@@ -47,6 +47,17 @@ in
     # list of packages to be installed for this user. Will not apply to root.
     git
     rofi
+    (symlinkJoin {
+      name = "gnome-control-center";
+      paths = [ gnome-control-center ];
+      nativeBuildInputs = [ makeWrapper ];
+      postBuild = ''
+        wrapProgram $out/bin/gnome-control-center \
+            --set XDG_CURRENT_DESKTOP GNOME
+      '';
+
+    })
+    gnome-control-center
 
     # Core
     neovim

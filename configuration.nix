@@ -11,14 +11,13 @@
   imports = [
     # Include the results of the hardware scan.
     # Points to root file to isolate system hardware from config.
-    /etc/nixos/hardware-configuration.nix
+    ./hardware-configuration.nix
   ];
 
   boot.loader.systemd-boot.enable = true; # Use the systemd-boot EFI boot loader.
   boot.loader.efi.canTouchEfiVariables = true;
 
   networking.hostName = "nixos-btw"; # Define your hostname.
-
   networking.networkmanager.enable = true; # configure network connections with nmtui.
 
   time.timeZone = "America/Montreal";
@@ -38,6 +37,11 @@
     nvidiaSettings = true; # enable nvidia settings menu
     package = config.boot.kernelPackages.nvidiaPackages.stable; # which nvidia drivers are being used.
   };
+  hardware.nvidia.prime = {
+    sync.enable = true;
+    intelBusId = "PCI:0:2:0";
+    nvidiaBusId = "PCI:1:0:0";
+  };
 
   services.xserver = {
     # X11 windowing system
@@ -50,8 +54,8 @@
   # Enable CUPS to print documents.
   # services.printing.enable = true;
 
+  # Enable sound.
   services.pipewire = {
-    # Enable sound.
     enable = true;
     pulse.enable = true;
   };
@@ -70,6 +74,7 @@
   };
 
   programs.firefox.enable = true;
+  programs.dconf.enable = true; # allows settings from gnome-control-center to be saved.
 
   environment.systemPackages = with pkgs; [
     # packages installed at the system level
