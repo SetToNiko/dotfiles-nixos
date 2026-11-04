@@ -27,6 +27,8 @@ in
 
   };
 
+  home.file.".background-image".source = ~/dotfiles-nixos/wallpaper/leaves.png;
+
   home.stateVersion = "25.05";
   programs.bash = {
     enable = true;
