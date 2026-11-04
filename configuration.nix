@@ -23,7 +23,8 @@
 
   time.timeZone = "America/Montreal";
 
-  nixpkgs.config.allowUnfree = true; # allows the use of proprietary packages. required for nvidia.
+  nixpkgs.config.allowUnfree = true; # allows the use of proprietary packages. required for nvidia and android-studio
+  nixpkgs.config.android_sdk.accept_license = true; # can't develop for android without it
 
   hardware.graphics = {
     # enable GPU usage
@@ -58,7 +59,11 @@
   users.users.niko = {
     # Define a user account. Don't forget to set a password with ‘passwd’.
     isNormalUser = true;
-    extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
+    extraGroups = [
+      "wheel"
+      "kvm"
+      "adbusers"
+    ]; # Enable ‘sudo’ for the user.
     packages = with pkgs; [
       tree
     ];

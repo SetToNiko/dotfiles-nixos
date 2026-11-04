@@ -27,7 +27,7 @@ in
 
   };
 
-  home.file.".background-image".source = ~/dotfiles-nixos/wallpaper/leaves.png;
+  home.file.".background-image".source = ./wallpaper/leaves.png;
 
   home.stateVersion = "25.05";
   programs.bash = {
@@ -50,6 +50,8 @@ in
 
     # Core
     neovim
+    android-studio
+    android-tools
     ripgrep # telescope find_files / grep_string
     fd # telescope find_files (faster)
     tree-sitter
