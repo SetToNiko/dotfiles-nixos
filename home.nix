@@ -7,6 +7,7 @@ let
   configs = {
     nvim = "nvim";
     i3 = "i3";
+    ghostty = "ghostty";
   };
 in
 {
