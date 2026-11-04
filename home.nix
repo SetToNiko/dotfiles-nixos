@@ -6,6 +6,7 @@ let
   create_symlink = path: config.lib.file.mkOutOfStoreSymlink path;
   configs = {
     nvim = "nvim";
+    i3 = "i3";
   };
 in
 {
