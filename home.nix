@@ -43,6 +43,7 @@ in
   home.packages = with pkgs; [
     # list of packages to be installed for this user. Will not apply to root.
     git
+    rofi
 
     # Core
     neovim
