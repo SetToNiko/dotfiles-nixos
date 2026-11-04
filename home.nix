@@ -2,7 +2,7 @@
 { config, pkgs, ... }:
 
 let
-  dotfiles = "${config.home.homeDirectory}/dotfiles-nixos/config";
+  dotfiles = "${config.home.homeDirectory}/dotfiles-nixos/configs";
   create_symlink = path: config.lib.file.mkOutOfStoreSymlink path;
   configs = {
     nvim = "nvim";
@@ -38,11 +38,6 @@ in
     source = create_symlink "${dotfiles}/${subpath}";
     recursive = true;
   }) configs;
-
-  # xdg.configFile."nvim" = {
-  #   source = create_symlink "${dotfiles}/nvim";
-  #   recursive = true;
-  # };
 
   home.packages = with pkgs; [
     # list of packages to be installed for this user. Will not apply to root.
