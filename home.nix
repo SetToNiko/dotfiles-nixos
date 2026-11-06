@@ -7,8 +7,10 @@ let
   configs = {
     nvim = "nvim";
     i3 = "i3";
+    i3status-rust = "i3status-rust";
     ghostty = "ghostty";
     ideavimrc = "ideavimrc";
+
   };
 in
 {
@@ -57,7 +59,6 @@ in
         wrapProgram $out/bin/gnome-control-center \
             --set XDG_CURRENT_DESKTOP GNOME
       '';
-
     })
 
     # Core
@@ -71,6 +72,7 @@ in
     nil
     nixpkgs-fmt
     nodejs
+    i3status-rust
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
