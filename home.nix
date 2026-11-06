@@ -8,6 +8,7 @@ let
     nvim = "nvim";
     i3 = "i3";
     ghostty = "ghostty";
+    ideavimrc = "ideavimrc";
   };
 in
 {
@@ -34,6 +35,7 @@ in
     enable = true;
     shellAliases = {
       btw = "echo fresh nixos install btw";
+      nrs = "sudo nixos-rebuild switch --impure --flake ~/dotfiles-nixos#nixos-btw";
     };
   };
 
@@ -57,7 +59,6 @@ in
       '';
 
     })
-    gnome-control-center
 
     # Core
     neovim
@@ -70,7 +71,10 @@ in
     nil
     nixpkgs-fmt
     nodejs
+
+    # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
+    nerd-fonts.geist-mono
 
     # LSP servers
     vscode-langservers-extracted # html, cssls, jsonls
