@@ -71,7 +71,6 @@ in
     gcc
     nil
     nixpkgs-fmt
-    nodejs
     i3status-rust
 
     # Fonts
@@ -91,6 +90,10 @@ in
     nixd
     yaml-language-server
     tombi
+
+    # Web Dev
+    nodejs
+    browser-sync
 
     # Rust (rustaceanvim)
     rust-analyzer
