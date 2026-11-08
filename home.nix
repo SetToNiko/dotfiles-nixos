@@ -49,6 +49,9 @@ in
   '';
 
   home.file.".background-image".source = ./wallpaper/leaves.png;
+  home.file.".gradle/gradle.properties".text = ''
+    org.gradle.daemon.idletimeout=15000
+  '';
 
   # First-time setup: pick a colour scheme if none has been chosen yet
   home.activation.defaultTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
