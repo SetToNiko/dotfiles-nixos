@@ -32,12 +32,12 @@
       open = true; # using open source drivers
       nvidiaSettings = true; # enable nvidia settings menu
       package = config.boot.kernelPackages.nvidiaPackages.stable; # which nvidia drivers are being used.
-      prime = {
-        # enables switching between cpu and gpu on laptop
-        sync.enable = true;
-        intelBusId = "PCI:0:2:0";
-        nvidiaBusId = "PCI:1:0:0";
-      };
+      # prime = {
+      #   # enables switching between cpu and gpu on laptop
+      #   sync.enable = true;
+      #   intelBusId = "PCI:0:2:0";
+      #   nvidiaBusId = "PCI:1:0:0";
+      # };
 
     };
   };
