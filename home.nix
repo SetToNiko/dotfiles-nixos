@@ -31,6 +31,9 @@ in
   };
 
   home.file.".background-image".source = ./wallpaper/leaves.png;
+  home.file.".gradle/gradle.properties".text = ''
+    org.gradle.daemon.idletimeout=15000
+  '';
 
   home.stateVersion = "25.05";
   programs.bash = {
