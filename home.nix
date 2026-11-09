@@ -105,6 +105,7 @@ in
     nixpkgs-fmt
     i3status-rust
     discord
+    claude-code
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
