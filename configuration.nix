@@ -72,7 +72,7 @@
   environment.sessionVariables = {
     GDK_SCALE = "1";
     GDK_DPI_SCALE = "1";
-    _JAVA_OPTIONS = "-Dsun.java2d.uiScale=2";
+    _JAVA_OPTIONS = "-Dsun.java2d.uiScale=1";
   };
 
   # Enable CUPS to print documents.
@@ -107,6 +107,7 @@
     ghostty
     unzip
     libreoffice
+    autorandr
   ];
 
   services.openssh.enable = true; # Enable the OpenSSH daemon.
