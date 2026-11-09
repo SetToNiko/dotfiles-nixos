@@ -11,7 +11,7 @@
   imports = [
     # Include the results of the hardware scan.
     # Points to root file to isolate system hardware from config.
-    ~/etc/hardware-configuration.nix
+    etc/nixos/hardware-configuration.nix
   ];
 
   boot.loader.systemd-boot.enable = true; # Use the systemd-boot EFI boot loader.
