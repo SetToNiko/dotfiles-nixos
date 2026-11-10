@@ -10,7 +10,8 @@ let
     i3status-rust = "i3status-rust";
     ghostty = "ghostty";
     ideavimrc = "ideavimrc";
-
+    claude-code = "claude";
+    starship = "starship";
   };
 in
 {
@@ -29,6 +30,11 @@ in
     };
 
   };
+
+  # programs.starship = {
+  #   enable = true;
+  #   enableBashIntegration = true;
+  # };
 
   home.file.".background-image".source = ./wallpaper/leaves.png;
   home.file.".gradle/gradle.properties".text = ''
@@ -106,6 +112,7 @@ in
     i3status-rust
     discord
     claude-code
+    starship
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
@@ -127,6 +134,8 @@ in
 
     # Web Dev
     nodejs
+    deno
+    moon
     browser-sync
 
     # Rust (rustaceanvim)
