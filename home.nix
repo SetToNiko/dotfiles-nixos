@@ -139,11 +139,11 @@ in
     browser-sync
 
     # Rust (rustaceanvim)
-    rust-analyzer
-    cargo
-    rustc
-    clippy
-    rustfmt
+    rustup
+    pkg-config
+    librsvg
+    webkitgtk_4_1
+    openssl
 
     # Go toolchain + formatters/linters
     go
