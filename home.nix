@@ -19,6 +19,7 @@ let
     starship = "starship";
     yazi = "yazi";
     rofi = "rofi";
+    pywalfox = "pywalfox";
   };
 in
 {
@@ -101,9 +102,8 @@ in
     discord
     claude-code
     starship
-
-    # Yazi file explorer and dependencies
-    yazi
+    pywalfox-native
+    yazi # Yazi file explorer and dependencies
     ffmpeg
     jq
     fd
