@@ -7,7 +7,7 @@ let
   configs = {
     nvim = "nvim";
     i3 = "i3";
-    i3status-rust = "i3status-rust";
+    i3blocks = "i3blocks";
     ghostty = "ghostty";
     ideavimrc = "ideavimrc";
     claude-code = "claude";
@@ -82,7 +82,7 @@ in
     gcc
     nil
     nixpkgs-fmt
-    i3status-rust
+    i3blocks
     autotiling
     discord
     claude-code
