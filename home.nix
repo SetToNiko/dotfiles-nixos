@@ -73,6 +73,11 @@ in
     recursive = true;
   }) configs;
 
+  xdg.mimeApps = {
+    enable = true;
+    associations.added."application/pdf" = [ "firefox.desktop" ];
+  };
+
   home.packages = with pkgs; [
     # list of packages to be installed for this user. Will not apply to root.
     git
