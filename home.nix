@@ -1,5 +1,10 @@
 # This file sets the config for a specific user @ username
-{ config, pkgs, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 let
   dotfiles = "${config.home.homeDirectory}/dotfiles-nixos/configs";
@@ -13,6 +18,7 @@ let
     claude-code = "claude";
     starship = "starship";
     yazi = "yazi";
+    rofi = "rofi";
   };
 in
 {
@@ -42,6 +48,14 @@ in
   '';
 
   home.file.".background-image".source = ./wallpaper/leaves.png;
+
+  # First-time setup: pick a colour scheme if none has been chosen yet
+  home.activation.defaultTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ ! -e "$HOME/.config/colors/current" ]; then
+      run env PATH="${pkgs.jq}/bin:$PATH" NO_RESTART=1 \
+        ${pkgs.bash}/bin/bash "${dotfiles}/theme-switch.sh" "Gruvbox Dark"
+    fi
+  '';
 
   home.stateVersion = "25.05";
   programs.bash = {
