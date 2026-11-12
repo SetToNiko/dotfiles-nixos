@@ -117,6 +117,7 @@ in
     zoxide
     resvg
     imagemagick
+    brightnessctl
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
