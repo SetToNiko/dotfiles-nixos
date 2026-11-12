@@ -97,6 +97,9 @@
     dconf = {
       enable = true; # allows settings from gnome-control-center to be saved.
     };
+    nix-ld = {
+      enable = true; # enables linker for dynamically linked libraries
+    };
   };
 
   environment.systemPackages = with pkgs; [
@@ -107,6 +110,7 @@
     ghostty
     unzip
     libreoffice
+    autorandr
   ];
 
   services.openssh.enable = true; # Enable the OpenSSH daemon.

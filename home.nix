@@ -10,7 +10,9 @@ let
     i3status-rust = "i3status-rust";
     ghostty = "ghostty";
     ideavimrc = "ideavimrc";
-
+    claude-code = "claude";
+    starship = "starship";
+    yazi = "yazi";
   };
 in
 {
@@ -29,6 +31,15 @@ in
     };
 
   };
+  programs.yazi.enable = true;
+  # programs.starship = {
+  #   enable = true;
+  #   enableBashIntegration = true;
+  # };
+
+  home.file.".gradle/gradle.properties".text = ''
+    org.gradle.daemon.idletimeout=15000
+  '';
 
   home.file.".background-image".source = ./wallpaper/leaves.png;
 
@@ -72,6 +83,21 @@ in
     nil
     nixpkgs-fmt
     i3status-rust
+    autotiling
+    discord
+    claude-code
+    starship
+
+    # Yazi file explorer and dependencies
+    yazi
+    ffmpeg
+    jq
+    fd
+    poppler
+    fzf
+    zoxide
+    resvg
+    imagemagick
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
@@ -93,14 +119,16 @@ in
 
     # Web Dev
     nodejs
+    deno
+    moon
     browser-sync
 
     # Rust (rustaceanvim)
-    rust-analyzer
-    cargo
-    rustc
-    clippy
-    rustfmt
+    rustup
+    pkg-config
+    librsvg
+    webkitgtk_4_1
+    openssl
 
     # Go toolchain + formatters/linters
     go
@@ -122,6 +150,5 @@ in
     htmlhint
     markdownlint-cli2
     yamllint
-
   ];
 }
