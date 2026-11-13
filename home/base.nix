@@ -1,8 +1,10 @@
-# This file sets the config for a specific user @ username
+# home-manager config for niko, shared by every host.
+# Host-specific settings live in hosts/<host>/home.nix.
 {
   config,
   pkgs,
   lib,
+  host, # "laptop" or "desktop", passed in from flake.nix
   ...
 }:
 
@@ -20,6 +22,8 @@ let
     yazi = "yazi";
     rofi = "rofi";
     pywalfox = "pywalfox";
+    # per-host fragments (e.g. ~/.config/host/i3.conf, included by i3/config)
+    host = "hosts/${host}";
   };
 in
 {
@@ -44,11 +48,7 @@ in
   #   enableBashIntegration = true;
   # };
 
-  home.file.".gradle/gradle.properties".text = ''
-    org.gradle.daemon.idletimeout=15000
-  '';
-
-  home.file.".background-image".source = ./wallpaper/leaves.png;
+  home.file.".background-image".source = ../wallpaper/leaves.png;
   home.file.".gradle/gradle.properties".text = ''
     org.gradle.daemon.idletimeout=15000
   '';
@@ -66,7 +66,7 @@ in
     enable = true;
     shellAliases = {
       btw = "echo fresh nixos install btw";
-      nrs = "sudo nixos-rebuild switch --impure --flake ~/dotfiles-nixos#nixos-btw";
+      nrs = "sudo nixos-rebuild switch --flake ~/dotfiles-nixos#${host}";
     };
   };
 

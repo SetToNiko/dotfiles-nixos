@@ -1,31 +1,38 @@
-# Desktop dotfiles for nixOS
+# NixOS dotfiles
 
-## Global
+One branch for every machine: a shared base plus per-host modules, selected
+through the flake.
 
-This repo contains my global nixOS nix configs.
+## Layout
 
-configuration.nix : global system files
-home.nix : individual user files, home-manager
-flake.nix : used for building system using specific user configs
+- `flake.nix` : one `nixosConfigurations.<host>` per machine (`laptop`, `desktop`)
+- `modules/base.nix` : system settings shared by every host
+- `home/base.nix` : home-manager settings shared by every host
+- `hosts/<host>/default.nix` : system settings for one host
+- `hosts/<host>/hardware-configuration.nix` : that host's hardware scan
+- `hosts/<host>/home.nix` : home-manager settings for one host (e.g. the desktop's monitor layout)
 
 ## User configs
 
-The /config directory for user configs is absent from this repo.
+The `configs/` directory is a separate repo and is absent from this one.
+After cloning, clone the configs repo into `configs/`.
 
-After cloning, create the directory, the clone individual repos into it.
+Program configs are shared. Anything that differs per machine lives in
+`configs/hosts/<host>/`, which home-manager links to `~/.config/host`
+(e.g. `i3/config` includes `~/.config/host/i3.conf`).
 
-## Initial setup
+## Building
 
-to build the system, run:
-
-```nix
-sudo nixos-rebuild switch --impure --flake
+```sh
+sudo nixos-rebuild switch --flake ~/dotfiles-nixos#laptop
+sudo nixos-rebuild switch --flake ~/dotfiles-nixos#desktop
 ```
 
-afterwards, for a given `<user>` run
+After the first switch, the `nrs` alias rebuilds the current host.
 
-```nix
-sudo nixos-rebuild switch --impure --flake ~/dotfiles-nixos#<user>
-```
+## Adding a host
 
-to rebuld the system with user specific settings from home-manager
+1. Create `hosts/<name>/` with `default.nix`, `home.nix` and the machine's
+   `hardware-configuration.nix` (from `nixos-generate-config`).
+2. Add `<name> = mkHost "<name>";` to `flake.nix`.
+3. Create `configs/hosts/<name>/i3.conf`.

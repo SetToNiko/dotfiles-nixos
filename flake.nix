@@ -18,21 +18,36 @@
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
+
+      # One NixOS system per machine: shared base + hosts/<host> overrides.
+      # `host` is passed to every module so shared config can refer to it.
+      mkHost =
+        host:
+        nixpkgs.lib.nixosSystem {
+          specialArgs = { inherit host; };
+          modules = [
+            ./modules/base.nix
+            ./hosts/${host}
+            home-manager.nixosModules.home-manager
+            {
+              home-manager = {
+                useGlobalPkgs = true;
+                useUserPackages = true;
+                extraSpecialArgs = { inherit host; };
+                users.niko.imports = [
+                  ./home/base.nix
+                  ./hosts/${host}/home.nix
+                ];
+                backupFileExtension = "backup";
+              };
+            }
+          ];
+        };
     in
     {
-      nixosConfigurations.nixos-btw = nixpkgs.lib.nixosSystem {
-        modules = [
-          ./configuration.nix
-          home-manager.nixosModules.home-manager
-          {
-            home-manager = {
-              useGlobalPkgs = true;
-              useUserPackages = true;
-              users.niko = import ./home.nix;
-              backupFileExtension = "backup";
-            };
-          }
-        ];
+      nixosConfigurations = {
+        laptop = mkHost "laptop";
+        desktop = mkHost "desktop";
       };
 
       devShells.${system}.soteria = pkgs.mkShell {

@@ -1,4 +1,5 @@
-#This sets the system settings and packages for root.
+# System settings and packages shared by every host.
+# Host-specific settings (hardware scan, scaling, ...) live in hosts/<host>/default.nix.
 
 {
   config,
@@ -8,12 +9,6 @@
 }:
 
 {
-  imports = [
-    # Include the results of the hardware scan.
-    # Points to root file to isolate system hardware from config.
-    ./hardware-configuration.nix
-  ];
-
   boot.loader.systemd-boot.enable = true; # Use the systemd-boot EFI boot loader.
   boot.loader.efi.canTouchEfiVariables = true;
 
@@ -72,7 +67,7 @@
   environment.sessionVariables = {
     GDK_SCALE = "1";
     GDK_DPI_SCALE = "1";
-    _JAVA_OPTIONS = "-Dsun.java2d.uiScale=2";
+    # _JAVA_OPTIONS (uiScale) is set per host
   };
 
   # Enable CUPS to print documents.
