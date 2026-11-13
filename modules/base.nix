@@ -21,6 +21,11 @@
   nixpkgs.config.android_sdk.accept_license = true; # can't develop for android without it
 
   hardware = {
+    bluetooth = {
+      enable = true;
+      powerOnBoot = true; # adapter is on after boot, ready to reconnect paired devices
+      settings.General.Experimental = true; # report battery level of connected devices
+    };
     graphics.enable = true; # enable gpu usage
     nvidia = {
       modesetting.enable = true;
@@ -52,6 +57,7 @@
       enable = true;
       pulse.enable = true;
     };
+    blueman.enable = true; # bluetooth manager GUI + tray applet (started by dex in i3)
     picom = {
       enable = true;
       backend = "xrender"; # other option : glx
@@ -63,6 +69,8 @@
       };
     };
   };
+
+  security.rtkit.enable = true; # lets pipewire get realtime scheduling (avoids audio stutter)
 
   environment.sessionVariables = {
     GDK_SCALE = "1";
@@ -102,6 +110,7 @@
     vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
     wget
     git
+    lazygit
     ghostty
     unzip
     libreoffice

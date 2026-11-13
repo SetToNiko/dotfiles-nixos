@@ -36,3 +36,17 @@ After the first switch, the `nrs` alias rebuilds the current host.
    `hardware-configuration.nix` (from `nixos-generate-config`).
 2. Add `<name> = mkHost "<name>";` to `flake.nix`.
 3. Create `configs/hosts/<name>/i3.conf`.
+
+## Dev shells
+
+Project-specific dependencies live in `devshells/<name>.nix`; each file
+becomes `devShells.<name>` in the flake. A project picks its shell with a
+one-line `.envrc`, and direnv loads it on `cd`:
+
+```sh
+echo 'use flake ~/dotfiles-nixos#<name>' > .envrc
+direnv allow
+```
+
+Toolchains, LSPs, formatters and linters stay global in `home/base.nix`;
+dev shells hold the libraries and build tools a single project needs.

@@ -43,6 +43,13 @@ in
 
   };
   programs.yazi.enable = true;
+
+  # Loads a project's dev shell automatically on cd (see devshells/ and the
+  # project's .envrc). nix-direnv caches the shell so it loads instantly.
+  programs.direnv = {
+    enable = true;
+    nix-direnv.enable = true;
+  };
   # programs.starship = {
   #   enable = true;
   #   enableBashIntegration = true;
@@ -53,12 +60,17 @@ in
     org.gradle.daemon.idletimeout=15000
   '';
 
-  # First-time setup: pick a colour scheme if none has been chosen yet
+  # Regenerate ~/.config/colors from palettes.json on every switch, so the
+  # generated files never lag behind the palette format. Keeps the current
+  # scheme; picks a default on first setup or if the current one is gone.
   home.activation.defaultTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    if [ ! -e "$HOME/.config/colors/current" ]; then
-      run env PATH="${pkgs.jq}/bin:$PATH" NO_RESTART=1 \
-        ${pkgs.bash}/bin/bash "${dotfiles}/theme-switch.sh" "Gruvbox Dark"
-    fi
+    theme="$(cat "$HOME/.config/colors/current" 2>/dev/null || true)"
+    for name in "$theme" "Gruvbox Dark"; do
+      if [ -n "$name" ] && run env PATH="${pkgs.jq}/bin:$PATH" NO_RESTART=1 \
+        ${pkgs.bash}/bin/bash "${dotfiles}/theme-switch.sh" "$name"; then
+        break
+      fi
+    done
   '';
 
   home.stateVersion = "25.05";
@@ -107,6 +119,7 @@ in
     nixpkgs-fmt
     i3blocks
     autotiling
+    dex # runs XDG autostart entries from the i3 config (blueman-applet)
     discord
     claude-code
     starship
@@ -148,10 +161,6 @@ in
 
     # Rust (rustaceanvim)
     rustup
-    pkg-config
-    librsvg
-    webkitgtk_4_1
-    openssl
 
     # Go toolchain + formatters/linters
     go
