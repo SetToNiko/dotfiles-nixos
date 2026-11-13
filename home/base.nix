@@ -25,6 +25,38 @@ let
     # per-host fragments (e.g. ~/.config/host/i3.conf, included by i3/config)
     host = "hosts/${host}";
   };
+
+  # Wallpaper rotation and the xsecurelock lock screen. These wrappers only pin
+  # the dependencies; the scripts run live from configs/lock, so edits to them
+  # apply without a rebuild.
+  liveScript =
+    name: deps:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = deps;
+      text = ''exec ${pkgs.bash}/bin/bash "${dotfiles}/lock/${name}.sh" "$@"'';
+    };
+  wallpaperRotate = liveScript "wallpaper-rotate" (
+    with pkgs;
+    [
+      feh
+      ffmpeg
+      util-linux
+      coreutils
+      findutils
+      gnugrep
+      gnused
+    ]
+  );
+  lockSaver = liveScript "lock-saver" [
+    pkgs.mpv
+    pkgs.gnused
+  ];
+  lockScreen = liveScript "lock-screen" [
+    pkgs.xsecurelock
+    lockSaver
+    pkgs.gnused
+  ];
 in
 {
   home = {
@@ -55,7 +87,24 @@ in
   #   enableBashIntegration = true;
   # };
 
-  home.file.".background-image".source = ../wallpaper/leaves.png;
+  # New random wallpaper every 2 minutes (the first one is set by i3 at login).
+  # Images come from ~/dotfiles-nixos/wallpaper.
+  systemd.user.services.wallpaper-rotate = {
+    Unit.Description = "Switch to a random wallpaper";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${wallpaperRotate}/bin/wallpaper-rotate";
+    };
+  };
+  systemd.user.timers.wallpaper-rotate = {
+    Unit.Description = "Switch wallpaper every 2 minutes";
+    Timer = {
+      OnStartupSec = "2min";
+      OnUnitActiveSec = "2min";
+    };
+    Install.WantedBy = [ "timers.target" ];
+  };
+
   home.file.".gradle/gradle.properties".text = ''
     org.gradle.daemon.idletimeout=15000
   '';
@@ -134,6 +183,9 @@ in
     resvg
     imagemagick
     brightnessctl
+    wallpaperRotate
+    lockScreen
+    xss-lock
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)

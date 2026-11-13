@@ -7,6 +7,8 @@
   # (`autorandr --load docked`).
   programs.autorandr = {
     enable = true;
+    # Re-centre the wallpaper once the monitor layout has changed
+    hooks.postswitch.wallpaper = "wallpaper-rotate refresh";
     profiles = {
       docked = {
         fingerprint = {
