@@ -50,12 +50,18 @@ let
       gnused
     ]
   );
+  # The password prompt reduced to a bordered input box at the bottom of the
+  # screen, whose border changes colour while Num Lock is on (colours and
+  # margin are set in configs/lock/lock-screen.sh)
+  xsecurelock = pkgs.xsecurelock.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./xsecurelock-password-box.patch ];
+  });
   lockSaver = liveScript "lock-saver" [
     pkgs.mpv
     pkgs.gnused
   ];
   lockScreen = liveScript "lock-screen" [
-    pkgs.xsecurelock
+    xsecurelock
     lockSaver
     pkgs.gnused
   ];
@@ -71,7 +77,7 @@ let
   ];
   # Shutdown/reboot with the ASCII wallpaper dissolving first ($mod+Shift+p)
   asciiPower = liveScript "ascii-power" [
-    pkgs.xsecurelock
+    xsecurelock
     lockSaver
     asciiBoot
     pkgs.rofi
