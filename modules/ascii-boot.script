@@ -1,0 +1,73 @@
+// Plymouth theme script: the desktop's ASCII wallpaper fades back in,
+// character by character, while the machine boots (the reverse of the
+// shutdown dissolve). Frames come from ascii-boot.sh, which writes them to
+// /var/lib/ascii-boot (this theme's ImageDir) during the dissolve. That is on
+// the real root filesystem, so nothing shows until the initrd has switched
+// root; Plymouth then sees the files and the animation starts. With no frames,
+// and during shutdown and reboot, the screen just stays black.
+// Packaged by modules/ascii-boot.nix; ascii-boot.sh is in configs/lock.
+
+FPS = 12;       // frames per second in the set: fps in ascii-boot.sh
+TICKS = 50;     // Plymouth calls refresh() this many times a second
+
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+fun frame_image(n) {
+    return Image("frame-" + n + ".png");
+}
+
+// Centre an image on the screen, like feh --bg-center on the desktop
+fun show(sprite, image) {
+    sprite.SetImage(image);
+    sprite.SetX(Window.GetX() + Window.GetWidth() / 2 - image.GetWidth() / 2);
+    sprite.SetY(Window.GetY() + Window.GetHeight() / 2 - image.GetHeight() / 2);
+}
+
+global.ticks = -1;   // -1 until the frames can be read
+global.shown = 0;    // frame on the bottom sprite
+global.next = NULL;  // the frame after it, faded in on top
+
+fun refresh() {
+    if (global.ticks < 0) {
+        first = frame_image(0);
+        if (!first)
+            return;
+        bg = Image("bg.png");
+        if (bg) {
+            global.backdrop = Sprite(bg.Scale(Window.GetWidth(), Window.GetHeight()));
+            global.backdrop.SetX(Window.GetX());
+            global.backdrop.SetY(Window.GetY());
+            global.backdrop.SetZ(0);
+        }
+        global.under = Sprite();
+        global.under.SetZ(1);
+        global.over = Sprite();
+        global.over.SetZ(2);
+        show(global.under, first);
+        global.next = frame_image(1);
+        if (global.next)
+            show(global.over, global.next);
+        global.over.SetOpacity(0);
+        global.ticks = 0;
+    }
+
+    // Step through the frames, cross-fading each into the next so the
+    // characters fade smoothly between them
+    global.ticks += 1;
+    pos = global.ticks / TICKS * FPS;
+    while (global.next && Math.Int(pos) > global.shown) {
+        show(global.under, global.next);
+        global.shown += 1;
+        global.next = frame_image(global.shown + 1);
+        if (global.next)
+            show(global.over, global.next);
+    }
+    if (global.next)
+        global.over.SetOpacity(pos - global.shown);
+    else
+        global.over.SetOpacity(0);
+}
+
+if (Plymouth.GetMode() == "boot")
+    Plymouth.SetRefreshFunction(refresh);

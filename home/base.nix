@@ -41,6 +41,8 @@ let
     [
       feh
       ffmpeg
+      mpv # renders the ASCII desktop still
+      xvfb-run # ... in an invisible X server
       util-linux
       coreutils
       findutils
@@ -56,6 +58,23 @@ let
     pkgs.xsecurelock
     lockSaver
     pkgs.gnused
+  ];
+  # Next boot's animation and greeter image, from the current ASCII wallpaper
+  asciiBoot = liveScript "ascii-boot" [
+    (pkgs.python3.withPackages (ps: [
+      ps.numpy
+      ps.pillow
+    ]))
+    pkgs.xrandr
+    pkgs.gnused
+    pkgs.coreutils
+  ];
+  # Shutdown/reboot with the ASCII wallpaper dissolving first ($mod+Shift+p)
+  asciiPower = liveScript "ascii-power" [
+    pkgs.xsecurelock
+    lockSaver
+    asciiBoot
+    pkgs.rofi
   ];
 in
 {
@@ -185,6 +204,8 @@ in
     brightnessctl
     wallpaperRotate
     lockScreen
+    asciiPower
+    asciiBoot
     xss-lock
 
     # Fonts

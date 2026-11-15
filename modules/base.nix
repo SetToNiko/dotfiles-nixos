@@ -12,6 +12,19 @@
   boot.loader.systemd-boot.enable = true; # Use the systemd-boot EFI boot loader.
   boot.loader.efi.canTouchEfiVariables = true;
 
+  # Boot animation (Plymouth) and login screen (LightDM): ascii-boot.nix.
+  # Instead of scrolling console text (Esc shows the messages), boot fades the
+  # ASCII wallpaper in, and shutdown stays black after ascii-power's dissolve.
+  # Plymouth needs the GPU driver in the initrd to draw early: see
+  # boot.initrd.kernelModules in hosts/<host>/default.nix.
+  imports = [ ./ascii-boot.nix ];
+  boot.consoleLogLevel = 3; # kernel: errors only
+  boot.kernelParams = [
+    "quiet" # (boot.plymouth adds "splash")
+    "udev.log_level=3"
+    "rd.udev.log_level=3"
+  ];
+
   networking.hostName = "nixos-btw"; # Define your hostname.
   networking.networkmanager.enable = true; # configure network connections with nmtui.
 
