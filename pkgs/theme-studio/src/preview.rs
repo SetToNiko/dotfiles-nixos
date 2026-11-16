@@ -395,7 +395,12 @@ impl Preview {
     /// F12: editor → each preview window → editor.
     pub fn cycle_focus(&mut self) {
         let panes = self.focusable();
-        self.focus = match self.focus.and_then(|f| panes.iter().position(|p| *p == f)) {
+        // the right-hand slot is one stop whether it shows the shell or yazi
+        let slot = |a: PaneId, b: PaneId| a == b || (a != PaneId::Nvim && b != PaneId::Nvim);
+        self.focus = match self
+            .focus
+            .and_then(|f| panes.iter().position(|p| slot(*p, f)))
+        {
             None => panes.first().copied(),
             Some(i) => panes.get(i + 1).copied(),
         };
@@ -590,7 +595,23 @@ impl Preview {
             } else {
                 role("client.unfocused", 4)
             };
+            // Number and name on the border: 3 / 4 jump here (i3 itself shows no
+            // title with `border pixel`; this is studio chrome).
+            let (n, label) = match id {
+                PaneId::Nvim => (3, "nvim"),
+                PaneId::Shell => (4, "shell"),
+                PaneId::Yazi => (4, "yazi"),
+            };
+            let label_fg = if id == focused {
+                border
+            } else {
+                p.get("grey1")
+            };
             let block = Block::bordered()
+                .title(Line::from(vec![
+                    crate::ui::panel_number(n),
+                    Span::styled(format!("{label} "), Style::new().fg(label_fg.color())),
+                ]))
                 .border_style(Style::new().fg(border.color()).bg(p.get("bg_dim").color()));
             let inner = block.inner(r);
             f.render_widget(block, r);

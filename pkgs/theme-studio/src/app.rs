@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 
 use crate::color::{self, Rgb};
 use crate::palette::{self, GROUPS, Palette};
-use crate::preview::{Mode as PreviewMode, Preview};
+use crate::preview::{Mode as PreviewMode, PaneId, Preview};
 use crate::store::{Store, TerminalMap};
 
 /// Which control the keyboard drives.
@@ -456,6 +456,44 @@ impl App {
 
     // ----- input -----------------------------------------------------------
 
+    /// Number keys jump between the numbered panels: 1 key list, 2 colour
+    /// picker, 3 nvim, 4 shell (or yazi). 3 and 4 give that preview window
+    /// the keyboard; F12 hands it back.
+    pub fn goto_panel(&mut self, n: u8) {
+        match n {
+            1 => {
+                self.preview.focus = None;
+                self.focus = Focus::List;
+            }
+            2 => {
+                self.preview.focus = None;
+                if self.focus == Focus::List {
+                    self.focus = Focus::Square;
+                }
+            }
+            3 | 4 => {
+                self.preview.mode = PreviewMode::Desktop;
+                let id = match (n, self.preview.show_yazi) {
+                    (3, _) => PaneId::Nvim,
+                    (_, true) => PaneId::Yazi,
+                    _ => PaneId::Shell,
+                };
+                // the right-hand slot counts whether it last showed the shell or yazi
+                let shown = self
+                    .preview
+                    .rects
+                    .iter()
+                    .any(|(p, _)| *p == id || (n == 4 && *p != PaneId::Nvim));
+                if !shown && !self.preview.rects.is_empty() {
+                    self.info("That preview window isn't shown at this window size");
+                    return;
+                }
+                self.preview.focus = Some(id);
+            }
+            _ => {}
+        }
+    }
+
     fn on_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // A preview window has the keyboard: everything but F12 goes to it.
@@ -535,6 +573,7 @@ impl App {
                 };
                 return;
             }
+            KeyCode::Char(c @ '1'..='4') => return self.goto_panel(c as u8 - b'0'),
             KeyCode::Char('#') => {
                 self.focus = Focus::Hex;
                 self.hex_input = "#".into();
@@ -1130,6 +1169,35 @@ mod tests {
         for keys in ["\x1b?", "\x1bS", "\x1b\x1bc", "\x1b"] {
             press(&mut app, keys);
             render(&mut app, 160, 45);
+        }
+    }
+
+    #[test]
+    fn number_keys_jump_between_panels() {
+        let mut app = test_app(temp_store("panels"), Start::Named("One".into()));
+        render(&mut app, 160, 45); // lays out the preview windows
+        press(&mut app, "2");
+        assert_eq!(app.focus, Focus::Square);
+        press(&mut app, "1");
+        assert_eq!(app.focus, Focus::List);
+        press(&mut app, "3");
+        assert_eq!(app.preview.focus, Some(PaneId::Nvim));
+        // inside a preview window digits are typed into it, F12 comes back out
+        press(&mut app, "1");
+        assert_eq!(app.preview.focus, Some(PaneId::Nvim));
+        while app.preview.focus.is_some() {
+            app.on_key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+        }
+        press(&mut app, "Y4");
+        assert_eq!(app.preview.focus, Some(PaneId::Yazi));
+        app.on_key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+        // digits still type into the hex box
+        press(&mut app, "1#123456\n");
+        assert_eq!(app.palette.get("bg0"), Rgb(0x12, 0x34, 0x56));
+        // titles carry the numbers
+        let screen = render(&mut app, 160, 45);
+        for t in ["¹Palette", "²Colour", "³nvim", "⁴yazi"] {
+            assert!(screen.contains(t), "missing {t}");
         }
     }
 

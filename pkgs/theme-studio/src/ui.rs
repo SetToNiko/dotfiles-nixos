@@ -162,7 +162,8 @@ fn swatch(c: Rgb, width: usize) -> Span<'static> {
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let title = Line::from(vec![
-        " Palette: ".into(),
+        panel_number(1),
+        "Palette: ".into(),
         Span::styled(app.name.clone(), Style::new().bold()),
         if app.dirty() {
             Span::styled(" ●", Style::new().yellow())
@@ -280,7 +281,8 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
         )
     };
     let title = Line::from(vec![
-        " Colour: ".into(),
+        panel_number(2),
+        "Colour: ".into(),
         Span::styled(key, Style::new().bold()),
         " ".into(),
         state,
@@ -473,7 +475,9 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(format!("{id:?}"), Style::new().bold()),
             "  F12 next window / back to the editor ".into(),
         ]),
-        None => Line::raw(" Preview  F12 or click: use it   Y yazi   R rofi   V swatches "),
+        None => {
+            Line::raw(" Preview  3 4, F12 or click: use a window   Y yazi   R rofi   V swatches ")
+        }
     };
     let block = focused_block(title, app.preview.focus.is_some());
     let inner = block.inner(area);
@@ -761,7 +765,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 /// As many hints as fit in `room` columns: the ones for the current control
 /// first, then the general ones, and "? keys" always last (it lists the rest).
 fn fit_hints(context: &[&str], room: usize) -> String {
-    const GENERAL: [&str; 4] = ["Tab next", "s save", "a apply", "o open"];
+    const GENERAL: [&str; 5] = ["Tab next", "1-4 panels", "s save", "a apply", "o open"];
     const LAST: &str = "? keys";
     let mut out = String::from(" ");
     let budget = room.saturating_sub(LAST.len() + 3);
@@ -854,6 +858,10 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                     "type into the preview windows; F12 again: next, then back",
                 ),
                 ("Y  R  V", "preview: yazi window, rofi menu, swatches view"),
+                (
+                    "1 2 3 4",
+                    "jump to a panel: key list, colour, nvim, shell/yazi",
+                ),
                 ("q", "quit"),
                 (
                     "mouse",
@@ -965,6 +973,12 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
+/// Superscript panel number for a title, btop-style ("¹Palette"); the
+/// number key jumps to that panel.
+pub fn panel_number(n: u8) -> Span<'static> {
+    const SUP: [&str; 10] = ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"];
+    Span::styled(format!(" {}", SUP[n as usize % 10]), Style::new().yellow())
+}
 #[cfg(test)]
 mod tests {
     use super::fit_hints;
@@ -975,7 +989,7 @@ mod tests {
         let wide = fit_hints(&ctx, 200);
         assert_eq!(
             wide,
-            " j/k move  Enter edit  p pin │ Tab next  s save  a apply  o open  ? keys "
+            " j/k move  Enter edit  p pin │ Tab next  1-4 panels  s save  a apply  o open  ? keys "
         );
         let narrow = fit_hints(&ctx, 40);
         assert!(narrow.chars().count() <= 40, "{narrow}");
