@@ -148,6 +148,7 @@
     wget
     git
     lazygit
+    bat
     ghostty
     unzip
     libreoffice
