@@ -179,7 +179,7 @@ splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
   room beyond the whole key list; otherwise the list scrolls. Tests drive the
   editor with real key events and render it with ratatui's TestBackend.
 
-## Phase 4: live preview (right pane)
+## Phase 4: live preview (right pane) ✅ done
 
 A small desktop drawn in terminal cells. i3's 2-pixel borders become
 1-cell lines, so the borders look heavier than on the real desktop.
@@ -224,6 +224,34 @@ A small desktop drawn in terminal cells. i3's 2-pixel borders become
   preview windows sit side by side when the preview is wide enough and
   stack when it isn't; below about 40×12 cells each, the preview raises
   the minimum size the "too small" message asks for.
+
+**Built as (differences from the above):**
+- **Keyboard into the preview:** `F12` or a click, not `Ctrl+w` (nvim uses
+  `Ctrl+w` for its own windows). F12 again moves to the next preview
+  window, then back to the editor; while a window has the keyboard, every
+  key (Ctrl+C too) goes to it, and pastes are sent as bracketed paste.
+- **Demo shell:** `ls`, `git --no-pager log` (with the pager, `less` ate
+  the next typed command) and `false`, typed once the first prompt appears
+  so they aren't echoed early. It runs with `HISTFILE=/dev/null`, so the
+  demo stays out of your history. No `bat`/`git status`: the window is
+  small and they pushed the prompt out of view.
+- **The draft palette** is written to `$XDG_RUNTIME_DIR/theme-studio-<pid>-<n>/colors.sh`
+  on every change; nvim's file watcher picks it up. Folders left by a studio
+  that was killed (closing its window) are removed the next time one starts.
+  Closing the window also ends nvim, the shell and yazi (they get a hangup).
+- **yazi:** image previews aren't turned off explicitly; the embedded
+  terminal ignores graphics escapes, so they simply don't show.
+- **i3blocks:** each block runs in its own process group with a 3 s
+  timeout, and the whole group is stopped afterwards (so `volume.sh`'s
+  `pw-mon` doesn't outlive it). Blocks that print nothing are left out, as
+  i3bar does.
+- **rofi overlay:** only the palette being edited shows swatches; the
+  other rows are names.
+- **`V`** switches the preview to the earlier swatch view (every key, the
+  16 terminal colours, a code sample), which is still handy for small
+  keys like `bg_statusline2`.
+- Two windows side by side from 60 preview columns, stacked below that;
+  the minimum window size didn't need to change.
 
 ## Resizing ✅ done (added after Phase 3)
 
