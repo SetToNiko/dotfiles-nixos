@@ -12,9 +12,12 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 
 use crate::color::{self, Rgb};
+use crate::fonts::FontsTab;
 use crate::palette::{self, GROUPS, Palette};
 use crate::preview::{Mode as PreviewMode, PaneId, Preview};
 use crate::store::{Store, TerminalMap};
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
 
 /// Which control the keyboard drives.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,6 +47,21 @@ pub enum Pending {
     Quit,
     New,
     Open(String),
+    NewFonts,
+    OpenFonts(String),
+}
+
+impl Pending {
+    fn is_fonts(&self) -> bool {
+        matches!(self, Pending::NewFonts | Pending::OpenFonts(_))
+    }
+}
+
+/// The left pane's tab (F1 / F2).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tab {
+    Colours,
+    Fonts,
 }
 
 pub enum Overlay {
@@ -108,6 +126,14 @@ pub struct App {
     pub overlay: Overlay,
     pub areas: Areas,
     pub preview: Preview,
+    pub tab: Tab,
+    pub fonts: FontsTab,
+    /// Draws images in the terminal (kitty graphics); None in tests.
+    pub picker: Option<Picker>,
+    pub sample_image: Option<StatefulProtocol>,
+    pub sample_error: Option<String>,
+    /// The Open / Save as pop-up is for font presets, not palettes.
+    pub overlay_fonts: bool,
     quit: bool,
 }
 
@@ -133,8 +159,15 @@ impl App {
         };
         let terminal = store.terminal_map().ok();
         let preview = Preview::new(&store.dir);
+        let fonts = FontsTab::new(&store.dir, preview.draft_dir(), preview.dirty_flag());
         let mut app = App {
             preview,
+            tab: Tab::Colours,
+            fonts,
+            picker: None,
+            sample_image: None,
+            sample_error: None,
+            overlay_fonts: false,
             store,
             name,
             is_new,
@@ -168,6 +201,9 @@ impl App {
         while !self.quit {
             // nvim in the preview re-reads this whenever it changes
             self.preview.sync_draft(&self.palette);
+            if self.tab == Tab::Fonts {
+                self.update_sample();
+            }
             if self.preview.take_dirty() || redraw {
                 terminal.draw(|f| crate::ui::draw(f, self))?;
                 redraw = false;
@@ -192,6 +228,140 @@ impl App {
 
     pub fn dirty(&self) -> bool {
         self.is_new || self.palette != self.saved
+    }
+
+    /// Asks for a new font sample when the fonts or colours changed, and
+    /// shows a finished one.
+    fn update_sample(&mut self) {
+        let fonts = self.fonts.shown_fonts();
+        let sizes = [0, 1, 2].map(|r| self.fonts.effective_size(r, fonts[r].size));
+        let markup = crate::fonts::sample_markup(&fonts, sizes, &self.palette);
+        let dpi = self.fonts.dpi;
+        self.fonts
+            .sample
+            .request(markup, self.palette.get("bg0"), dpi);
+        match self.fonts.sample.take() {
+            Some(Ok(path)) => match image::open(&path) {
+                Ok(img) => {
+                    self.sample_image = self.picker.as_ref().map(|p| p.new_resize_protocol(img));
+                    self.sample_error = None;
+                }
+                Err(e) => self.sample_error = Some(format!("{e}")),
+            },
+            Some(Err(e)) => self.sample_error = Some(e),
+            None => {}
+        }
+    }
+
+    /// Starts on the Fonts tab (`--fonts`).
+    pub fn open_fonts_tab(&mut self) {
+        self.switch_tab(Tab::Fonts);
+    }
+
+    fn switch_tab(&mut self, tab: Tab) {
+        if tab == Tab::Fonts && self.fonts.installed.is_empty() {
+            self.fonts.refresh_installed();
+        }
+        self.tab = tab;
+        self.preview.focus = None;
+    }
+
+    // ----- font presets ----------------------------------------------------
+
+    fn fonts_save(&mut self, then_apply: bool) {
+        if self.fonts.is_new {
+            self.overlay_fonts = true;
+            self.overlay = Overlay::SaveAs {
+                input: String::new(),
+                overwrite: false,
+                then_apply,
+            };
+            return;
+        }
+        let name = self.fonts.name.clone();
+        self.fonts_save_as(&name, then_apply);
+    }
+
+    fn fonts_save_as(&mut self, name: &str, then_apply: bool) {
+        match self.fonts.save_as(name) {
+            Ok(()) if then_apply => match self.fonts.store.apply(name) {
+                Ok(()) => {
+                    self.fonts.active = Some(name.to_string());
+                    self.info(format!("Saved and applied font preset \"{name}\""));
+                }
+                Err(e) => self.error(format!("Apply failed: {e:#}")),
+            },
+            Ok(()) => self.info(format!("Saved font preset \"{name}\" to fonts.json")),
+            Err(e) => self.error(format!("Save failed: {e:#}")),
+        }
+    }
+
+    fn fonts_open_overlay(&mut self) {
+        match self.fonts.store.load_all() {
+            Ok(all) => {
+                let entries: Vec<(String, Vec<Rgb>)> =
+                    all.keys().map(|n| (n.clone(), Vec::new())).collect();
+                let sel = entries
+                    .iter()
+                    .position(|(n, _)| *n == self.fonts.name)
+                    .unwrap_or(0);
+                self.overlay_fonts = true;
+                self.overlay = Overlay::Open {
+                    filter: String::new(),
+                    sel,
+                    entries,
+                };
+            }
+            Err(e) => self.error(format!("{e:#}")),
+        }
+    }
+
+    /// Keys while the Fonts tab is showing (after the tab and quit keys).
+    fn on_fonts_key(&mut self, k: KeyEvent) {
+        use crate::fonts::FontFocus;
+        if self.fonts.focus == FontFocus::Search {
+            self.fonts.on_key(k);
+            return;
+        }
+        match k.code {
+            KeyCode::Char('q') => self.guard(Pending::Quit),
+            KeyCode::Char('s') => self.fonts_save(false),
+            KeyCode::Char('S') => {
+                self.overlay_fonts = true;
+                self.overlay = Overlay::SaveAs {
+                    input: self.fonts.name.clone(),
+                    overwrite: false,
+                    then_apply: false,
+                };
+            }
+            KeyCode::Char('a') => {
+                if self.fonts.dirty() {
+                    self.fonts_save(true);
+                } else {
+                    let name = self.fonts.name.clone();
+                    self.fonts_save_as(&name, true);
+                }
+            }
+            KeyCode::Char('o') => self.fonts_open_overlay(),
+            KeyCode::Char('n') => self.guard(Pending::NewFonts),
+            KeyCode::Char('?') => self.overlay = Overlay::Help,
+            KeyCode::Char('1') => self.fonts.focus = FontFocus::Slots,
+            KeyCode::Char('2') => self.fonts.open_list(),
+            KeyCode::Char(c @ ('3' | '4')) => {
+                self.switch_tab(Tab::Colours);
+                self.goto_panel(c as u8 - b'0');
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                if self.fonts.focus == FontFocus::Slots {
+                    self.fonts.open_list();
+                } else {
+                    self.fonts.focus = FontFocus::Slots;
+                }
+            }
+            _ => {
+                self.fonts.on_key(k);
+            }
+        }
     }
 
     fn info(&mut self, s: impl Into<String>) {
@@ -325,6 +495,7 @@ impl App {
     // ----- files -----------------------------------------------------------
 
     fn save(&mut self, then_apply: bool) {
+        self.overlay_fonts = false;
         if self.is_new {
             self.overlay = Overlay::SaveAs {
                 input: String::new(),
@@ -408,7 +579,12 @@ impl App {
 
     /// Runs `p` now, or asks first when there are unsaved changes.
     fn guard(&mut self, p: Pending) {
-        if self.dirty() {
+        let dirty = match p {
+            Pending::Quit => self.dirty() || self.fonts.dirty(),
+            _ if p.is_fonts() => self.fonts.dirty(),
+            _ => self.dirty(),
+        };
+        if dirty {
             self.overlay = Overlay::Confirm(p);
         } else {
             self.run_pending(p);
@@ -421,10 +597,34 @@ impl App {
             Pending::Quit => self.quit = true,
             Pending::New => self.new_palette(),
             Pending::Open(n) => self.open(&n),
+            Pending::NewFonts => {
+                self.fonts.new_preset();
+                self.info("New font preset (a copy of the current fonts); s asks for a name");
+            }
+            Pending::OpenFonts(n) => match self.fonts.open(&n) {
+                Ok(()) => self.info(format!("Opened font preset \"{n}\"")),
+                Err(e) => self.error(format!("{e:#}")),
+            },
+        }
+    }
+
+    /// "Save first" from the unsaved-changes prompt: saves whatever `p`
+    /// would throw away (both for quit), if it already has a name.
+    fn save_before(&mut self, p: &Pending) {
+        let palette = matches!(p, Pending::Quit) || !p.is_fonts();
+        let fonts = matches!(p, Pending::Quit) || p.is_fonts();
+        if palette && self.dirty() && !self.is_new {
+            let name = self.name.clone();
+            self.save_as(&name, false);
+        }
+        if fonts && self.fonts.dirty() && !self.fonts.is_new {
+            let name = self.fonts.name.clone();
+            self.fonts_save_as(&name, false);
         }
     }
 
     fn open_overlay(&mut self) {
+        self.overlay_fonts = false;
         match self.store.load_all() {
             Ok(all) => {
                 let entries = all
@@ -508,6 +708,7 @@ impl App {
             return;
         }
         if k.code == KeyCode::F(12) && matches!(self.overlay, Overlay::None) {
+            self.switch_tab(Tab::Colours);
             self.preview.mode = PreviewMode::Desktop;
             self.preview.cycle_focus();
             return;
@@ -521,6 +722,14 @@ impl App {
             return;
         }
         self.message = None;
+        match k.code {
+            KeyCode::F(1) => return self.switch_tab(Tab::Colours),
+            KeyCode::F(2) => return self.switch_tab(Tab::Fonts),
+            _ => {}
+        }
+        if self.tab == Tab::Fonts {
+            return self.on_fonts_key(k);
+        }
         if self.focus == Focus::Hex {
             self.on_hex_key(k);
             return;
@@ -531,6 +740,7 @@ impl App {
             KeyCode::Char('q') => return self.guard(Pending::Quit),
             KeyCode::Char('s') => return self.save(false),
             KeyCode::Char('S') => {
+                self.overlay_fonts = false;
                 self.overlay = Overlay::SaveAs {
                     input: self.name.clone(),
                     overwrite: false,
@@ -688,9 +898,8 @@ impl App {
                     self.run_pending(p);
                     Overlay::None
                 }
-                KeyCode::Char('s') if !self.is_new => {
-                    let name = self.name.clone();
-                    self.save_as(&name, false);
+                KeyCode::Char('s') => {
+                    self.save_before(&p);
                     self.run_pending(p);
                     Overlay::None
                 }
@@ -726,18 +935,29 @@ impl App {
                 KeyCode::Esc => Overlay::None,
                 KeyCode::Enter => {
                     let name = input.trim().to_string();
-                    let exists = self
-                        .store
-                        .load_all()
-                        .map(|a| a.contains_key(&name))
-                        .unwrap_or(false);
+                    let (exists, current) = if self.overlay_fonts {
+                        let all = self.fonts.store.load_all();
+                        (
+                            all.map(|a| a.contains_key(&name)).unwrap_or(false),
+                            self.fonts.name.clone(),
+                        )
+                    } else {
+                        let all = self.store.load_all();
+                        (
+                            all.map(|a| a.contains_key(&name)).unwrap_or(false),
+                            self.name.clone(),
+                        )
+                    };
                     if name.is_empty() {
                         Overlay::SaveAs {
                             input,
                             overwrite,
                             then_apply,
                         }
-                    } else if exists && name != self.name && !overwrite {
+                    } else if self.overlay_fonts && (!exists || name == current || overwrite) {
+                        self.fonts_save_as(&name, then_apply);
+                        Overlay::None
+                    } else if exists && name != current && !overwrite {
                         self.error(format!("\"{name}\" exists. Enter again to overwrite it"));
                         Overlay::SaveAs {
                             input,
@@ -782,7 +1002,11 @@ impl App {
                     KeyCode::Enter => match open_matches(&entries, &filter).get(sel) {
                         Some(&i) => {
                             let name = entries[i].0.clone();
-                            self.guard(Pending::Open(name));
+                            self.guard(if self.overlay_fonts {
+                                Pending::OpenFonts(name)
+                            } else {
+                                Pending::Open(name)
+                            });
                             // guard() may have opened a confirmation instead
                             std::mem::replace(&mut self.overlay, Overlay::None)
                         }
@@ -852,6 +1076,9 @@ impl App {
     }
 
     fn on_mouse(&mut self, m: MouseEvent) {
+        if self.tab == Tab::Fonts {
+            return;
+        }
         if !matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. }) {
             return;
         }
@@ -931,6 +1158,13 @@ impl App {
 
     /// Bracketed paste (Ctrl+Shift+V): a hex colour sets the selected key.
     fn on_paste(&mut self, s: &str) {
+        if self.tab == Tab::Fonts && matches!(self.overlay, Overlay::None) {
+            if self.fonts.focus == crate::fonts::FontFocus::Search {
+                self.fonts.search.push_str(s.trim());
+                self.fonts.list_sel = 0;
+            }
+            return;
+        }
         if let Some(id) = self.preview.focus {
             return self.preview.send_paste(id, s);
         }
@@ -1198,6 +1432,87 @@ mod tests {
         let screen = render(&mut app, 160, 45);
         for t in ["¹Palette", "²Colour", "³nvim", "⁴yazi"] {
             assert!(screen.contains(t), "missing {t}");
+        }
+    }
+
+    #[test]
+    fn fonts_tab_edits_saves_and_opens_presets() {
+        let store = temp_store("fonts");
+        let dir = store.dir.clone();
+        std::fs::write(
+            dir.join("fonts.json"),
+            "{\n  \"Base\": {\n    \"mono\": {\n      \"family\": \"A\",\n      \"size\": 14\n    },\n    \"ui\": {\n      \"family\": \"B\",\n      \"size\": 9\n    }\n  }\n}\n",
+        )
+        .unwrap();
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.fonts.store.dir = dir.clone();
+        app.fonts.open("Base").unwrap();
+        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        assert_eq!(app.tab, Tab::Fonts);
+        app.fonts.installed = vec![
+            crate::fonts::Installed {
+                family: "A".into(),
+                mono: true,
+                nerd: true,
+            },
+            crate::fonts::Installed {
+                family: "B".into(),
+                mono: false,
+                nerd: false,
+            },
+            crate::fonts::Installed {
+                family: "C Mono".into(),
+                mono: true,
+                nerd: false,
+            },
+        ];
+        // bar (third role): pick C Mono from the list, two sizes bigger
+        press(&mut app, "jj\nG\nll");
+        assert_eq!(app.fonts.preset.fonts[2].family, "C Mono");
+        assert_eq!(app.fonts.preset.fonts[2].size, 11);
+        // number keys: 2 opens the list, 1 goes back
+        press(&mut app, "2");
+        assert_eq!(app.fonts.focus, crate::fonts::FontFocus::List);
+        press(&mut app, "1");
+        // unsaved: opening another preset asks first
+        press(&mut app, "oBase\n");
+        assert!(matches!(
+            app.overlay,
+            Overlay::Confirm(Pending::OpenFonts(_))
+        ));
+        press(&mut app, "\x1b");
+        // save as a new preset, which lands in fonts.json in jq's format
+        press(&mut app, "S");
+        for _ in 0..4 {
+            app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        }
+        press(&mut app, "Wide bar\n");
+        assert!(!app.fonts.dirty());
+        let text = std::fs::read_to_string(dir.join("fonts.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["Wide bar"]["bar"]["family"], "C Mono");
+        assert_eq!(text, to_jq_string(&v));
+        // the palette tab didn't change, and its keys still work after F1
+        assert!(!app.dirty());
+        app.on_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+        press(&mut app, "2");
+        assert_eq!(app.focus, Focus::Square);
+        // the Fonts tab draws at every size (no image support in tests)
+        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        let screen = render(&mut app, 160, 45);
+        for t in [
+            "¹Fonts: Wide bar",
+            "²Installed fonts",
+            "F2 Fonts",
+            "Sample",
+            "C Mono",
+        ] {
+            assert!(screen.contains(t), "missing {t}");
+        }
+        for w in (1..=200).step_by(7) {
+            for h in (1..=70).step_by(5) {
+                render(&mut app, w, h);
+            }
         }
     }
 

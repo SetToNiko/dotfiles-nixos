@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
-use crate::app::{App, Focus, Overlay, open_matches};
+use crate::app::{App, Focus, Overlay, Tab, open_matches};
 use crate::color::{self, Rgb};
 use crate::palette::{self, GROUPS, TEXT_KEYS};
 use crate::preview::Mode as PreviewMode;
@@ -99,9 +99,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             status,
             ..
         } => {
-            draw_list(f, app, list);
-            draw_picker(f, app, picker);
-            draw_preview(f, app, preview);
+            if app.tab == Tab::Fonts {
+                let editor = list.union(picker);
+                crate::fonts_ui::draw_fonts(f, app, editor);
+                crate::fonts_ui::draw_sample(f, app, preview);
+            } else {
+                draw_list(f, app, list);
+                draw_picker(f, app, picker);
+                draw_preview(f, app, preview);
+            }
             draw_status(f, app, status);
             draw_overlay(f, app, area);
         }
@@ -716,11 +722,32 @@ fn draw_swatches(f: &mut Frame, app: &App, area: Rect) {
 // ----- status line --------------------------------------------------------
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    let mut spans = vec![Span::styled(
-        format!(" {}{} ", app.name, if app.dirty() { " ●" } else { "" }),
-        Style::new().reversed(),
-    )];
-    if let Some(active) = &app.active {
+    let tab = |label: &'static str, on: bool| {
+        Span::styled(
+            label,
+            if on {
+                Style::new().reversed().bold()
+            } else {
+                Style::new().dark_gray()
+            },
+        )
+    };
+    let fonts = app.tab == Tab::Fonts;
+    let (name, dirty, active) = if fonts {
+        (&app.fonts.name, app.fonts.dirty(), &app.fonts.active)
+    } else {
+        (&app.name, app.dirty(), &app.active)
+    };
+    let mut spans = vec![
+        tab(" F1 Colours ", !fonts),
+        tab(" F2 Fonts ", fonts),
+        " ".into(),
+        Span::styled(
+            format!(" {name}{} ", if dirty { " ●" } else { "" }),
+            Style::new().reversed(),
+        ),
+    ];
+    if let Some(active) = active {
         spans.push(Span::styled(
             format!(" active: {active} "),
             Style::new().dark_gray(),
@@ -736,7 +763,19 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             },
         ));
     } else {
-        let context: &[&str] = if app.preview.focus.is_some() {
+        let context: &[&str] = if fonts {
+            match app.fonts.focus {
+                crate::fonts::FontFocus::Slots => &["j/k role", "h/l size", "Enter pick font"],
+                crate::fonts::FontFocus::List => &[
+                    "j/k browse",
+                    "Enter use",
+                    "/ search",
+                    "m mono only",
+                    "Esc back",
+                ],
+                crate::fonts::FontFocus::Search => &["type to search", "Enter/Esc done"],
+            }
+        } else if app.preview.focus.is_some() {
             &[
                 "keys go to the preview window (Ctrl+C too)",
                 "F12 next window / back",
@@ -860,7 +899,12 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 ("Y  R  V", "preview: yazi window, rofi menu, swatches view"),
                 (
                     "1 2 3 4",
-                    "jump to a panel: key list, colour, nvim, shell/yazi",
+                    "jump to a panel: key list, colour, nvim, shell/yazi (Fonts tab: 1 roles, 2 font list)",
+                ),
+                ("F1  F2", "Colours tab / Fonts tab"),
+                (
+                    "Fonts tab",
+                    "j/k role, h/l size (H/L by 4), Enter pick from the list: / search, m mono only",
                 ),
                 ("q", "quit"),
                 (
@@ -900,7 +944,11 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             input, overwrite, ..
         } => {
             let mut lines = vec![
-                Line::raw(" Name in palettes.json:"),
+                Line::raw(if app.overlay_fonts {
+                    " Name in fonts.json:"
+                } else {
+                    " Name in palettes.json:"
+                }),
                 Line::from(vec![
                     Span::raw(" "),
                     Span::styled(format!("{input}▏"), Style::new().yellow()),
@@ -960,7 +1008,16 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 }
                 lines.push(Line::from(spans));
             }
-            popup(f, r, "Open palette", lines);
+            popup(
+                f,
+                r,
+                if app.overlay_fonts {
+                    "Open font preset"
+                } else {
+                    "Open palette"
+                },
+                lines,
+            );
         }
     }
 }

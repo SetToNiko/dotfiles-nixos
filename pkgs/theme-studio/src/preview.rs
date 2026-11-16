@@ -421,6 +421,16 @@ impl Preview {
     }
 
     /// True once since the last call if a program printed something.
+    /// The folder for the draft colours (and the font samples).
+    pub fn draft_dir(&self) -> &Path {
+        &self.draft_dir
+    }
+
+    /// Set by anything that needs a redraw (programs printing, samples ready).
+    pub fn dirty_flag(&self) -> Arc<AtomicBool> {
+        self.dirty.clone()
+    }
+
     pub fn take_dirty(&self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
     }
