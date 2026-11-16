@@ -10,36 +10,89 @@ use crate::color::Rgb;
 
 /// Every key, in the order palette-derive.jq (and so palettes.json) uses.
 pub const KEYS: [&str; 34] = [
-    "bg_dim", "bg0", "bg1", "bg2", "bg3", "bg4", "bg5",
-    "bg_statusline1", "bg_statusline2", "bg_statusline3",
-    "bg_visual_red", "bg_visual_yellow", "bg_visual_green", "bg_visual_blue", "bg_visual_purple",
-    "bg_diff_red", "bg_diff_green", "bg_diff_blue", "bg_current_word",
-    "fg0", "fg1", "red", "orange", "yellow", "green", "aqua", "blue", "purple",
-    "bg_red", "bg_green", "bg_yellow", "grey0", "grey1", "grey2",
+    "bg_dim",
+    "bg0",
+    "bg1",
+    "bg2",
+    "bg3",
+    "bg4",
+    "bg5",
+    "bg_statusline1",
+    "bg_statusline2",
+    "bg_statusline3",
+    "bg_visual_red",
+    "bg_visual_yellow",
+    "bg_visual_green",
+    "bg_visual_blue",
+    "bg_visual_purple",
+    "bg_diff_red",
+    "bg_diff_green",
+    "bg_diff_blue",
+    "bg_current_word",
+    "fg0",
+    "fg1",
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "aqua",
+    "blue",
+    "purple",
+    "bg_red",
+    "bg_green",
+    "bg_yellow",
+    "grey0",
+    "grey1",
+    "grey2",
 ];
 
 /// The colours a palette is built from; everything else derives from these.
-pub const BASE: [&str; 8] = ["bg0", "fg0", "red", "green", "yellow", "blue", "purple", "aqua"];
+pub const BASE: [&str; 8] = [
+    "bg0", "fg0", "red", "green", "yellow", "blue", "purple", "aqua",
+];
 
 /// How the editor groups the keys.
 pub const GROUPS: [(&str, &[&str]); 5] = [
     ("Base", &BASE),
-    ("Backgrounds", &[
-        "bg_dim", "bg1", "bg2", "bg3", "bg4", "bg5",
-        "bg_statusline1", "bg_statusline2", "bg_statusline3", "bg_current_word",
-    ]),
-    ("Text and accents", &["fg1", "orange", "bg_red", "bg_green", "bg_yellow"]),
+    (
+        "Backgrounds",
+        &[
+            "bg_dim",
+            "bg1",
+            "bg2",
+            "bg3",
+            "bg4",
+            "bg5",
+            "bg_statusline1",
+            "bg_statusline2",
+            "bg_statusline3",
+            "bg_current_word",
+        ],
+    ),
+    (
+        "Text and accents",
+        &["fg1", "orange", "bg_red", "bg_green", "bg_yellow"],
+    ),
     ("Greys", &["grey0", "grey1", "grey2"]),
-    ("Tinted backgrounds", &[
-        "bg_visual_red", "bg_visual_yellow", "bg_visual_green", "bg_visual_blue",
-        "bg_visual_purple", "bg_diff_red", "bg_diff_green", "bg_diff_blue",
-    ]),
+    (
+        "Tinted backgrounds",
+        &[
+            "bg_visual_red",
+            "bg_visual_yellow",
+            "bg_visual_green",
+            "bg_visual_blue",
+            "bg_visual_purple",
+            "bg_diff_red",
+            "bg_diff_green",
+            "bg_diff_blue",
+        ],
+    ),
 ];
 
 /// Keys used as text, so their contrast against bg0 matters.
 pub const TEXT_KEYS: [&str; 12] = [
-    "fg0", "fg1", "red", "orange", "yellow", "green", "aqua", "blue", "purple",
-    "grey0", "grey1", "grey2",
+    "fg0", "fg1", "red", "orange", "yellow", "green", "aqua", "blue", "purple", "grey0", "grey1",
+    "grey2",
 ];
 
 pub fn is_base(key: &str) -> bool {
@@ -93,7 +146,14 @@ pub fn derive(base: &HashMap<&'static str, Rgb>) -> HashMap<&'static str, Rgb> {
     let mut put = |k: &'static str, c: Rgb| {
         d.insert(k, c);
     };
-    put("bg_dim", if light { mix(bg, fg, 0.05) } else { mix(bg, black, 0.3) });
+    put(
+        "bg_dim",
+        if light {
+            mix(bg, fg, 0.05)
+        } else {
+            mix(bg, black, 0.3)
+        },
+    );
     put("bg0", bg);
     put("bg1", mix(bg, fg, 0.05));
     put("bg2", mix(bg, fg, 0.05));
@@ -145,8 +205,14 @@ impl Palette {
     pub fn from_json(obj: &Map<String, Value>) -> Result<Palette> {
         let mut values = HashMap::new();
         for k in BASE {
-            let v = obj.get(k).and_then(Value::as_str).ok_or_else(|| anyhow!("missing {k}"))?;
-            values.insert(k, Rgb::parse(v).with_context(|| format!("bad colour for {k}: {v}"))?);
+            let v = obj
+                .get(k)
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("missing {k}"))?;
+            values.insert(
+                k,
+                Rgb::parse(v).with_context(|| format!("bad colour for {k}: {v}"))?,
+            );
         }
         let mut pinned = HashSet::new();
         for (k, derived) in derive(&values) {
@@ -169,20 +235,34 @@ impl Palette {
             .filter(|(k, _)| key(k).is_none())
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        Ok(Palette { values, pinned, extra })
+        Ok(Palette {
+            values,
+            pinned,
+            extra,
+        })
     }
 
     /// A neutral dark starting point for a new palette.
     pub fn blank() -> Palette {
         let base = [
-            ("bg0", "#1e1e22"), ("fg0", "#d8d4cc"), ("red", "#e06c6c"), ("green", "#9cc47a"),
-            ("yellow", "#e2b860"), ("blue", "#6fa3d8"), ("purple", "#b48ad8"), ("aqua", "#6cc4b4"),
+            ("bg0", "#1e1e22"),
+            ("fg0", "#d8d4cc"),
+            ("red", "#e06c6c"),
+            ("green", "#9cc47a"),
+            ("yellow", "#e2b860"),
+            ("blue", "#6fa3d8"),
+            ("purple", "#b48ad8"),
+            ("aqua", "#6cc4b4"),
         ];
         let mut values = HashMap::new();
         for (k, v) in base {
             values.insert(key(k).unwrap(), Rgb::parse(v).unwrap());
         }
-        let mut p = Palette { values, pinned: HashSet::new(), extra: Vec::new() };
+        let mut p = Palette {
+            values,
+            pinned: HashSet::new(),
+            extra: Vec::new(),
+        };
         p.recompute();
         p
     }
@@ -246,12 +326,19 @@ mod tests {
 
     fn all_palettes(dir: &std::path::Path) -> Map<String, Value> {
         let text = std::fs::read_to_string(dir.join("palettes.json")).unwrap();
-        serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().clone()
+        serde_json::from_str::<Value>(&text)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone()
     }
 
     #[test]
     fn every_key_is_in_exactly_one_group() {
-        let mut seen: Vec<&str> = GROUPS.iter().flat_map(|(_, ks)| ks.iter().copied()).collect();
+        let mut seen: Vec<&str> = GROUPS
+            .iter()
+            .flat_map(|(_, ks)| ks.iter().copied())
+            .collect();
         seen.sort();
         let mut keys = KEYS.to_vec();
         keys.sort();
@@ -271,12 +358,15 @@ mod tests {
             .iter()
             .map(|(name, p)| {
                 let o = p.as_object().unwrap();
-                let b: Map<String, Value> =
-                    BASE.iter().map(|k| (k.to_string(), o[*k].clone())).collect();
+                let b: Map<String, Value> = BASE
+                    .iter()
+                    .map(|k| (k.to_string(), o[*k].clone()))
+                    .collect();
                 (name.clone(), Value::Object(b))
             })
             .collect();
-        let input = std::env::temp_dir().join(format!("theme-studio-derive-{}.json", std::process::id()));
+        let input =
+            std::env::temp_dir().join(format!("theme-studio-derive-{}.json", std::process::id()));
         std::fs::write(&input, serde_json::to_string(&bases).unwrap()).unwrap();
         let out = Command::new("jq")
             .args(["-r", "-f"])
@@ -287,7 +377,11 @@ mod tests {
             eprintln!("skipped: jq not available");
             return;
         };
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let expected: Map<String, Value> = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(expected.len(), all.len());
         for (name, want) in &expected {
@@ -320,7 +414,10 @@ mod tests {
             pinned_somewhere += (!pal.pinned.is_empty()) as usize;
             assert_eq!(&pal.to_json(), obj, "{name}");
         }
-        assert!(pinned_somewhere > 0, "expected hand-tuned palettes (e.g. Gruvbox Dark Hard)");
+        assert!(
+            pinned_somewhere > 0,
+            "expected hand-tuned palettes (e.g. Gruvbox Dark Hard)"
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Editor state and input handling.
 
 use std::io::Write;
+use std::time::Duration;
 
 use anyhow::Result;
 use ratatui::DefaultTerminal;
@@ -12,6 +13,7 @@ use ratatui::layout::Rect;
 
 use crate::color::{self, Rgb};
 use crate::palette::{self, GROUPS, Palette};
+use crate::preview::{Mode as PreviewMode, Preview};
 use crate::store::{Store, TerminalMap};
 
 /// Which control the keyboard drives.
@@ -27,7 +29,13 @@ pub enum Focus {
 }
 
 const FOCUS_ORDER: [Focus; 7] = [
-    Focus::List, Focus::Square, Focus::Hue, Focus::SliderH, Focus::SliderS, Focus::SliderL, Focus::Hex,
+    Focus::List,
+    Focus::Square,
+    Focus::Hue,
+    Focus::SliderH,
+    Focus::SliderS,
+    Focus::SliderL,
+    Focus::Hex,
 ];
 
 /// Something that would throw away unsaved changes, waiting for confirmation.
@@ -40,11 +48,21 @@ pub enum Pending {
 
 pub enum Overlay {
     None,
-    Open { filter: String, sel: usize, entries: Vec<(String, Vec<Rgb>)> },
-    SaveAs { input: String, overwrite: bool, then_apply: bool },
+    Open {
+        filter: String,
+        sel: usize,
+        entries: Vec<(String, Vec<Rgb>)>,
+    },
+    SaveAs {
+        input: String,
+        overwrite: bool,
+        then_apply: bool,
+    },
     Confirm(Pending),
     /// Picking the key whose colour gets copied into `target`.
-    CopyFrom { target: &'static str },
+    CopyFrom {
+        target: &'static str,
+    },
     Help,
 }
 
@@ -89,6 +107,7 @@ pub struct App {
     pub message: Option<(String, bool)>,
     pub overlay: Overlay,
     pub areas: Areas,
+    pub preview: Preview,
     quit: bool,
 }
 
@@ -113,7 +132,9 @@ impl App {
             Start::New => ("untitled".to_string(), Palette::blank(), true),
         };
         let terminal = store.terminal_map().ok();
+        let preview = Preview::new(&store.dir);
         let mut app = App {
+            preview,
             store,
             name,
             is_new,
@@ -122,7 +143,10 @@ impl App {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: None,
-            keys: GROUPS.iter().flat_map(|(_, ks)| ks.iter().copied()).collect(),
+            keys: GROUPS
+                .iter()
+                .flat_map(|(_, ks)| ks.iter().copied())
+                .collect(),
             sel: 0,
             list_scroll: 0,
             focus: Focus::List,
@@ -140,13 +164,23 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        let mut redraw = true;
         while !self.quit {
-            terminal.draw(|f| crate::ui::draw(f, self))?;
-            match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
-                Event::Mouse(m) => self.on_mouse(m),
-                Event::Paste(s) => self.on_paste(&s),
-                _ => {}
+            // nvim in the preview re-reads this whenever it changes
+            self.preview.sync_draft(&self.palette);
+            if self.preview.take_dirty() || redraw {
+                terminal.draw(|f| crate::ui::draw(f, self))?;
+                redraw = false;
+            }
+            // Short poll: the preview's programs can print at any time.
+            if event::poll(Duration::from_millis(25))? {
+                match event::read()? {
+                    Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
+                    Event::Mouse(m) => self.on_mouse(m),
+                    Event::Paste(s) => self.on_paste(&s),
+                    _ => {}
+                }
+                redraw = true;
             }
         }
         Ok(())
@@ -292,7 +326,11 @@ impl App {
 
     fn save(&mut self, then_apply: bool) {
         if self.is_new {
-            self.overlay = Overlay::SaveAs { input: String::new(), overwrite: false, then_apply };
+            self.overlay = Overlay::SaveAs {
+                input: String::new(),
+                overwrite: false,
+                then_apply,
+            };
             return;
         }
         let name = self.name.clone();
@@ -392,15 +430,25 @@ impl App {
                 let entries = all
                     .iter()
                     .map(|(name, v)| {
-                        let sw = ["bg0", "fg0", "red", "orange", "yellow", "green", "aqua", "blue", "purple"]
-                            .iter()
-                            .filter_map(|k| v.get(*k).and_then(|x| x.as_str()).and_then(Rgb::parse))
-                            .collect();
+                        let sw = [
+                            "bg0", "fg0", "red", "orange", "yellow", "green", "aqua", "blue",
+                            "purple",
+                        ]
+                        .iter()
+                        .filter_map(|k| v.get(*k).and_then(|x| x.as_str()).and_then(Rgb::parse))
+                        .collect();
                         (name.clone(), sw)
                     })
                     .collect::<Vec<_>>();
-                let sel = entries.iter().position(|(n, _)| *n == self.name).unwrap_or(0);
-                self.overlay = Overlay::Open { filter: String::new(), sel, entries };
+                let sel = entries
+                    .iter()
+                    .position(|(n, _)| *n == self.name)
+                    .unwrap_or(0);
+                self.overlay = Overlay::Open {
+                    filter: String::new(),
+                    sel,
+                    entries,
+                };
             }
             Err(e) => self.error(format!("{e:#}")),
         }
@@ -410,6 +458,22 @@ impl App {
 
     fn on_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        // A preview window has the keyboard: everything but F12 goes to it.
+        if let Some(id) = self.preview.focus
+            && matches!(self.overlay, Overlay::None)
+        {
+            if k.code == KeyCode::F(12) {
+                self.preview.cycle_focus();
+            } else {
+                self.preview.send_key(id, k);
+            }
+            return;
+        }
+        if k.code == KeyCode::F(12) && matches!(self.overlay, Overlay::None) {
+            self.preview.mode = PreviewMode::Desktop;
+            self.preview.cycle_focus();
+            return;
+        }
         if ctrl && k.code == KeyCode::Char('c') {
             self.guard(Pending::Quit);
             return;
@@ -429,7 +493,11 @@ impl App {
             KeyCode::Char('q') => return self.guard(Pending::Quit),
             KeyCode::Char('s') => return self.save(false),
             KeyCode::Char('S') => {
-                self.overlay = Overlay::SaveAs { input: self.name.clone(), overwrite: false, then_apply: false };
+                self.overlay = Overlay::SaveAs {
+                    input: self.name.clone(),
+                    overwrite: false,
+                    then_apply: false,
+                };
                 return;
             }
             KeyCode::Char('a') => return self.apply(),
@@ -451,6 +519,22 @@ impl App {
                 self.overlay = Overlay::Help;
                 return;
             }
+            KeyCode::Char('Y') => {
+                self.preview.mode = PreviewMode::Desktop;
+                return self.preview.toggle_yazi();
+            }
+            KeyCode::Char('R') => {
+                self.preview.mode = PreviewMode::Desktop;
+                self.preview.show_rofi = !self.preview.show_rofi;
+                return;
+            }
+            KeyCode::Char('V') => {
+                self.preview.mode = match self.preview.mode {
+                    PreviewMode::Desktop => PreviewMode::Swatches,
+                    PreviewMode::Swatches => PreviewMode::Desktop,
+                };
+                return;
+            }
             KeyCode::Char('#') => {
                 self.focus = Focus::Hex;
                 self.hex_input = "#".into();
@@ -465,7 +549,8 @@ impl App {
             _ => {}
         }
 
-        let big = k.modifiers.contains(KeyModifiers::SHIFT) || k.code.as_char().is_some_and(|c| c.is_ascii_uppercase());
+        let big = k.modifiers.contains(KeyModifiers::SHIFT)
+            || k.code.as_char().is_some_and(|c| c.is_ascii_uppercase());
         let dir = match k.code {
             KeyCode::Char('h' | 'H') | KeyCode::Left => Some((-1, 0)),
             KeyCode::Char('l' | 'L') | KeyCode::Right => Some((1, 0)),
@@ -594,16 +679,32 @@ impl App {
                 }
                 _ => Overlay::CopyFrom { target },
             },
-            Overlay::SaveAs { mut input, overwrite, then_apply } => match k.code {
+            Overlay::SaveAs {
+                mut input,
+                overwrite,
+                then_apply,
+            } => match k.code {
                 KeyCode::Esc => Overlay::None,
                 KeyCode::Enter => {
                     let name = input.trim().to_string();
-                    let exists = self.store.load_all().map(|a| a.contains_key(&name)).unwrap_or(false);
+                    let exists = self
+                        .store
+                        .load_all()
+                        .map(|a| a.contains_key(&name))
+                        .unwrap_or(false);
                     if name.is_empty() {
-                        Overlay::SaveAs { input, overwrite, then_apply }
+                        Overlay::SaveAs {
+                            input,
+                            overwrite,
+                            then_apply,
+                        }
                     } else if exists && name != self.name && !overwrite {
                         self.error(format!("\"{name}\" exists. Enter again to overwrite it"));
-                        Overlay::SaveAs { input, overwrite: true, then_apply }
+                        Overlay::SaveAs {
+                            input,
+                            overwrite: true,
+                            then_apply,
+                        }
                     } else {
                         self.save_as(&name, then_apply);
                         Overlay::None
@@ -611,15 +712,31 @@ impl App {
                 }
                 KeyCode::Backspace => {
                     input.pop();
-                    Overlay::SaveAs { input, overwrite: false, then_apply }
+                    Overlay::SaveAs {
+                        input,
+                        overwrite: false,
+                        then_apply,
+                    }
                 }
                 KeyCode::Char(c) => {
                     input.push(c);
-                    Overlay::SaveAs { input, overwrite: false, then_apply }
+                    Overlay::SaveAs {
+                        input,
+                        overwrite: false,
+                        then_apply,
+                    }
                 }
-                _ => Overlay::SaveAs { input, overwrite, then_apply },
+                _ => Overlay::SaveAs {
+                    input,
+                    overwrite,
+                    then_apply,
+                },
             },
-            Overlay::Open { mut filter, mut sel, entries } => {
+            Overlay::Open {
+                mut filter,
+                mut sel,
+                entries,
+            } => {
                 let n = open_matches(&entries, &filter).len();
                 match k.code {
                     KeyCode::Esc => Overlay::None,
@@ -630,33 +747,65 @@ impl App {
                             // guard() may have opened a confirmation instead
                             std::mem::replace(&mut self.overlay, Overlay::None)
                         }
-                        None => Overlay::Open { filter, sel, entries },
+                        None => Overlay::Open {
+                            filter,
+                            sel,
+                            entries,
+                        },
                     },
                     KeyCode::Down => {
                         sel = (sel + 1).min(n.saturating_sub(1));
-                        Overlay::Open { filter, sel, entries }
+                        Overlay::Open {
+                            filter,
+                            sel,
+                            entries,
+                        }
                     }
                     KeyCode::Up => {
                         sel = sel.saturating_sub(1);
-                        Overlay::Open { filter, sel, entries }
+                        Overlay::Open {
+                            filter,
+                            sel,
+                            entries,
+                        }
                     }
                     KeyCode::Char('n') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                         sel = (sel + 1).min(n.saturating_sub(1));
-                        Overlay::Open { filter, sel, entries }
+                        Overlay::Open {
+                            filter,
+                            sel,
+                            entries,
+                        }
                     }
                     KeyCode::Char('p') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                         sel = sel.saturating_sub(1);
-                        Overlay::Open { filter, sel, entries }
+                        Overlay::Open {
+                            filter,
+                            sel,
+                            entries,
+                        }
                     }
                     KeyCode::Backspace => {
                         filter.pop();
-                        Overlay::Open { filter, sel: 0, entries }
+                        Overlay::Open {
+                            filter,
+                            sel: 0,
+                            entries,
+                        }
                     }
                     KeyCode::Char(c) => {
                         filter.push(c);
-                        Overlay::Open { filter, sel: 0, entries }
+                        Overlay::Open {
+                            filter,
+                            sel: 0,
+                            entries,
+                        }
                     }
-                    _ => Overlay::Open { filter, sel, entries },
+                    _ => Overlay::Open {
+                        filter,
+                        sel,
+                        entries,
+                    },
                 }
             }
             Overlay::None => Overlay::None,
@@ -669,17 +818,40 @@ impl App {
         }
         let (x, y) = (m.column, m.row);
         let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+        // Clicking a preview window gives it the keyboard; clicking anywhere
+        // else gives it back to the editor.
+        if let MouseEventKind::Down(_) = m.kind {
+            let hit = self
+                .preview
+                .rects
+                .iter()
+                .find(|(_, r)| inside(*r))
+                .map(|(id, _)| *id);
+            if hit.is_some() || self.preview.focus.is_some() {
+                self.preview.focus = hit;
+                if hit.is_some() {
+                    return;
+                }
+            }
+        }
         let frac = |r: Rect, v: u16, len: u16| {
-            if len <= 1 { 0.0 } else { (v.saturating_sub(r.x.min(v)) as f64 / (len - 1) as f64).clamp(0.0, 1.0) }
+            if len <= 1 {
+                0.0
+            } else {
+                (v.saturating_sub(r.x.min(v)) as f64 / (len - 1) as f64).clamp(0.0, 1.0)
+            }
         };
         match m.kind {
             MouseEventKind::ScrollDown if inside(self.areas.list) => self.move_sel(1),
             MouseEventKind::ScrollUp if inside(self.areas.list) => self.move_sel(-1),
             MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
                 let a = &self.areas;
-                let (sq, hue, sh, ss, sl, hex, list) = (a.square, a.hue, a.slider_h, a.slider_s, a.slider_l, a.hex, a.list);
+                let (sq, hue, sh, ss, sl, hex, list) = (
+                    a.square, a.hue, a.slider_h, a.slider_s, a.slider_l, a.hex, a.list,
+                );
                 if inside(list) {
-                    if let Some(Some(i)) = self.areas.list_rows.get((y - list.y) as usize).copied() {
+                    if let Some(Some(i)) = self.areas.list_rows.get((y - list.y) as usize).copied()
+                    {
                         self.select(i);
                     }
                     if matches!(self.overlay, Overlay::None) {
@@ -688,7 +860,8 @@ impl App {
                 } else if inside(sq) {
                     self.focus = Focus::Square;
                     let s = frac(sq, x, sq.width);
-                    let v = 1.0 - ((y - sq.y) as f64 / (sq.height.max(2) - 1) as f64).clamp(0.0, 1.0);
+                    let v =
+                        1.0 - ((y - sq.y) as f64 / (sq.height.max(2) - 1) as f64).clamp(0.0, 1.0);
                     self.set_hsv(self.hsv.0, s, v);
                 } else if inside(hue) {
                     self.focus = Focus::Hue;
@@ -719,6 +892,9 @@ impl App {
 
     /// Bracketed paste (Ctrl+Shift+V): a hex colour sets the selected key.
     fn on_paste(&mut self, s: &str) {
+        if let Some(id) = self.preview.focus {
+            return self.preview.send_paste(id, s);
+        }
         match (&mut self.overlay, Rgb::parse(s)) {
             (Overlay::SaveAs { input, .. }, _) => input.push_str(s.trim()),
             (Overlay::Open { filter, sel, .. }, _) => {
@@ -730,7 +906,9 @@ impl App {
                 self.set_key(key, c);
                 self.info(format!("{key} = {}", c.hex()));
             }
-            (Overlay::None, None) => self.error(format!("Pasted text isn't a colour: {}", s.trim())),
+            (Overlay::None, None) => {
+                self.error(format!("Pasted text isn't a colour: {}", s.trim()))
+            }
             _ => {}
         }
     }
@@ -741,7 +919,10 @@ impl App {
     }
 
     fn cycle_focus(&mut self, d: i32) {
-        let i = FOCUS_ORDER.iter().position(|f| *f == self.focus).unwrap_or(0) as i32;
+        let i = FOCUS_ORDER
+            .iter()
+            .position(|f| *f == self.focus)
+            .unwrap_or(0) as i32;
         let n = FOCUS_ORDER.len() as i32;
         self.focus = FOCUS_ORDER[(i + d).rem_euclid(n) as usize];
         if self.focus == Focus::Hex {
@@ -765,7 +946,11 @@ fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::new();
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
         for i in 0..4 {
             if i <= chunk.len() {
@@ -796,7 +981,8 @@ mod tests {
 
     /// A store in a temp folder with palettes "One" and "Two".
     fn temp_store(tag: &str) -> Store {
-        let dir = std::env::temp_dir().join(format!("theme-studio-app-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("theme-studio-app-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut two = Palette::blank();
         two.set("red", Rgb(200, 0, 0));
@@ -805,6 +991,13 @@ mod tests {
         m.insert("Two".into(), Value::Object(two.to_json()));
         std::fs::write(dir.join("palettes.json"), to_jq_string(&Value::Object(m))).unwrap();
         Store { dir }
+    }
+
+    /// An app whose preview never starts nvim, the shell or yazi.
+    fn test_app(store: Store, start: Start) -> App {
+        let mut app = App::new(store, start).unwrap();
+        app.preview.set_headless();
+        app
     }
 
     fn press(app: &mut App, keys: &str) {
@@ -824,14 +1017,18 @@ mod tests {
         t.draw(|f| crate::ui::draw(f, app)).unwrap();
         let buf = t.backend().buffer().clone();
         (0..h)
-            .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>())
+            .map(|y| {
+                (0..w)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
 
     #[test]
     fn picker_edits_follow_through_derived_keys_and_undo() {
-        let mut app = App::new(temp_store("edit"), Start::Named("One".into())).unwrap();
+        let mut app = test_app(temp_store("edit"), Start::Named("One".into()));
         assert_eq!(app.key(), "bg0");
         let grey_before = app.palette.get("grey1");
         // bg0: into the square, raise value a lot
@@ -850,7 +1047,7 @@ mod tests {
 
     #[test]
     fn pinning_hex_entry_paste_and_copy_from() {
-        let mut app = App::new(temp_store("pin"), Start::Named("One".into())).unwrap();
+        let mut app = test_app(temp_store("pin"), Start::Named("One".into()));
         // select grey1 (in the Greys group) and type a hex colour
         let i = app.keys.iter().position(|k| *k == "grey1").unwrap();
         app.select(i);
@@ -881,11 +1078,14 @@ mod tests {
     fn save_open_and_save_as() {
         let store = temp_store("save");
         let dir = store.dir.clone();
-        let mut app = App::new(store, Start::Named("One".into())).unwrap();
+        let mut app = test_app(store, Start::Named("One".into()));
         press(&mut app, "#abcdef\n");
         press(&mut app, "s");
         assert!(!app.dirty());
-        assert_eq!(Store { dir: dir.clone() }.load("One").unwrap().get("bg0"), Rgb(0xab, 0xcd, 0xef));
+        assert_eq!(
+            Store { dir: dir.clone() }.load("One").unwrap().get("bg0"),
+            Rgb(0xab, 0xcd, 0xef)
+        );
         // open "Two" through the search box
         press(&mut app, "oTwo\n");
         assert_eq!(app.name, "Two");
@@ -909,7 +1109,7 @@ mod tests {
 
     #[test]
     fn renders_at_full_size_and_warns_when_small() {
-        let mut app = App::new(temp_store("draw"), Start::Named("One".into())).unwrap();
+        let mut app = test_app(temp_store("draw"), Start::Named("One".into()));
         let screen = render(&mut app, 160, 45);
         assert!(screen.contains("Palette: One"));
         assert!(screen.contains("Backgrounds"));
@@ -938,7 +1138,12 @@ mod tests {
         use crate::ui::{Arrangement, arrange};
         let r = |w, h| Rect::new(0, 0, w, h);
         match arrange(r(160, 45)) {
-            Arrangement::Panels { list, preview, stacked, .. } => {
+            Arrangement::Panels {
+                list,
+                preview,
+                stacked,
+                ..
+            } => {
                 assert!(!stacked);
                 assert_eq!(list.width, 52);
                 assert_eq!(preview.x, 52);
@@ -947,7 +1152,13 @@ mod tests {
         }
         // too narrow for both side by side: editor on top, preview below
         match arrange(r(100, 50)) {
-            Arrangement::Panels { list, picker, preview, stacked, .. } => {
+            Arrangement::Panels {
+                list,
+                picker,
+                preview,
+                stacked,
+                ..
+            } => {
                 assert!(stacked);
                 assert_eq!((list.width, preview.width), (100, 100));
                 assert!(list.y < picker.y && picker.y < preview.y);
@@ -955,16 +1166,34 @@ mod tests {
             }
             a => panic!("{a:?}"),
         }
-        assert_eq!(arrange(r(40, 50)), Arrangement::TooSmall { need_w: 52, need_h: 35 });
-        assert_eq!(arrange(r(100, 20)), Arrangement::TooSmall { need_w: 52, need_h: 35 });
-        assert_eq!(arrange(r(130, 20)), Arrangement::TooSmall { need_w: 112, need_h: 23 });
+        assert_eq!(
+            arrange(r(40, 50)),
+            Arrangement::TooSmall {
+                need_w: 52,
+                need_h: 35
+            }
+        );
+        assert_eq!(
+            arrange(r(100, 20)),
+            Arrangement::TooSmall {
+                need_w: 52,
+                need_h: 35
+            }
+        );
+        assert_eq!(
+            arrange(r(130, 20)),
+            Arrangement::TooSmall {
+                need_w: 112,
+                need_h: 23
+            }
+        );
     }
 
     /// Dragging the window through every size never crashes the drawing
     /// (tests build in debug mode, where integer underflow panics).
     #[test]
     fn every_window_size_renders() {
-        let mut app = App::new(temp_store("sizes"), Start::Named("One".into())).unwrap();
+        let mut app = test_app(temp_store("sizes"), Start::Named("One".into()));
         for w in (1..=220).step_by(3) {
             for h in (1..=80).step_by(2) {
                 render(&mut app, w, h);

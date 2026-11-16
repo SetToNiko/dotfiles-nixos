@@ -2,7 +2,9 @@
 
 mod app;
 mod color;
+mod desktop;
 mod palette;
+mod preview;
 mod store;
 mod ui;
 

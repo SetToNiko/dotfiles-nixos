@@ -41,7 +41,11 @@ impl Rgb {
 
     /// Black or white, whichever reads better on top of this colour.
     pub fn text_on(self) -> Rgb {
-        if self.luminance() > 0.18 { Rgb(0, 0, 0) } else { Rgb(255, 255, 255) }
+        if self.luminance() > 0.18 {
+            Rgb(0, 0, 0)
+        } else {
+            Rgb(255, 255, 255)
+        }
     }
 }
 
@@ -97,7 +101,11 @@ pub fn rgb_to_hsl(c: Rgb) -> (Option<f64>, f64, f64) {
     let min = r.min(g).min(b);
     let d = max - min;
     let l = (max + min) / 2.0;
-    let s = if d == 0.0 { 0.0 } else { d / (1.0 - (2.0 * l - 1.0).abs()) };
+    let s = if d == 0.0 {
+        0.0
+    } else {
+        d / (1.0 - (2.0 * l - 1.0).abs())
+    };
     (hue(r, g, b, max, d), s, l)
 }
 

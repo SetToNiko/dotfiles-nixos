@@ -22,7 +22,9 @@ pub struct TerminalMap {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// palettes.json is formatted exactly like `jq .` output, which is what
@@ -95,7 +97,10 @@ impl Store {
             .output()
             .context("running theme-switch.sh")?;
         if !out.status.success() {
-            bail!("theme-switch.sh: {}", String::from_utf8_lossy(&out.stderr).trim());
+            bail!(
+                "theme-switch.sh: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
         }
         Ok(())
     }
@@ -105,14 +110,26 @@ impl Store {
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         let v: Value = serde_json::from_str(&text)?;
-        let s = |k: &str| v[k].as_str().map(str::to_string).ok_or_else(|| anyhow!("{k} missing"));
+        let s = |k: &str| {
+            v[k].as_str()
+                .map(str::to_string)
+                .ok_or_else(|| anyhow!("{k} missing"))
+        };
         let ansi = v["palette"]
             .as_array()
             .ok_or_else(|| anyhow!("palette missing"))?
             .iter()
-            .map(|x| x.as_str().map(str::to_string).ok_or_else(|| anyhow!("bad palette entry")))
+            .map(|x| {
+                x.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow!("bad palette entry"))
+            })
             .collect::<Result<Vec<_>>>()?;
-        Ok(TerminalMap { background: s("background")?, foreground: s("foreground")?, ansi })
+        Ok(TerminalMap {
+            background: s("background")?,
+            foreground: s("foreground")?,
+            ansi,
+        })
     }
 }
 
