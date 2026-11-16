@@ -270,7 +270,7 @@ to whatever size it gets.
 - A test renders every window size from 1×1 to 220×80 (debug build, so
   arithmetic underflow would fail it).
 
-## Phase 5: fonts tab (left pane, second tab)
+## Phase 5: fonts tab (left pane, second tab) ✅ done
 
 - `F1` / `F2` switch the left pane between **Colours** and **Fonts** (`Tab`
   already moves between the picker's controls); the
@@ -293,6 +293,25 @@ to whatever size it gets.
   warnings itself: font not installed, mono font without Nerd Font icons.
 - **Saving:** `s` saves the slots as a preset in `fonts.json`; `a` applies
   it with `font-switch.sh`.
+
+**Built as (differences from the above):**
+- **Panels:** ¹ the three roles (j/k role, h/l size, H/L by 4, Enter or `f`
+  opens the list), ² installed fonts (`/` search, `m` monospaced only,
+  Enter uses the font, Esc back). `3`/`4` switch to the Colours tab and its
+  preview windows. The sample replaces the preview while this tab is open.
+- **Browsing previews:** while the list has the keyboard, the sample shows
+  the highlighted font in the selected role, before you pick it.
+- **Sample:** rendered in the background by ImageMagick/Pango (about 35 ms)
+  at the X server's DPI (`Xft.dpi`) and this machine's sizes, so it is
+  the real size; shown with the kitty graphics protocol (half blocks if a
+  terminal doesn't answer the query). It includes Nerd Font icons, to show
+  whether a font has them.
+- **Nerd Font check:** a font counts as a Nerd Font when fontconfig says it
+  has U+F115 (an icon every Nerd Font carries).
+- **Unsaved changes:** the quit prompt covers both tabs; `s` there saves
+  whichever has a name.
+- **`theme-studio --fonts`** starts on this tab.
+- **Not yet:** mouse in this tab (keyboard only).
 
 ## Phase 6: downloading fonts
 
