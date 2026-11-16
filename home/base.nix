@@ -140,8 +140,19 @@ in
   home.activation.defaultTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     theme="$(cat "$HOME/.config/colors/current" 2>/dev/null || true)"
     for name in "$theme" "Gruvbox Dark"; do
-      if [ -n "$name" ] && run env PATH="${pkgs.jq}/bin:$PATH" NO_RESTART=1 \
+      # ghostty: theme-switch.sh checks it for a theme matching the palette name
+      if [ -n "$name" ] && run env PATH="${pkgs.jq}/bin:${pkgs.ghostty}/bin:$PATH" NO_RESTART=1 \
         ${pkgs.bash}/bin/bash "${dotfiles}/theme-switch.sh" "$name"; then
+        break
+      fi
+    done
+  '';
+  # Same for the font preset (~/.config/fonts, from fonts.json).
+  home.activation.defaultFonts = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    preset="$(cat "$HOME/.config/fonts/current" 2>/dev/null || true)"
+    for name in "$preset" "JetBrains Mono"; do
+      if [ -n "$name" ] && run env PATH="${pkgs.jq}/bin:${pkgs.fontconfig.bin}/bin:$PATH" NO_RESTART=1 \
+        ${pkgs.bash}/bin/bash "${dotfiles}/font-switch.sh" "$name"; then
         break
       fi
     done
