@@ -154,6 +154,39 @@ in
       btw = "echo fresh nixos install btw";
       nrs = "sudo nixos-rebuild switch --flake ~/dotfiles-nixos#${host}";
     };
+    # dev <name>: enter a dev shell. Tries, in order:
+    #   1. a full flake ref (anything containing '#' or ':'), used as-is
+    #   2. devShells.<name> from this flake (devshells/<name>.nix)
+    #   3. the <name> template from github:the-nix-way/dev-templates
+    initExtra = ''
+      dev() {
+        local shells
+        shells="$(ls ~/dotfiles-nixos/devshells | sed 's/\.nix$//')"
+        case "$1" in
+          -h | --help)
+            echo "usage: dev [devshell|template|flake-ref]"
+            echo "  no argument: pick a local devshell from a menu"
+            echo "local devshells: $(echo $shells)"
+            return 0
+            ;;
+        esac
+        if [ $# -eq 0 ]; then
+          local pick
+          pick="$(printf '%s\n' "$shells" | fzf --prompt='devshell> ' --height=40% --reverse)" || return 1
+          set -- "$pick"
+        fi
+        case "$1" in
+          *'#'* | *:*) nix develop "$1" ;;
+          *)
+            if [ -f ~/dotfiles-nixos/devshells/"$1".nix ]; then
+              nix develop ~/dotfiles-nixos#"$1"
+            else
+              nix develop "github:the-nix-way/dev-templates?dir=$1"
+            fi
+            ;;
+        esac
+      }
+    '';
   };
 
   # this function maps the create_symlink function to all of our configurable programs in the list

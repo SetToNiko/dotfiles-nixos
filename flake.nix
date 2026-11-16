@@ -52,10 +52,14 @@
 
       # One dev shell per file in devshells/: devshells/<name>.nix becomes
       # devShells.<name>, used from a project with `use flake ~/dotfiles-nixos#<name>`.
+      # The shell's name is set to <name> so the prompt (starship nix_shell) shows it.
       devShells.${system} = nixpkgs.lib.mapAttrs' (
         file: _:
-        nixpkgs.lib.nameValuePair (nixpkgs.lib.removeSuffix ".nix" file) (
-          import ./devshells/${file} { inherit pkgs; }
+        let
+          name = nixpkgs.lib.removeSuffix ".nix" file;
+        in
+        nixpkgs.lib.nameValuePair name (
+          (import ./devshells/${file} { inherit pkgs; }).overrideAttrs { inherit name; }
         )
       ) (builtins.readDir ./devshells);
     };
