@@ -107,10 +107,10 @@ in
     enable = true;
     nix-direnv.enable = true;
   };
-  # programs.starship = {
-  #   enable = true;
-  #   enableBashIntegration = true;
-  # };
+  programs.starship = {
+    enable = true;
+    enableBashIntegration = true;
+  };
 
   # New random wallpaper every 2 minutes (the first one is set by i3 at login).
   # Images come from ~/dotfiles-nixos/wallpaper.
@@ -193,7 +193,11 @@ in
   xdg.configFile = builtins.mapAttrs (name: subpath: {
     source = create_symlink "${dotfiles}/${subpath}";
     recursive = true;
-  }) configs;
+  }) configs // {
+    # Starship reads ~/.config/starship.toml; link it to the live file in
+    # configs/ so prompt edits apply on the next prompt without a rebuild.
+    "starship.toml".source = create_symlink "${dotfiles}/starship/starship.toml";
+  };
 
   xdg.mimeApps = {
     enable = true;
