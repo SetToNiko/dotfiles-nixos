@@ -217,9 +217,29 @@ A small desktop drawn in terminal cells. i3's 2-pixel borders become
   (bluetooth battery tint and so on) are kept.
 - **rofi overlay:** `R` shows a centred mock of the palette menu (swatch
   rows, the selected row, the red delete message) using the rasi colour roles.
-- **Size:** each window in the preview needs about 40×12 cells, so the
-  studio wants roughly a 160×40 terminal and shows a message when it's
-  smaller.
+- **Size and resizing:** the layout already follows the window as it's
+  resized (see "Resizing" below). The preview desktop has to do the same:
+  every layout change resizes the embedded terminals (nvim, terminal, yazi)
+  through their PTYs, so they reflow like a real window would. The two
+  preview windows sit side by side when the preview is wide enough and
+  stack when it isn't; below about 40×12 cells each, the preview raises
+  the minimum size the "too small" message asks for.
+
+## Resizing ✅ done (added after Phase 3)
+
+Works like btop: the window is resized by i3 (with the mouse:
+`$mod` + right-drag, or by dragging the border), and the studio reflows
+to whatever size it gets.
+
+- **Side by side** (editor 52 columns, preview the rest) when the window
+  is at least 112 columns wide.
+- **Stacked** below that: editor on top (key list, then the picker), the
+  preview underneath with 40% of the height.
+- **Too small:** below 112×23 side by side, or 52×35 stacked, the window
+  shows the current and needed width and height, with the short side in
+  red, and redraws as soon as it fits again.
+- A test renders every window size from 1×1 to 220×80 (debug build, so
+  arithmetic underflow would fail it).
 
 ## Phase 5: fonts tab (left pane, second tab)
 
