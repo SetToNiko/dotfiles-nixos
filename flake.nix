@@ -50,6 +50,9 @@
         desktop = mkHost "desktop";
       };
 
+      # Programs in pkgs/, e.g. `nix run ~/dotfiles-nixos#theme-studio`.
+      packages.${system}.theme-studio = pkgs.callPackage ./pkgs/theme-studio { };
+
       # One dev shell per file in devshells/: devshells/<name>.nix becomes
       # devShells.<name>, used from a project with `use flake ~/dotfiles-nixos#<name>`.
       # The shell's name is set to <name> so the prompt (starship nix_shell) shows it.

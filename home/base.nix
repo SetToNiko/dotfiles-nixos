@@ -261,6 +261,7 @@ in
     asciiPower
     asciiBoot
     xss-lock
+    (callPackage ../pkgs/theme-studio { }) # $mod+Ctrl+t
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
