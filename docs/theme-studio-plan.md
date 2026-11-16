@@ -329,6 +329,10 @@ to whatever size it gets.
   it at 96% × 92% of the monitor (a fixed 1920×1080 hung off your portrait
   monitor) with the 1-pixel border your other Ghostty windows have.
 - `?` help overlay ✅ (done early).
+- **Numbered panels** ✅ (added after Phase 4): btop-style superscript
+  numbers in the titles, ¹ key list, ² colour picker, ³ nvim, ⁴ shell/yazi;
+  the number keys jump there (3 and 4 give that window the keyboard, F12
+  hands it back). The Phase 5 fonts tab continues the numbering.
 - A status line shows unsaved changes, the active palette and font preset,
   and warnings (missing Nerd Font, terminal too small, low contrast).
 - README section and comments in the same style as the existing scripts.
