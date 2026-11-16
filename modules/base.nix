@@ -82,7 +82,7 @@
       autoRepeatDelay = 200; # delay before autorepeat starts ms.
       autoRepeatInterval = 35; # autorepeat keypress/s.
       windowManager.i3.enable = true; # set window manager to i3.
-      dpi = 144;
+      # dpi is set per host (hosts/<host>/default.nix)
     };
     pipewire = {
       # enable sound

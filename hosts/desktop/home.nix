@@ -3,6 +3,9 @@
 { ... }:
 
 {
+  # Match the X server DPI (hosts/desktop/default.nix) for Xft/GTK/i3 text
+  xresources.properties."Xft.dpi" = 96;
+
   # Dual monitor layout. Loaded at i3 startup by configs/hosts/desktop/i3.conf
   # (`autorandr --load docked`).
   programs.autorandr = {

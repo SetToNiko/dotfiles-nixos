@@ -17,6 +17,9 @@
   # to draw on from the start
   boot.initrd.kernelModules = [ "i915" ];
 
+  # HiDPI panel: 1.5x X DPI
+  services.xserver.dpi = 144;
+
   # HiDPI panel: scale Java (android-studio, etc.) UIs up
   environment.sessionVariables._JAVA_OPTIONS = "-Dsun.java2d.uiScale=2";
 }
