@@ -33,6 +33,25 @@
   nixpkgs.config.allowUnfree = true; # allows the use of proprietary packages. required for nvidia and android-studio
   nixpkgs.config.android_sdk.accept_license = true; # can't develop for android without it
 
+  nixpkgs.overlays = [
+    # Vial's AppImage sandbox is missing libgpg-error, so its Qt xcb plugin
+    # fails to load and the app exits silently. Add it to the FHS env.
+    (final: prev: {
+      vial = prev.vial.override {
+        appimageTools = prev.appimageTools // {
+          wrapType2 =
+            args:
+            prev.appimageTools.wrapType2 (
+              args
+              // {
+                extraPkgs = p: (args.extraPkgs or (_: [ ])) p ++ [ p.libgpg-error ];
+              }
+            );
+        };
+      };
+    })
+  ];
+
   hardware = {
     bluetooth = {
       enable = true;
@@ -116,6 +135,11 @@
     nix-ld = {
       enable = true; # enables linker for dynamically linked libraries
     };
+    steam = {
+      enable = true;
+      remotePlay.openFirewall = true;
+      localNetworkGameTransfers.openFirewall = true;
+    };
   };
 
   environment.systemPackages = with pkgs; [
@@ -129,7 +153,10 @@
     libreoffice
     autorandr
     glib
+    vial # Vial keymap editor
   ];
+
+  services.udev.packages = [ pkgs.vial ]; # udev rule granting hidraw access to Vial keyboards
 
   services.openssh.enable = true; # Enable the OpenSSH daemon.
   programs.ssh.startAgent = true;

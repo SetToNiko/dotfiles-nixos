@@ -231,6 +231,7 @@ in
     nixd
     yaml-language-server
     tombi
+    pyright
 
     # Web Dev
     nodejs
