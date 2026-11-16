@@ -20,7 +20,7 @@ are marked 🔸; say if you want any of them changed.
 | | Choice |
 |---|---|
 | ✅ Stack | Rust + ratatui (crossterm backend) |
-| ✅ Font roles | Two roles: **mono** (terminal, nvim, lock screen) and **ui** (i3 titles and bar, rofi, GTK) |
+| ✅ Font roles | Three roles: **mono** (terminal, nvim, lock screen), **ui** (rofi, GTK) and **bar** (i3 titles and bar; added after Phase 4, falls back to ui) |
 | ✅ Font install | Into `~/.local/share/fonts/theme-studio/` straight away, and recorded in a list that Nix installs on the next rebuild |
 | ✅ Font preview | Sample text rendered to an image (ImageMagick + Pango) and shown inline using the kitty graphics protocol |
 | ✅ Palette keys | All 34 keys can be edited. Derived keys follow their base colours until you edit one by hand, which **pins** it |
@@ -76,7 +76,8 @@ configs/font-switch.sh        <name> | no argument for a rofi picker
 {
   "JetBrains + Inter": {
     "mono": { "family": "JetBrainsMono Nerd Font", "size": 11 },
-    "ui":   { "family": "Inter", "size": 10 }
+    "ui":   { "family": "Inter", "size": 10 },
+    "bar":  { "family": "Inter", "size": 9 }
   }
 }
 ```
@@ -86,7 +87,7 @@ configs/font-switch.sh        <name> | no argument for a rofi picker
 | App | Generated file | Change needed in the existing config | When it updates |
 |---|---|---|---|
 | Ghostty | `fonts/ghostty` (`font-family`, `font-size`) | `config-file = ?~/.config/fonts/ghostty` | Immediately (SIGUSR2) |
-| i3 titles + bar (i3blocks) | `fonts/i3` (`font pango:<ui> <size>`) | `include ~/.config/fonts/i3`; remove the `font` line from `hosts/*/i3.conf` | Immediately (`i3-msg restart`) |
+| i3 titles + bar (i3blocks) | `fonts/i3` (`font pango:<bar> <size>`) | `include ~/.config/fonts/i3`; remove the `font` line from `hosts/*/i3.conf` | Immediately (`i3-msg restart`) |
 | rofi | `fonts/rofi.rasi` (`* { font: "<ui> <size>"; }`) | `@import` in `rofi/config.rasi` | Next time rofi opens |
 | Lock screen | `fonts/lock.sh` (`XSECURELOCK_FONT=<mono>:size=N`) | `lock-screen.sh` sources it instead of hard-coding GeistMono | Next lock |
 | GTK 3/4 (blueman, Firefox UI, …) | `gtk-3.0/settings.ini`, `gtk-4.0/settings.ini` (`gtk-font-name`) | none; home-manager doesn't manage GTK yet | When each app is restarted |
@@ -99,7 +100,7 @@ splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
 
 - 🔸 **Per-host sizes.** At the moment the bar font is 9 on the desktop and 12
   on the laptop. Sizes in `fonts.json` would be the base, and an optional
-  `configs/hosts/<host>/fonts.json` (`{ "mono": +0, "ui": +3 }`) adjusts them
+  `configs/hosts/<host>/fonts.json` (`{ "mono": 0, "ui": 3, "bar": 3 }`) adjusts them
   per machine.
 - 🔸 **Shortcut:** `$mod+Shift+t` opens the font picker (`$mod+t` stays the
   palette picker). Each row shows the preset name followed by its families
@@ -274,10 +275,11 @@ to whatever size it gets.
 - `F1` / `F2` switch the left pane between **Colours** and **Fonts** (`Tab`
   already moves between the picker's controls); the
   preview stays visible.
-- There are two slots, **mono** and **ui**, each with a family and size.
-  Changing either updates a rendered sample image above the list: code in
-  the mono font; an i3 title, bar text and rofi rows in the ui font; drawn
-  in the current palette.
+- There are three slots, **mono**, **ui** and **bar**, each with a family
+  and size (bar can also be left to follow ui). Changing one updates a
+  rendered sample image above the list: code in the mono font, rofi rows
+  in the ui font, an i3 title and bar text in the bar font, drawn in the
+  current palette.
 - **Sizes per machine:** each slot shows the base size saved in
   `fonts.json` and the size actually used on this host after the
   `hosts/<host>/fonts.json` offset (e.g. `14 → 17 on laptop`). Sample images
@@ -291,10 +293,6 @@ to whatever size it gets.
   warnings itself: font not installed, mono font without Nerd Font icons.
 - **Saving:** `s` saves the slots as a preset in `fonts.json`; `a` applies
   it with `font-switch.sh`.
-- **Possible third slot:** the ui font currently covers the bar, rofi and
-  GTK at one size (now 14). If one size doesn't suit all three, a separate
-  **bar** role goes into `fonts.json` / `font-switch.sh`, and this tab gets a
-  third slot.
 
 ## Phase 6: downloading fonts
 
