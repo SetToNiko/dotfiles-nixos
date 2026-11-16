@@ -149,6 +149,7 @@
     git
     lazygit
     bat
+    doxx # terminal .docx viewer
     ghostty
     unzip
     libreoffice
