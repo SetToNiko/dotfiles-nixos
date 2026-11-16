@@ -13,36 +13,90 @@ use crate::app::{App, Focus, Overlay, open_matches};
 use crate::color::{self, Rgb};
 use crate::palette::{self, GROUPS, TEXT_KEYS};
 
-const LEFT_WIDTH: u16 = 52;
+/// Width of the editor column (key list and picker) when beside the preview;
+/// also the narrowest the editor can be.
+const EDITOR_W: u16 = 52;
 /// The picker is at least this tall, and grows (bigger colour square) when
-/// the window has room beyond the whole key list.
+/// the editor has room beyond the whole key list.
 const PICKER_MIN: u16 = 14;
 const PICKER_MAX: u16 = 30;
 /// Rows the key list needs to show every key: 34 keys, 5 headers, 4 gaps, borders.
 const LIST_FULL: u16 = 34 + 5 + 4 + 2;
-const MIN_W: u16 = 90;
-const MIN_H: u16 = 30;
+/// Smallest useful key list (it scrolls) and preview.
+const LIST_MIN: u16 = 8;
+const PREVIEW_MIN_W: u16 = 60;
+const PREVIEW_MIN_H: u16 = 12;
+/// Share of the height the preview gets when stacked under the editor.
+const STACKED_PREVIEW_SHARE: f64 = 0.4;
+
+/// Where everything goes for a window size. Like btop, the layout follows
+/// the window as it's resized: editor and preview side by side when both
+/// fit, stacked (editor on top) when the window is too narrow, and a "too
+/// small" message with the needed size below the minimum.
+#[derive(Debug, PartialEq)]
+pub enum Arrangement {
+    Panels { list: Rect, picker: Rect, preview: Rect, status: Rect, stacked: bool },
+    TooSmall { need_w: u16, need_h: u16 },
+}
+
+pub fn arrange(area: Rect) -> Arrangement {
+    let side_by_side = area.width >= EDITOR_W + PREVIEW_MIN_W;
+    let (need_w, need_h) = if side_by_side {
+        (EDITOR_W + PREVIEW_MIN_W, LIST_MIN + PICKER_MIN + 1)
+    } else {
+        (EDITOR_W, LIST_MIN + PICKER_MIN + PREVIEW_MIN_H + 1)
+    };
+    if area.width < need_w || area.height < need_h {
+        return Arrangement::TooSmall { need_w, need_h };
+    }
+    let [main, status] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
+    let (editor, preview) = if side_by_side {
+        let [e, p] = Layout::horizontal([Constraint::Length(EDITOR_W), Constraint::Min(0)]).areas(main);
+        (e, p)
+    } else {
+        let most = main.height - LIST_MIN - PICKER_MIN;
+        let preview_h = ((main.height as f64 * STACKED_PREVIEW_SHARE) as u16).clamp(PREVIEW_MIN_H, most);
+        let [e, p] = Layout::vertical([Constraint::Min(0), Constraint::Length(preview_h)]).areas(main);
+        (e, p)
+    };
+    let picker_h = editor.height.saturating_sub(LIST_FULL).clamp(PICKER_MIN, PICKER_MAX);
+    let picker_h = picker_h.min(editor.height - LIST_MIN);
+    let [list, picker] = Layout::vertical([Constraint::Min(0), Constraint::Length(picker_h)]).areas(editor);
+    Arrangement::Panels { list, picker, preview, status, stacked: !side_by_side }
+}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    if area.width < MIN_W || area.height < MIN_H {
-        let msg = format!(
-            "Theme Studio needs at least {MIN_W}×{MIN_H}; this window is {}×{}.",
-            area.width, area.height
-        );
-        f.render_widget(Paragraph::new(msg).yellow(), area);
-        return;
+    match arrange(area) {
+        Arrangement::TooSmall { need_w, need_h } => draw_too_small(f, area, need_w, need_h),
+        Arrangement::Panels { list, picker, preview, status, .. } => {
+            draw_list(f, app, list);
+            draw_picker(f, app, picker);
+            draw_preview(f, app, preview);
+            draw_status(f, app, status);
+            draw_overlay(f, app, area);
+        }
     }
-    let [main, status] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
-    let [left, right] = Layout::horizontal([Constraint::Length(LEFT_WIDTH), Constraint::Min(0)]).areas(main);
-    let picker_h = left.height.saturating_sub(LIST_FULL).clamp(PICKER_MIN, PICKER_MAX);
-    let [list, picker] = Layout::vertical([Constraint::Min(0), Constraint::Length(picker_h)]).areas(left);
+}
 
-    draw_list(f, app, list);
-    draw_picker(f, app, picker);
-    draw_preview(f, app, right);
-    draw_status(f, app, status);
-    draw_overlay(f, app, area);
+/// btop-style: the current size (red where it falls short) and what's needed.
+fn draw_too_small(f: &mut Frame, area: Rect, need_w: u16, need_h: u16) {
+    let ok = |have: u16, need: u16| if have >= need { Style::new().green() } else { Style::new().red().bold() };
+    let lines = vec![
+        Line::styled("Window too small", Style::new().bold()),
+        Line::from(vec![
+            "Width = ".into(),
+            Span::styled(area.width.to_string(), ok(area.width, need_w)),
+            "  Height = ".into(),
+            Span::styled(area.height.to_string(), ok(area.height, need_h)),
+        ]),
+        Line::raw(""),
+        Line::styled("Needed:", Style::new().bold()),
+        Line::raw(format!("Width = {need_w}  Height = {need_h}")),
+    ];
+    let h = (lines.len() as u16).min(area.height);
+    let r = Rect { x: area.x, y: area.y + (area.height - h) / 2, width: area.width, height: h };
+    f.render_widget(Paragraph::new(lines).centered(), r);
 }
 
 fn focused_block(title: Line<'static>, focused: bool) -> Block<'static> {

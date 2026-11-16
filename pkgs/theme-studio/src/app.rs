@@ -923,11 +923,59 @@ mod tests {
         assert!(fg_row.contains(":1"), "contrast cut off: {fg_row}");
         press(&mut app, "o?");
         let small = render(&mut app, 80, 20);
-        assert!(small.contains("needs at least"));
+        assert!(small.contains("Window too small"));
+        assert!(small.contains("Width = 80  Height = 20"));
+        assert!(small.contains("Width = 52  Height = 35"), "{small}");
         // every pop-up draws without panicking
         for keys in ["\x1b?", "\x1bS", "\x1b\x1bc", "\x1b"] {
             press(&mut app, keys);
             render(&mut app, 160, 45);
+        }
+    }
+
+    #[test]
+    fn layout_goes_side_by_side_then_stacked_then_too_small() {
+        use crate::ui::{Arrangement, arrange};
+        let r = |w, h| Rect::new(0, 0, w, h);
+        match arrange(r(160, 45)) {
+            Arrangement::Panels { list, preview, stacked, .. } => {
+                assert!(!stacked);
+                assert_eq!(list.width, 52);
+                assert_eq!(preview.x, 52);
+            }
+            a => panic!("{a:?}"),
+        }
+        // too narrow for both side by side: editor on top, preview below
+        match arrange(r(100, 50)) {
+            Arrangement::Panels { list, picker, preview, stacked, .. } => {
+                assert!(stacked);
+                assert_eq!((list.width, preview.width), (100, 100));
+                assert!(list.y < picker.y && picker.y < preview.y);
+                assert!(preview.height >= 12 && list.height >= 8);
+            }
+            a => panic!("{a:?}"),
+        }
+        assert_eq!(arrange(r(40, 50)), Arrangement::TooSmall { need_w: 52, need_h: 35 });
+        assert_eq!(arrange(r(100, 20)), Arrangement::TooSmall { need_w: 52, need_h: 35 });
+        assert_eq!(arrange(r(130, 20)), Arrangement::TooSmall { need_w: 112, need_h: 23 });
+    }
+
+    /// Dragging the window through every size never crashes the drawing
+    /// (tests build in debug mode, where integer underflow panics).
+    #[test]
+    fn every_window_size_renders() {
+        let mut app = App::new(temp_store("sizes"), Start::Named("One".into())).unwrap();
+        for w in (1..=220).step_by(3) {
+            for h in (1..=80).step_by(2) {
+                render(&mut app, w, h);
+            }
+        }
+        // and with the picker focused and the selection near the end of the list
+        press(&mut app, "G\t");
+        for w in [52, 53, 111, 112, 113] {
+            for h in [22, 23, 34, 35, 36, 60] {
+                render(&mut app, w, h);
+            }
         }
     }
 }
