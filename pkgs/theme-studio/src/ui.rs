@@ -732,25 +732,67 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             },
         ));
     } else {
-        let hints = if app.preview.focus.is_some() {
-            "keys go to the preview window (Ctrl+C too)  F12 next window / back"
+        let context: &[&str] = if app.preview.focus.is_some() {
+            &[
+                "keys go to the preview window (Ctrl+C too)",
+                "F12 next window / back",
+            ]
         } else {
             match app.focus {
-                Focus::List => "j/k move  Enter edit  p pin  c copy  # hex",
-                Focus::Square => "hjkl saturation/value (HJKL faster)  Esc list",
-                Focus::Hue => "j/k hue (J/K faster)  Esc list",
+                Focus::List => &["j/k move", "Enter edit", "p pin", "c copy", "# hex"],
+                Focus::Square => &["hjkl saturation/value", "HJKL faster", "Esc list"],
+                Focus::Hue => &["j/k hue", "J/K faster", "Esc list"],
                 Focus::SliderH | Focus::SliderS | Focus::SliderL => {
-                    "h/l adjust (H/L faster)  j/k next slider"
+                    &["h/l adjust", "H/L faster", "j/k next slider"]
                 }
-                Focus::Hex => "type #rrggbb  Enter set  Esc cancel",
+                Focus::Hex => &["type #rrggbb", "Enter set", "Esc cancel"],
             }
         };
+        let used: usize = spans.iter().map(|s| s.width()).sum();
+        let room = (area.width as usize).saturating_sub(used);
         spans.push(Span::styled(
-            format!(" {hints} │ Tab next  s save  a apply  o open  ? keys "),
+            fit_hints(context, room),
             Style::new().dark_gray(),
         ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// As many hints as fit in `room` columns: the ones for the current control
+/// first, then the general ones, and "? keys" always last (it lists the rest).
+fn fit_hints(context: &[&str], room: usize) -> String {
+    const GENERAL: [&str; 4] = ["Tab next", "s save", "a apply", "o open"];
+    const LAST: &str = "? keys";
+    let mut out = String::from(" ");
+    let budget = room.saturating_sub(LAST.len() + 3);
+    let mut general_started = false;
+    for (i, hint) in context.iter().chain(GENERAL.iter()).enumerate() {
+        let sep = if i == 0 {
+            ""
+        } else if i == context.len() && !general_started {
+            general_started = true;
+            " │ "
+        } else {
+            "  "
+        };
+        if out.chars().count() + sep.chars().count() + hint.chars().count() > budget {
+            break;
+        }
+        out.push_str(sep);
+        out.push_str(hint);
+    }
+    if out.trim().is_empty() {
+        out = format!(" {LAST} ");
+    } else {
+        out.push_str("  ");
+        out.push_str(LAST);
+        out.push(' ');
+    }
+    if out.chars().count() > room {
+        String::new()
+    } else {
+        out
+    }
 }
 
 // ----- pop-ups ------------------------------------------------------------
@@ -920,5 +962,31 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(n - 1).collect::<String>() + "…"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_hints;
+
+    #[test]
+    fn hints_shorten_to_fit_and_keep_help_last() {
+        let ctx = ["j/k move", "Enter edit", "p pin"];
+        let wide = fit_hints(&ctx, 200);
+        assert_eq!(
+            wide,
+            " j/k move  Enter edit  p pin │ Tab next  s save  a apply  o open  ? keys "
+        );
+        let narrow = fit_hints(&ctx, 40);
+        assert!(narrow.chars().count() <= 40, "{narrow}");
+        assert!(
+            narrow.starts_with(" j/k move  Enter edit") && narrow.ends_with("? keys "),
+            "{narrow}"
+        );
+        assert_eq!(fit_hints(&ctx, 10), " ? keys ");
+        assert_eq!(fit_hints(&ctx, 5), "");
+        for room in 0..120 {
+            assert!(fit_hints(&ctx, room).chars().count() <= room);
+        }
     }
 }
