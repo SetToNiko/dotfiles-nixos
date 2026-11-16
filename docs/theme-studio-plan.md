@@ -23,7 +23,7 @@ are marked 🔸; say if you want any of them changed.
 | ✅ Font roles | Two roles: **mono** (terminal, nvim, lock screen) and **ui** (i3 titles and bar, rofi, GTK) |
 | ✅ Font install | Into `~/.local/share/fonts/theme-studio/` straight away, and recorded in a list that Nix installs on the next rebuild |
 | ✅ Font preview | Sample text rendered to an image (ImageMagick + Pango) and shown inline using the kitty graphics protocol |
-| ✅ Palette keys | All 35 keys can be edited. Derived keys follow their base colours until you edit one by hand, which **pins** it |
+| ✅ Palette keys | All 34 keys can be edited. Derived keys follow their base colours until you edit one by hand, which **pins** it |
 | ✅ Picker | HSV square, hue strip, H/S/L sliders, hex input; mouse and keyboard |
 | ✅ Font sources | Google Fonts (search via Fontsource) and Nerd Fonts releases |
 | ✅ Preview extras | Rofi menu overlay and a yazi file-browser view |
@@ -111,7 +111,7 @@ splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
   Nerd Font, so icons keep working. The studio warns when the selected mono
   font isn't a Nerd Font.
 
-## Phase 2: studio skeleton and palette engine
+## Phase 2: studio skeleton and palette engine ✅ done
 
 - Code lives in `pkgs/theme-studio/` (outer repo), built with
   `rustPlatform.buildRustPackage`, exposed as a flake package and added to
@@ -139,7 +139,7 @@ splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
   (runs `theme-switch.sh <name>`), and `q` asks before discarding unsaved
   changes. Undo/redo with `u` / `Ctrl+r`.
 
-## Phase 3: colour editor (left pane)
+## Phase 3: colour editor (left pane) ✅ done
 
 ```
 ┌ Palette: novmbr* ─────────────┐
@@ -170,8 +170,14 @@ splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
 - 🔸 **Contrast hints:** next to each foreground key, the contrast ratio
   against `bg0` (for example `4.8:1`), shown in red below 3:1. Useful for
   greys and comments.
-- 🔸 **Extras:** `y` copies the hex, `P` pastes a hex from the clipboard,
-  and `c` copies another key's colour into this one.
+- **Extras:** `y` copies the hex (OSC 52, so no clipboard tool needed),
+  pasting a hex with Ctrl+Shift+V sets the selected key (bracketed paste
+  instead of a `P` key, for the same reason), `c` copies another key's colour
+  into this one, `#` jumps to the hex box (typing replaces the colour, Esc
+  restores it).
+- **Built as:** the picker grows (bigger colour square) when the window has
+  room beyond the whole key list; otherwise the list scrolls. Tests drive the
+  editor with real key events and render it with ratatui's TestBackend.
 
 ## Phase 4: live preview (right pane)
 
@@ -217,7 +223,8 @@ A small desktop drawn in terminal cells. i3's 2-pixel borders become
 
 ## Phase 5: fonts tab (left pane, second tab)
 
-- `Tab` switches the left pane between **Colours** and **Fonts**; the
+- `F1` / `F2` switch the left pane between **Colours** and **Fonts** (`Tab`
+  already moves between the picker's controls); the
   preview stays visible.
 - There are two slots, **mono** and **ui**, each with a family and size.
   Changing either updates a rendered sample image above the list: code in
@@ -271,13 +278,11 @@ A small desktop drawn in terminal cells. i3's 2-pixel borders become
 
 ## Phase 7: polish
 
-- **Launching:** a floating i3 window. 🔸 `$mod+Ctrl+t` runs
-  `ghostty --class=floating.theme-studio -e theme-studio`, and an i3 rule
-  (`for_window [class="^floating\.theme-studio$"] floating enable, resize set
-  1920 1080, move position center`) makes it float at the same size as the
-  yazi window. The window also gets the 1-pixel border your other Ghostty
-  windows have.
-- `?` shows a help overlay with all keybindings.
+- **Launching** ✅ (done early): `$mod+Ctrl+t` runs
+  `ghostty --class=floating.theme-studio -e theme-studio`; an i3 rule floats
+  it at 96% × 92% of the monitor (a fixed 1920×1080 hung off your portrait
+  monitor) with the 1-pixel border your other Ghostty windows have.
+- `?` help overlay ✅ (done early).
 - A status line shows unsaved changes, the active palette and font preset,
   and warnings (missing Nerd Font, terminal too small, low contrast).
 - README section and comments in the same style as the existing scripts.
