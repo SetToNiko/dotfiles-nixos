@@ -760,7 +760,130 @@ line. Below, what was planned; differences are noted.
 - 🔸 **Unused fonts:** an "uninstall" action for studio-installed fonts
   removes the files and the list entry.
 
-## Phase 7: polish
+## Phase 7: themes, font picking, previews and a font tournament
+
+Asked for after Phase 6; the decisions are settled. (Polish and the README
+move to Phase 8.)
+
+### 1. Themes
+
+- **Now:** palettes and font presets are opened and saved separately; the
+  pane titles carry their names ("¹Fonts: JetBrains Mono ●",
+  "⁴Palette: One").
+- **Becomes:** a **theme** is a name plus a palette plus a font preset,
+  saved as one. It points at them by name, in `configs/themes.json`:
+  `{"version": 1, "themes": {"Work": {"palette": "Gruvbox Dark",
+  "fonts": "JetBrains Mono"}}}`. Palettes and font presets stay reusable
+  building blocks: editing one changes every theme that uses it. The
+  scripts keep reading palettes.json and fonts.json as now.
+- **In the studio:** Save, Save as, Open and New act on the theme; the dot
+  shows when either part changed. The pane titles lose the names ("¹Fonts",
+  "⁴Palette"). The theme's name and its dot sit in the page tab row:
+  " F1 Main  F2 Fonts  F3 Settings   Theme: Work ●", wherever the tabs
+  are (top or bottom).
+- **Parts stay reusable:** in the Fonts pane, Open swaps in another font
+  preset; in the Palette pane, another palette.
+- **Apply:** applies both parts (theme-switch.sh and font-switch.sh) and
+  records the active theme in `~/.config/colors/theme`.
+- **The rofi picker:** a new `themes-switch` picker on the current key
+  lists themes (palette and fonts together, with Alt+BackSpace to delete
+  as now). The palette-only picker moves to another key for quick colour
+  changes.
+- **Migration:** on first start, the active palette and font preset become a
+  theme.
+
+### 2. Picking a role's font
+
+- **Enter (or `f`) on a role** (mono, ui, bar) moves to Installed fonts with
+  that role's filter on. The filter chips can be switched off as now, to
+  pick anything.
+  - **mono:** Nerd Font Mono, falling back to Mono when the family has no
+    Nerd Font.
+  - **ui:** Propo (proportional).
+  - **bar:** Nerd Font (the bar shows icons).
+  - The filters per role are settings (Behaviour tab, Fonts pane group).
+- **The list shows which role** you're picking for.
+- **Choosing applies at once:** the font is set for the role, the theme's
+  font preset is saved (font-switch.sh reads saved presets), and it's
+  applied system-wide: Ghostty reloads and i3 restarts, as with Apply now.
+
+### 3. A whole family at once
+
+- **`F` on a family** in Installed fonts fills every role from it:
+  - **mono:** the family's Nerd Font Mono, else its monospaced face.
+  - **ui:** its Nerd Font Propo, else its proportional face, else the
+    base.
+  - **bar:** its Nerd Font, else its Nerd Font Propo, else the base.
+- **Applies at once,** like a single pick; the message says what went where
+  and what the family lacked.
+
+### 4. Previews on the Fonts (download) page
+
+- **A preview pane** next to the details: the highlighted font rendered
+  before installing it.
+- **Fetched just for the preview** into `~/.cache/theme-studio/preview/`:
+  one regular (400) file per Google / Fontsource font from Fontsource's
+  CDN (one small request), loaded automatically. Nerd Fonts only come as
+  1–50 MB archives, so they preview on request (`p`, showing the size
+  first); archives stay cached.
+- **Rendered like the sample** (Pango through ImageMagick), with a
+  fontconfig setup that includes the cache folder, so nothing is
+  installed. Colours from the theme's palette.
+- **Texts** (a key cycles them; the default fits the font):
+  - **Code** for mono and Nerd Fonts: Rust, Python, TypeScript, Go, C, Lua
+    and shell (another key cycles the language).
+  - **Icons** for Nerd Fonts: a prompt line, a file tree with devicons, git
+    status, a status bar.
+  - **Prose** for sans, serif, display and handwriting: chapter 1 of
+    *Frankenstein* (Project Gutenberg, public domain), with paging.
+  - **README** for any font: a Markdown-style document (headings, lists, a
+    code block, a table).
+- **Size:** `+` / `-` change the preview size.
+
+### 5. Font tournament (after codingfont.com)
+
+- **How codingfont.com does it:** 28 Google coding fonts, shuffled into a
+  single-elimination bracket (an odd one out gets a bye). Each match shows
+  the same code twice, names hidden unless "Show name" is on; you click
+  the one you prefer; there are theme, size and ligature options; the
+  winner gets a certificate. There's no ranking beyond the winner.
+- **Here:** a fourth tab on the Fonts page, **Tournament**, next to
+  Google Fonts, Nerd Fonts and Installed.
+- **The pool:** you pick a category, and every font in it takes part:
+  Google's monospace, sans-serif, serif, display or handwriting, Nerd
+  Fonts, or installed fonts (monospaced or proportional).
+- **Before it starts:** a warning with what it takes. The number of fonts,
+  the picks it will need (one fewer than the fonts), and the preview
+  download (estimated for Google fonts at ~100 KB each; the real sizes for
+  Nerd Font archives, which add up to over a gigabyte for all 72; nothing
+  for installed fonts). It starts only once you confirm. Then the preview
+  files are fetched (with progress), so matches render instantly; ones
+  already cached aren't fetched again.
+- **A match:** two previews side by side (stacked when narrow), the same
+  text and size; names hidden until you pick (a key shows them). The text
+  fits the category (code in a language you pick for monospace and Nerd
+  Fonts, the *Frankenstein* passage otherwise) and can be switched during
+  the tournament. Pick with
+  ←/→ (h/l) or a click; `u` takes the last pick back. A status line shows
+  the round, the match and how many fonts are left.
+- **The bracket:** `b` shows the rounds so far and who won each match.
+- **The end:** the top 10, grouped by the round they reached: 1st, 2nd,
+  the semi-finalists, the quarter-finalists, and two of the round-of-16
+  losers chosen at random (labelled as groups, since a bracket doesn't
+  order them). Each is listed with its preview; for each: install it (if
+  needed), use it for mono, ui or bar, or fill every role from its family.
+- **Results are kept** in `~/.local/state/theme-studio/tournaments/`, so a
+  past result can be reopened.
+
+### 6. Order of work
+
+1. Themes: the data, migration, the studio's titles and Save / Open, the
+   scripts and rofi.
+2. Role picking with filters and applying at once; filling from a family.
+3. Preview fetching and rendering, the texts, the preview pane.
+4. The tournament.
+
+## Phase 8: polish
 
 - **Launching** ✅ (done early): `$mod+Ctrl+t` runs
   `ghostty --class=floating.theme-studio -e theme-studio`; an i3 rule floats
