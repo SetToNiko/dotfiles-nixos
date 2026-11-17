@@ -85,7 +85,7 @@ pub fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
         .areas(inner);
         (t, b)
     };
-    let tabs_focused = app.settings_page.tabs_focused;
+    let tabs_focused = app.settings_page.tabs_focused && !app.page_tabs_focused;
     // tab strip
     let mut x = tabs.x + 1;
     for (i, (tab, name)) in TABS.iter().enumerate() {
@@ -356,7 +356,7 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
     app.settings_page.bh_scroll = scroll;
     // the looks as edited (this is drawn with the draft in place)
     let looks = app.looks(&app.settings);
-    let focused = !app.settings_page.tabs_focused;
+    let focused = !app.settings_page.tabs_focused && !app.page_tabs_focused;
     for (i, row) in rows
         .iter()
         .enumerate()

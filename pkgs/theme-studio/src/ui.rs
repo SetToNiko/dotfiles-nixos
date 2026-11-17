@@ -392,10 +392,12 @@ fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) -> u16 {
             width: w,
             height: 1,
         };
-        let mut style = if app.page == page {
-            Style::new().reversed().bold()
-        } else {
-            Style::new().dark_gray()
+        // with the keyboard on the tabs, the current one is yellow (like a
+        // page's own tabs)
+        let mut style = match (app.page == page, app.page_tabs_focused) {
+            (true, true) => Style::new().black().on_yellow().bold(),
+            (true, false) => Style::new().reversed().bold(),
+            _ => Style::new().dark_gray(),
         };
         if app.hits.add(r, Target::PageTab(page)) {
             style = hover(style);
@@ -527,50 +529,32 @@ fn swatch(c: Rgb, width: usize) -> Span<'static> {
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     app.palette_pane = Some(area);
-    // "⁴Palette: CRT Amber ▾": the name opens the palette list
-    let number = panel_number(4);
-    let head_w = number.width() as u16 + "Palette: ".len() as u16;
-    let menu = format!("{} ▾", app.name);
-    let menu_rect = Rect {
-        x: area.x + 1 + head_w,
-        y: area.y,
-        width: (menu.chars().count() as u16).min(area.width.saturating_sub(2 + head_w)),
-        height: 1,
-    };
-    let over_menu = app.hits.over(menu_rect);
+    // the title names the palette; the dropdown is the pane's first row
     let dot = if app.dirty() {
         Span::styled(" ●", Style::new().yellow())
     } else {
         "".into()
     };
     let title = Line::from(vec![
-        number,
+        panel_number(4),
         "Palette: ".into(),
-        menu.clone().into(),
-        dot.clone(),
+        app.name.clone().into(),
+        dot,
         " ".into(),
     ]);
-    // the title focuses the pane (and lights up) except over the name,
-    // which lights up alone
-    let mut title = if over_menu {
-        let r = Rect {
-            width: (title.width() as u16).min(area.width.saturating_sub(2)),
-            x: area.x + 1,
-            ..menu_rect
-        };
-        app.hits.add(r, Target::PaneTitle(4));
-        title
-    } else {
-        pane_title(app, area, title, 4)
-    };
-    if app.hits.add(menu_rect, Target::PaletteMenu) {
-        title.spans[2] = Span::styled(menu, hover(Style::new()));
-    }
-    let focused =
-        app.side == Side::Colours && app.focus == Focus::List && app.preview.focus.is_none();
+    let title = pane_title(app, area, title, 4);
+    let focused = app.side == Side::Colours
+        && app.focus == Focus::List
+        && app.preview.focus.is_none()
+        && !app.page_tabs_focused;
     let block = focused_block(app, area, title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    let [menu_row, inner] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    draw_palette_menu(f, app, menu_row, focused && app.palette_menu_focused);
+    // the colour rows have the cursor unless the dropdown row does
+    let focused = focused && !app.palette_menu_focused;
 
     let bg0 = app.palette.get("bg0");
     let copy_target = match app.overlay {
@@ -704,6 +688,30 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
     f.render_widget(Paragraph::new(shown), inner);
+}
+
+/// The Palette pane's dropdown row: " CRT Amber ▾ " and the palette's base
+/// colours. Enter (with the keyboard on it) or a click opens the list.
+fn draw_palette_menu(f: &mut Frame, app: &mut App, area: Rect, cursor: bool) {
+    let text = format!(" {} ▾ ", app.name);
+    let w = (text.chars().count() as u16).min(area.width);
+    let hit = Rect { width: w, ..area };
+    let base = Style::new().yellow().bold();
+    let mut spans = if cursor {
+        crate::hit::cursor_spans(text, base, Style::new().reversed())
+    } else {
+        vec![Span::styled(text, base)]
+    };
+    if app.hits.add(hit, Target::PaletteMenu) && !cursor {
+        spans = vec![Span::styled(spans[0].content.to_string(), hover(base))];
+    }
+    spans.push(" ".into());
+    for k in [
+        "bg0", "fg0", "red", "orange", "yellow", "green", "aqua", "blue", "purple",
+    ] {
+        spans.push(swatch(app.palette.get(k), 2));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 // ----- picker -------------------------------------------------------------
@@ -1321,6 +1329,24 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("{} reset", k(A::ResetSizes)),
                 format!("{} done", k(A::Back)),
             ]
+        } else if app.page_tabs_focused {
+            let back = if app.settings.layout.tabs_on_top() {
+                A::Down
+            } else {
+                A::Up
+            };
+            [
+                hint(&[A::Left, A::Right], "pages"),
+                hint(&[back], "back to the page"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        } else if app.page == Page::Main && app.palette_menu_focused && app.side == Side::Colours {
+            [hint(&[A::Confirm], "palettes"), hint(&[A::Down], "colours")]
+                .into_iter()
+                .flatten()
+                .collect()
         } else if app.page == Page::Downloads && app.dl.searching {
             vec!["type to search".into(), "Enter/Esc done".into()]
         } else if app.page == Page::Downloads {
@@ -1942,17 +1968,17 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             sel,
             entries,
         } => {
-            // the palette list hangs from the Palette pane's title; the
+            // the palette list hangs under the Palette pane's dropdown row; the
             // other lists (and this one on other pages) are centred
             let hanging = match app.palette_pane {
                 Some(p) if app.overlay_for == crate::app::For::Palette => {
                     let w = 70.min(area.width);
                     let h = (entries.len() as u16 + 4)
                         .min(30)
-                        .min(area.bottom().saturating_sub(p.y + 1));
+                        .min(area.bottom().saturating_sub(p.y + 2));
                     Some(Rect {
                         x: p.x.min(area.right().saturating_sub(w)),
-                        y: p.y + 1,
+                        y: p.y + 2,
                         width: w,
                         height: h,
                     })

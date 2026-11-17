@@ -204,6 +204,10 @@ pub struct App {
     pub hints_visible: bool,
     pub main_preview_visible: bool,
     pub fonts_preview_visible: bool,
+    /// The keyboard is on the Palette pane's dropdown row, or on the page
+    /// tabs (F1 / F2 / F3).
+    pub palette_menu_focused: bool,
+    pub page_tabs_focused: bool,
     /// Cursor in the colour list (group and colour rows); `sel` is the colour.
     pub row_sel: usize,
     /// Open colour groups (indexes into GROUPS).
@@ -311,6 +315,8 @@ impl App {
             hints_visible: config.settings.layout.key_hints != "hidden",
             main_preview_visible: config.settings.layout.main_preview != "hidden",
             fonts_preview_visible: config.settings.layout.fonts_preview != "hidden",
+            palette_menu_focused: false,
+            page_tabs_focused: false,
             row_sel: 0,
             edit_session: None,
             wide: true,
@@ -950,6 +956,41 @@ impl App {
     /// list, ³ font sample, ⁴ colour list, ⁵ colour picker, ⁶ nvim, ⁷ shell
     /// (or yazi). 6 and 7 give that preview window the keyboard; F12 hands it
     /// back. A hidden picker or sample is shown.
+    /// Moving off the top (`up`) or bottom of the page: the keyboard goes to
+    /// the page tabs if they're that way (settings: layout.tabs). True if so.
+    pub fn focus_page_tabs(&mut self, up: bool) -> bool {
+        if up == self.settings.layout.tabs_on_top() {
+            self.page_tabs_focused = true;
+        }
+        self.page_tabs_focused
+    }
+
+    /// Keys with the keyboard on the page tabs: left / right change pages
+    /// (the keyboard stays on the tabs); back towards the page, Enter or Esc
+    /// return to it. True if handled here.
+    fn page_tabs_action(&mut self, a: Action) -> bool {
+        const PAGES: [Page; 3] = [Page::Main, Page::Downloads, Page::Settings];
+        let top = self.settings.layout.tabs_on_top();
+        let i = PAGES.iter().position(|p| *p == self.page).unwrap_or(0);
+        match a {
+            Action::Left | Action::TabPrev => self.page = PAGES[(i + 2) % 3],
+            Action::Right | Action::TabNext => self.page = PAGES[(i + 1) % 3],
+            Action::Down if top => self.page_tabs_focused = false,
+            Action::Up if !top => self.page_tabs_focused = false,
+            Action::Confirm | Action::Back => self.page_tabs_focused = false,
+            // page keys, quitting and help work as anywhere
+            Action::Quit
+            | Action::Help
+            | Action::PageMain
+            | Action::PageDownloads
+            | Action::PageSettings
+            | Action::ToggleHints
+            | Action::TogglePreview => return false,
+            _ => {}
+        }
+        true
+    }
+
     pub fn focus_pane(&mut self, n: u8) {
         use crate::fonts::FontFocus;
         self.page = Page::Main;
@@ -1271,6 +1312,34 @@ impl App {
     fn list_action(&mut self, a: Action) {
         let rows = self.colour_rows();
         let last = rows.len() as i32 - 1;
+        let copying = matches!(self.overlay, Overlay::CopyFrom { .. });
+        if self.palette_menu_focused && !copying {
+            match a {
+                Action::Down | Action::Back => self.palette_menu_focused = false,
+                Action::Confirm | Action::Right => self.open_overlay(),
+                Action::Up => {
+                    self.focus_page_tabs(true);
+                }
+                _ => {}
+            }
+            return;
+        }
+        if !copying {
+            match a {
+                Action::Up if self.row_sel == 0 => {
+                    self.palette_menu_focused = true;
+                    return;
+                }
+                Action::Down
+                    if self.row_sel as i32 >= last
+                        && !self.picker_visible
+                        && self.focus_page_tabs(false) =>
+                {
+                    return;
+                }
+                _ => {}
+            }
+        }
         match (a, rows.get(self.row_sel).copied()) {
             (Action::Up, _) => self.move_row(-1),
             (Action::Down, _) => self.move_row(1),
@@ -1401,6 +1470,9 @@ impl App {
         if a == Action::UndoConfig {
             return self.undo_config();
         }
+        if self.page_tabs_focused && self.page_tabs_action(a) {
+            return;
+        }
         let fonts = self.side == Side::Fonts;
         let page_action = matches!(
             a,
@@ -1509,6 +1581,19 @@ impl App {
                     Err(e) => self.info(e),
                 }
             }
+            // the top of the roles, the bottom of the font list (without the
+            // sample under it): on to the page tabs, when they're that way
+            Action::Up
+                if fonts
+                    && self.fonts.focus == FontFocus::Slots
+                    && self.fonts.slot == 0
+                    && self.focus_page_tabs(true) => {}
+            Action::Down
+                if fonts
+                    && self.fonts.focus == FontFocus::List
+                    && !(self.sample_visible && self.wide)
+                    && self.fonts.list_sel + 1 >= self.fonts.rows().len()
+                    && self.focus_page_tabs(false) => {}
             _ if fonts => {
                 let role = self.fonts.slot;
                 self.fonts.act(a);
@@ -2018,6 +2103,7 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 // a click outside a preview window gives the keyboard back
+                self.page_tabs_focused = false;
                 if !matches!(target, Some((_, T::Preview(_)))) {
                     self.preview.focus = None;
                 }
@@ -2072,6 +2158,7 @@ impl App {
                 self.preview.focus = Some(id);
             }
             T::ColourRow(row) => {
+                self.palette_menu_focused = false;
                 let copying = matches!(self.overlay, Overlay::CopyFrom { .. });
                 let again =
                     row == self.row_sel && self.focus == Focus::List && self.side == Side::Colours;
@@ -2189,7 +2276,11 @@ impl App {
             | T::SettingsDiff
             | T::PresetRow(_) => self.settings_click(t),
             T::ThemeName => self.theme_open_overlay(),
-            T::PaletteMenu => self.open_overlay(),
+            T::PaletteMenu => {
+                self.focus_pane(4);
+                self.palette_menu_focused = true;
+                self.open_overlay();
+            }
             T::DlTab(_) | T::DlRow(_) | T::DlChip(_) | T::DlSearch | T::DlButton(_) => {
                 self.dl_click(t)
             }
@@ -4111,27 +4202,28 @@ mod tests {
     }
 
     #[test]
-    fn palette_list_hangs_from_the_title_and_previews() {
+    fn palette_list_hangs_from_its_row_and_previews() {
         use crate::hit::Target as T;
         let store = temp_store("palette-menu");
         let dir = store.dir.clone();
         let mut app = test_app(store, Start::Named("One".into()));
         let one_red = app.palette.get("red");
         let down = |app: &mut App| app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        // the name is in the title, as a dropdown
-        assert!(render(&mut app, 160, 45).contains("Palette: One ▾"));
-        // a click on it opens the list, hanging from the pane
+        // the title names it; the dropdown is the pane's first row
+        let s = render(&mut app, 160, 45);
+        assert!(s.contains("Palette: One ") && s.contains(" One ▾ "), "{s}");
+        // a click on the row opens the list, hanging under it
         click_on(&mut app, T::PaletteMenu);
         assert!(matches!(app.overlay, Overlay::Open { .. }));
         render(&mut app, 160, 45);
         let pane = app.palette_pane.unwrap();
-        assert_eq!(app.hits.rect_of(T::OverlayRow(0)).unwrap().y, pane.y + 4);
+        assert_eq!(app.hits.rect_of(T::OverlayRow(0)).unwrap().y, pane.y + 5);
         // moving shows the highlighted palette; it isn't an unsaved edit
         down(&mut app);
         assert_eq!(app.palette.get("red"), Rgb(200, 0, 0));
         assert_eq!(app.name, "One");
         assert!(!app.dirty());
-        assert!(render(&mut app, 160, 45).contains("Palette: One ▾ "));
+        assert!(render(&mut app, 160, 45).contains("Palette: One "));
         // Esc puts it back
         press(&mut app, "\x1b");
         assert!(matches!(app.overlay, Overlay::None));
@@ -4321,6 +4413,58 @@ mod tests {
         assert!(reversed(&cells[start]));
         let end = start + label.chars().count();
         assert!(!reversed(&cells[end + 1]), "padding after the label");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn keyboard_reaches_the_palette_dropdown_and_the_page_tabs() {
+        let store = temp_store("nav-up");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.settings.layout.tabs = "top".into();
+        let key = |app: &mut App, c: KeyCode| app.on_key(KeyEvent::new(c, KeyModifiers::NONE));
+        app.focus_pane(4);
+        // the cursor starts on the first colour, under the Base group
+        key(&mut app, KeyCode::Up);
+        assert_eq!(app.row_sel, 0);
+        // up from the first row: the dropdown row; Enter opens the list
+        key(&mut app, KeyCode::Up);
+        assert!(app.palette_menu_focused);
+        key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.overlay, Overlay::Open { .. }));
+        key(&mut app, KeyCode::Esc);
+        assert!(app.palette_menu_focused, "back on the row");
+        // up again: the page tabs; right changes pages, the keyboard stays
+        key(&mut app, KeyCode::Up);
+        assert!(app.page_tabs_focused);
+        let s = render(&mut app, 160, 45);
+        assert!(s.contains("F1 Main"), "{s}");
+        key(&mut app, KeyCode::Right);
+        assert_eq!(app.page, Page::Downloads);
+        assert!(app.page_tabs_focused);
+        // down: into the page (its tabs are on top, so the list)
+        key(&mut app, KeyCode::Down);
+        assert!(!app.page_tabs_focused && !app.dl.tabs_focused);
+        // up: the page's tabs, then the page tabs; left back to Main
+        key(&mut app, KeyCode::Up);
+        assert!(app.dl.tabs_focused);
+        key(&mut app, KeyCode::Up);
+        assert!(app.page_tabs_focused);
+        key(&mut app, KeyCode::Left);
+        assert_eq!(app.page, Page::Main);
+        key(&mut app, KeyCode::Down);
+        assert!(!app.page_tabs_focused && app.palette_menu_focused);
+        key(&mut app, KeyCode::Down);
+        assert!(!app.palette_menu_focused && app.row_sel == 0);
+        // tabs at the bottom: up from the dropdown row goes nowhere
+        app.settings.layout.tabs = "bottom".into();
+        key(&mut app, KeyCode::Up);
+        key(&mut app, KeyCode::Up);
+        assert!(app.palette_menu_focused && !app.page_tabs_focused);
+        // a click anywhere takes the keyboard off the page tabs
+        app.page_tabs_focused = true;
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 1, 1);
+        assert!(!app.page_tabs_focused);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

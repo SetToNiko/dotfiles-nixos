@@ -190,7 +190,10 @@ fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) {
             width: w.min(area.right().saturating_sub(x)),
             height: 1,
         };
-        let mut style = match (*tab == app.dl.tab, app.dl.tabs_focused) {
+        let mut style = match (
+            *tab == app.dl.tab,
+            app.dl.tabs_focused && !app.page_tabs_focused,
+        ) {
             (true, true) => Style::new().black().on_yellow().bold(),
             (true, false) => Style::new().reversed().bold(),
             _ => Style::new().dark_gray(),
@@ -333,7 +336,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(format!(" {:<12}", kind), Style::new().dark_gray()),
             status,
         ]);
-        let on = i == sel && !app.dl.tabs_focused;
+        let on = i == sel && !app.dl.tabs_focused && !app.page_tabs_focused;
         let mut style = if on {
             Style::new().reversed()
         } else {

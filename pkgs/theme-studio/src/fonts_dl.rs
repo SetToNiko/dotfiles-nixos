@@ -345,6 +345,12 @@ impl App {
                 Action::Right | Action::TabNext => self.dl_switch(1),
                 Action::Down if top => self.dl.tabs_focused = false,
                 Action::Up if !top => self.dl.tabs_focused = false,
+                Action::Up if top => {
+                    self.focus_page_tabs(true);
+                }
+                Action::Down if !top => {
+                    self.focus_page_tabs(false);
+                }
                 Action::Confirm | Action::Back => self.dl.tabs_focused = false,
                 _ => {}
             }
@@ -360,6 +366,8 @@ impl App {
         match a {
             Action::Up if top && edge(self.dl.sel, true) => self.dl.tabs_focused = true,
             Action::Down if !top && edge(self.dl.sel, false) => self.dl.tabs_focused = true,
+            Action::Up if edge(self.dl.sel, true) && self.focus_page_tabs(true) => {}
+            Action::Down if edge(self.dl.sel, false) && self.focus_page_tabs(false) => {}
             Action::TabNext => self.dl_switch(1),
             Action::TabPrev => self.dl_switch(-1),
             Action::Left | Action::Right if self.dl.tab == DlTab::Google => {

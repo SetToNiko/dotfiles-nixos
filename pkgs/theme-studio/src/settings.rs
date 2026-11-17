@@ -491,6 +491,13 @@ impl App {
                 Action::Right | Action::TabNext => switch(&mut self.settings_page, 1),
                 Action::Down if top => self.settings_page.tabs_focused = false,
                 Action::Up if !top => self.settings_page.tabs_focused = false,
+                // on past the page's tabs to the page tabs (F1 / F2 / F3)
+                Action::Up if top => {
+                    self.focus_page_tabs(true);
+                }
+                Action::Down if !top => {
+                    self.focus_page_tabs(false);
+                }
                 Action::Confirm | Action::Back => self.settings_page.tabs_focused = false,
                 _ => {}
             }
@@ -525,6 +532,9 @@ impl App {
                 self.settings_page.tabs_focused = true;
                 return;
             }
+            // the other edge: on to the page tabs, if they're there
+            Action::Up if self.settings_at_edge(true) && self.focus_page_tabs(true) => return,
+            Action::Down if self.settings_at_edge(false) && self.focus_page_tabs(false) => return,
             _ => {}
         }
         // Keymaps and Behaviour edit the draft; History acts at once
