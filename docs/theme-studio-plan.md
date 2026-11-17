@@ -457,6 +457,13 @@ narrow
   hints show friendly names (`Enter`, `Space s p`) while the help screen
   and settings use Vim notation; Ctrl+C always quits; text fields (hex,
   search, names) and the pop-ups' y/s/Esc keys aren't rebindable.
+- **Step 2 ✅** settings files. keymaps.json: `{ "active", "presets": { name:
+  { "leader", "bindings": { context: { action: [keys] } } } } }`; an empty
+  list means unbound; actions a file doesn't mention get the shipped keys
+  (so new actions appear). settings.json so far: the font list's starting
+  filters. Missing files and entries are written; files that don't parse
+  are left alone and reported in the status line. `theme-studio
+  --init-config` writes them and exits. Linked like nvim (after `nrs`).
 
 ### 7. Order of work
 
