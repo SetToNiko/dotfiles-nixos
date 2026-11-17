@@ -588,7 +588,12 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                 ..inner
             };
             if app.hits.add(r, Target::ColourRow(app.list_scroll + i)) {
-                line.patch_style(hover(Style::new()))
+                // only the group's or key's name is underlined
+                let name = match rows.get(app.list_scroll + i) {
+                    Some(ColourRow::Group { .. }) => 1,
+                    _ => 3,
+                };
+                crate::hit::hover_line(line, name)
             } else {
                 line
             }
@@ -1686,7 +1691,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                     ),
                 ]);
                 if app.hits.add(rr, Target::OverlayRow(i)) && i != *sel {
-                    line = line.patch_style(hover(Style::new()));
+                    line = crate::hit::hover_line(line, 1);
                 }
                 lines.push(line);
             }
@@ -1789,7 +1794,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 };
                 let line = Line::from(spans);
                 lines.push(if app.hits.add(rr, Target::OverlayRow(row)) {
-                    line.patch_style(hover(Style::new()))
+                    crate::hit::hover_line(line, 0)
                 } else {
                     line
                 });

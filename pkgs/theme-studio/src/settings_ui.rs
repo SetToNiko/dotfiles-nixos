@@ -8,9 +8,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 
 use crate::app::App;
-use crate::behaviour::{BhRow, LookId, behaviour_rows};
+use crate::behaviour::{BhRow, LookId};
 use crate::color::Rgb;
-use crate::hit::{Target, hover};
+use crate::hit::{Target, hover, hover_line, hover_row};
 use crate::keymap::{Keymap, display_seq};
 use crate::settings::{DiffLine, FILES, HistFocus, KmRow, TABS, Tab};
 
@@ -103,10 +103,12 @@ pub fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
             (true, false) => Style::new().reversed().bold(),
             _ => Style::new().dark_gray(),
         };
+        let mut line = Line::from(Span::styled(text, style));
         if app.hits.add(r, Target::SettingsTab(i as u8)) {
-            style = hover(style);
+            style = hover_row(style);
+            line = hover_line(line, 0);
         }
-        f.render_widget(Paragraph::new(Span::styled(text, style)), r);
+        f.render_widget(Paragraph::new(line).style(style), r);
         x += w + 1;
     }
     match app.settings_page.tab {
@@ -198,7 +200,11 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
             }
             KmRow::Gap => Line::raw(""),
             KmRow::Header(ctx) => {
-                Line::styled(format!(" {}", ctx.title()), Style::new().bold().cyan())
+                let open = !app.settings_page.km_closed.contains(&ctx);
+                Line::from(vec![
+                    Span::styled(if open { " ▾ " } else { " ▸ " }, Style::new().yellow()),
+                    Span::styled(ctx.title(), Style::new().bold().cyan()),
+                ])
             }
             KmRow::Binding(ctx, action) => {
                 let keys = app.keymap.keys_of(ctx, action);
@@ -228,10 +234,20 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
                 Line::from(spans)
             }
         };
-        let clickable = !matches!(row, KmRow::Header(_) | KmRow::Gap);
+        let clickable = !matches!(row, KmRow::Gap);
         let mut style = selected_style(on, true);
+        let mut line = line;
         if clickable && app.hits.add(r, Target::SettingsRow(i)) && !on {
-            style = hover(style);
+            // only the name is underlined
+            style = hover_row(style);
+            line = hover_line(
+                line,
+                if matches!(row, KmRow::Header(_)) {
+                    1
+                } else {
+                    0
+                },
+            );
         }
         f.render_widget(Paragraph::new(line).style(style), r);
     }
@@ -309,8 +325,8 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
 const VALUE_W: usize = 20;
 
 fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
-    let rows = behaviour_rows();
-    // the cursor never rests on a group title or a sample
+    let rows = crate::behaviour::visible_behaviour_rows(&app.settings_page.bh_closed);
+    // the cursor never rests on a blank line or a sample
     if !rows[app.settings_page.bh_sel.min(rows.len() - 1)].selectable() {
         app.settings_page.bh_sel = crate::behaviour::selectable_ends(&rows).0;
     }
@@ -344,7 +360,17 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
         let r = row_rect(list, i - scroll);
         let line = match *row {
             BhRow::Gap => Line::raw(""),
-            BhRow::Header(h) => Line::styled(format!(" {h}"), Style::new().bold().cyan()),
+            BhRow::Header(h) => Line::from(vec![
+                Span::styled(
+                    if app.settings_page.bh_closed.contains(h) {
+                        " ▸ "
+                    } else {
+                        " ▾ "
+                    },
+                    Style::new().yellow(),
+                ),
+                Span::styled(h, Style::new().bold().cyan()),
+            ]),
             BhRow::Sample(LookId::Hover) => Line::from(vec![
                 Span::styled("   Sample:  ", Style::new().dark_gray()),
                 Span::styled(" a clickable row ", looks.hover.apply(Style::new())),
@@ -412,8 +438,18 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
         };
         let on = i == sel;
         let mut style = selected_style(on, focused);
+        let mut line = line;
         if row.selectable() && app.hits.add(r, Target::SettingsRow(i)) && !on {
-            style = hover(style);
+            // only the name is underlined
+            style = hover_row(style);
+            line = hover_line(
+                line,
+                if matches!(row, BhRow::Header(_)) {
+                    1
+                } else {
+                    0
+                },
+            );
         }
         f.render_widget(Paragraph::new(line).style(style), r);
     }
@@ -460,10 +496,12 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
         let r = row_rect(inner, i);
         let on = i == app.settings_page.hist_file;
         let mut style = selected_style(on, focus == HistFocus::Files);
+        let mut line = Line::raw(format!(" {name}"));
         if app.hits.add(r, Target::HistFile(i)) && !(on && focus == HistFocus::Files) {
-            style = hover(style);
+            style = hover_row(style);
+            line = hover_line(line, 0);
         }
-        f.render_widget(Paragraph::new(format!(" {name}")).style(style), r);
+        f.render_widget(Paragraph::new(line).style(style), r);
     }
 
     // versions
@@ -516,8 +554,10 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
         ]);
         let on = i == sel;
         let mut style = selected_style(on, focus == HistFocus::Versions);
+        let mut line = line;
         if app.hits.add(r, Target::SettingsRow(i)) && !(on && focus == HistFocus::Versions) {
-            style = hover(style);
+            style = hover_row(style);
+            line = hover_line(line, 1);
         }
         f.render_widget(Paragraph::new(line).style(style), r);
     }

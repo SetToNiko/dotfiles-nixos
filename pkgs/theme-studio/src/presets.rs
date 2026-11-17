@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
-use crate::hit::{Target, hover};
+use crate::hit::{Target, hover_line};
 use crate::keymap::{Action, Context, Keymap, all_actions, display_seq};
 use crate::settings::{Deferred, Naming};
 
@@ -240,7 +240,7 @@ pub fn draw_browse(f: &mut Frame, app: &mut App, diff: Rect, list: Rect) {
             break;
         }
         let active = p.name == app.keymap.name;
-        let mut style = if i == sel {
+        let style = if i == sel {
             Style::new().reversed()
         } else {
             Style::new()
@@ -251,10 +251,8 @@ pub fn draw_browse(f: &mut Frame, app: &mut App, diff: Rect, list: Rect) {
             width: list.width,
             height: 1,
         };
-        if app.hits.add(r, Target::PresetRow(i)) && i != sel {
-            style = hover(style);
-        }
-        lines.push(Line::from(vec![
+        let hovered = app.hits.add(r, Target::PresetRow(i)) && i != sel;
+        let line = Line::from(vec![
             Span::styled(format!(" {:<16}", p.name), style),
             Span::styled(
                 format!(
@@ -268,7 +266,9 @@ pub fn draw_browse(f: &mut Frame, app: &mut App, diff: Rect, list: Rect) {
                 ),
                 Style::new().dark_gray(),
             ),
-        ]));
+        ]);
+        // only the name is underlined
+        lines.push(if hovered { hover_line(line, 0) } else { line });
     }
     lines.push(Line::raw(""));
     for h in [

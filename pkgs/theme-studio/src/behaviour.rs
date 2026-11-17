@@ -67,7 +67,7 @@ impl BhRow {
     }
 
     pub fn selectable(self) -> bool {
-        !matches!(self, BhRow::Gap | BhRow::Header(_) | BhRow::Sample(_))
+        !matches!(self, BhRow::Gap | BhRow::Sample(_))
     }
 
     /// A button rather than a value.
@@ -127,6 +127,22 @@ pub fn behaviour_rows() -> Vec<BhRow> {
         out.push(r);
     }
     out
+}
+
+/// The rows shown: a closed group keeps only its title.
+pub fn visible_behaviour_rows(closed: &std::collections::HashSet<&'static str>) -> Vec<BhRow> {
+    let mut shut = false;
+    behaviour_rows()
+        .into_iter()
+        .filter(|r| match r {
+            BhRow::Header(h) => {
+                shut = closed.contains(h);
+                true
+            }
+            BhRow::Gap => true,
+            _ => !shut,
+        })
+        .collect()
 }
 
 /// The first and last selectable rows.
@@ -334,12 +350,12 @@ impl App {
 
     /// The cursor is on the first (`up`) or last selectable row.
     pub fn behaviour_at_edge(&self, up: bool) -> bool {
-        let (first, last) = selectable_ends(&behaviour_rows());
+        let (first, last) = selectable_ends(&visible_behaviour_rows(&self.settings_page.bh_closed));
         self.settings_page.bh_sel == if up { first } else { last }
     }
 
     pub(crate) fn run_behaviour_tab(&mut self, a: Action) {
-        let rows = behaviour_rows();
+        let rows = visible_behaviour_rows(&self.settings_page.bh_closed);
         if !rows[self.settings_page.bh_sel.min(rows.len() - 1)].selectable() {
             self.settings_page.bh_sel = selectable_ends(&rows).0;
         }
@@ -357,6 +373,16 @@ impl App {
             opts[wrap(i, d, opts.len())].to_string()
         };
         let row = rows[self.settings_page.bh_sel];
+        // a group's title: Enter toggles it, right opens, left closes
+        if let BhRow::Header(h) = row {
+            let closed = &mut self.settings_page.bh_closed;
+            if (a == Action::Confirm && !closed.contains(h)) || a == Action::Left {
+                closed.insert(h);
+            } else {
+                closed.remove(h);
+            }
+            return;
+        }
         // colours: Enter opens the list of keys; left/right steps through it
         if row.is_colour() {
             let keys = theme_keys();

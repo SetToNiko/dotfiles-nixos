@@ -123,9 +123,12 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         }
         .intersection(inner);
         if app.hits.add(r, Target::FontRole(i)) {
+            // the row look on all three lines; the underline only under the
+            // font's name
             role = role
                 .into_iter()
-                .map(|l| l.patch_style(hover(Style::new())))
+                .enumerate()
+                .map(|(n, l)| crate::hit::hover_line(l, if n == 0 { 2 } else { usize::MAX }))
                 .collect();
         }
         lines.extend(role);
@@ -275,7 +278,8 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
             ..inner
         };
         let line = if app.hits.add(r, Target::FontRow(row_i)) {
-            line.patch_style(hover(Style::new()))
+            // only the group's or font's name is underlined
+            crate::hit::hover_line(line, 2)
         } else {
             line
         };

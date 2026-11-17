@@ -216,6 +216,44 @@ pub fn hover(style: Style) -> Style {
     LOOKS.with(|x| x.borrow().hover.apply(style))
 }
 
+/// The hover look for a whole row: everything but the underline, which
+/// goes under the option's name only (see `hover_line`).
+pub fn hover_row(style: Style) -> Style {
+    LOOKS.with(|x| {
+        let mut l = x.borrow().hover.clone();
+        l.underline = None;
+        l.apply(style)
+    })
+}
+
+/// A hovered row: the row look on every span, and the full look (with the
+/// underline) on span `name` without its leading and trailing spaces, so
+/// only the option's name is underlined, not padding or values.
+pub fn hover_line(line: ratatui::text::Line<'_>, name: usize) -> ratatui::text::Line<'_> {
+    use ratatui::text::Span;
+    let mut spans = Vec::new();
+    for (i, s) in line.spans.into_iter().enumerate() {
+        if i != name {
+            spans.push(Span::styled(s.content, hover_row(s.style)));
+            continue;
+        }
+        let text = s.content.to_string();
+        let core = text.trim();
+        let lead = &text[..text.len() - text.trim_start().len()];
+        let trail = &text[lead.len() + core.len()..];
+        for (part, style) in [
+            (lead, hover_row(s.style)),
+            (core, hover(s.style)),
+            (trail, hover_row(s.style)),
+        ] {
+            if !part.is_empty() {
+                spans.push(Span::styled(part.to_string(), style));
+            }
+        }
+    }
+    ratatui::text::Line { spans, ..line }
+}
+
 /// The look of the selected colour's derivation relatives (Palette pane).
 pub fn derived(style: Style) -> Style {
     LOOKS.with(|x| x.borrow().derived.apply(style))
@@ -270,6 +308,31 @@ impl HitMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_name_is_underlined() {
+        use ratatui::text::{Line, Span};
+        set_looks(Looks::default());
+        let line = Line::from(vec![Span::raw("   quit       "), Span::raw("q")]);
+        let out = hover_line(line, 0);
+        let under = |s: &Span| s.style.add_modifier.contains(Modifier::UNDERLINED);
+        let texts: Vec<(&str, bool)> = out
+            .spans
+            .iter()
+            .map(|s| (s.content.as_ref(), under(s)))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                ("   ", false),
+                ("quit", true),
+                ("       ", false),
+                ("q", false)
+            ]
+        );
+        // the rest of the look still applies to the whole row
+        assert_eq!(out.spans[3].style.fg, Some(Color::Yellow));
+    }
 
     #[test]
     fn topmost_target_wins_and_hover_follows_the_mouse() {

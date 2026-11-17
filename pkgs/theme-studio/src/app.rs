@@ -3193,10 +3193,10 @@ mod tests {
         assert!(render(&mut app, 160, 45).contains("back to the list"));
         press(&mut app, "j");
         assert!(!app.settings_page.tabs_focused);
-        // the cursor never rests on a group title: the first row is Leader
+        // the first row is the first group's title (groups fold open / shut)
         assert_eq!(
             crate::behaviour::behaviour_rows()[app.settings_page.bh_sel],
-            crate::behaviour::BhRow::Leader
+            crate::behaviour::BhRow::Header("Keys")
         );
         press(&mut app, "jk");
         assert!(!app.settings_page.tabs_focused);
@@ -3334,5 +3334,73 @@ mod tests {
         press(&mut app, "\x1b");
         assert_eq!(app.page, Page::Main);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn settings_groups_fold_and_only_names_are_underlined() {
+        use crate::behaviour::{BhRow, visible_behaviour_rows};
+        use crate::hit::Target as T;
+        use crate::settings::KmRow;
+        let mut app = test_app(temp_store("fold"), Start::Named("One".into()));
+        app.page = Page::Settings;
+        // Keymaps: Enter on a group's title closes it, again opens it
+        let n = app.keymap_rows().len();
+        let g = app
+            .keymap_rows()
+            .iter()
+            .position(|r| *r == KmRow::Header(Context::Global))
+            .unwrap();
+        app.settings_page.km_sel = g;
+        press(&mut app, "\n");
+        assert!(app.keymap_rows().len() < n);
+        assert!(render(&mut app, 160, 45).contains("▸ Everywhere"));
+        press(&mut app, "l");
+        assert_eq!(app.keymap_rows().len(), n);
+        // the cursor stops on titles but skips blank lines
+        press(&mut app, "k");
+        assert_eq!(app.keymap_rows()[app.settings_page.km_sel], KmRow::Preset);
+        // Behaviour: a click on the selected title folds it
+        app.settings_page.tab = crate::settings::Tab::Behaviour;
+        render(&mut app, 160, 45);
+        let rows = visible_behaviour_rows(&app.settings_page.bh_closed);
+        let hover = rows
+            .iter()
+            .position(|r| *r == BhRow::Header("Hover (everything clickable)"))
+            .unwrap();
+        app.settings_page.bh_sel = hover;
+        render(&mut app, 160, 45);
+        click_on(&mut app, T::SettingsRow(hover));
+        assert!(
+            app.settings_page
+                .bh_closed
+                .contains("Hover (everything clickable)")
+        );
+        assert!(visible_behaviour_rows(&app.settings_page.bh_closed).len() < rows.len());
+        // hover: only the option's name is underlined, not the row
+        let mut t = Terminal::new(TestBackend::new(160, 45)).unwrap();
+        t.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let leader = visible_behaviour_rows(&app.settings_page.bh_closed)
+            .iter()
+            .position(|r| *r == BhRow::Leader)
+            .unwrap();
+        let r = app.hits.rect_of(T::SettingsRow(leader)).unwrap();
+        mouse(&mut app, MouseEventKind::Moved, r.x + 5, r.y);
+        t.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = t.backend().buffer().clone();
+        let under = |x: u16| {
+            buf[(x, r.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        };
+        let row: String = (r.x..r.right())
+            .map(|x| buf[(x, r.y)].symbol().to_string())
+            .collect();
+        let start = r.x + row.find("Leader").unwrap() as u16;
+        assert!(under(start) && under(start + 10), "the name");
+        assert!(
+            !under(r.x) && !under(start + 45) && !under(start + 52),
+            "not the padding or value:\n{row}"
+        );
+        std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
     }
 }

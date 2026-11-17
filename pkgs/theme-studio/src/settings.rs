@@ -108,6 +108,10 @@ pub struct SettingsPage {
     pub draft: Option<crate::draft::Draft>,
     /// A config file was reloaded during a draft edit (see with_draft).
     pub reloaded: bool,
+    /// Keymaps tab: closed groups.
+    pub km_closed: std::collections::HashSet<Context>,
+    /// Behaviour tab: closed groups, by title.
+    pub bh_closed: std::collections::HashSet<&'static str>,
     /// Keymaps tab: browsing presets, with this one highlighted.
     pub browse: Option<usize>,
     pub browse_scroll: usize,
@@ -152,6 +156,8 @@ impl Default for SettingsPage {
             tabs_focused: false,
             draft: None,
             reloaded: false,
+            km_closed: Default::default(),
+            bh_closed: Default::default(),
             browse: None,
             browse_scroll: 0,
             browse_all: false,
@@ -564,19 +570,20 @@ impl App {
             if actions.is_empty() {
                 continue;
             }
-            // a blank line before each group's title
+            // a blank line before each group's title; closed groups show
+            // only the title
             rows.push(KmRow::Gap);
             rows.push(KmRow::Header(ctx));
-            rows.extend(actions.into_iter().map(|a| KmRow::Binding(ctx, a)));
+            if !self.settings_page.km_closed.contains(&ctx) {
+                rows.extend(actions.into_iter().map(|a| KmRow::Binding(ctx, a)));
+            }
         }
         rows
     }
 
-    /// The cursor can rest on the preset button and the bindings.
+    /// The cursor can rest on everything but the blank lines.
     pub fn keymap_selectable(rows: &[KmRow]) -> Vec<bool> {
-        rows.iter()
-            .map(|r| matches!(r, KmRow::Preset | KmRow::Binding(..)))
-            .collect()
+        rows.iter().map(|r| !matches!(r, KmRow::Gap)).collect()
     }
 
     fn move_sel(sel: &mut usize, n: usize, a: Action) -> bool {
@@ -611,6 +618,16 @@ impl App {
         match (row, a) {
             // the preset button opens the preset list
             (Some(KmRow::Preset), Action::Right | Action::Confirm) => self.open_browse(),
+            // a group's title: Enter toggles it, right opens, left closes
+            (Some(KmRow::Header(ctx)), Action::Confirm | Action::Right | Action::Left) => {
+                let closed = &mut self.settings_page.km_closed;
+                let open = !closed.contains(&ctx);
+                if (a == Action::Confirm && open) || a == Action::Left {
+                    closed.insert(ctx);
+                } else {
+                    closed.remove(&ctx);
+                }
+            }
             (_, Action::SaveNamed) => {
                 self.prompt("Save the keymap as a new preset", Naming::Preset, "")
             }
