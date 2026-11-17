@@ -464,6 +464,14 @@ narrow
   filters. Missing files and entries are written; files that don't parse
   are left alone and reported in the status line. `theme-studio
   --init-config` writes them and exits. Linked like nvim (after `nrs`).
+- **Steps 3–4 ✅** layout and visibility. Three columns from 148 columns,
+  fonts | colours over a preview row from 98; panes ¹–⁷ (number keys,
+  `<C-w>h/j/k/l` between the fonts and colour panes, clicks). Colour groups
+  collapse like font groups; the list cursor moves over group rows too.
+  Picker: hidden at start, Enter (or a second click) on a colour opens it,
+  Esc and leaving it hide it, `<leader>cp` toggles; `<leader>fs` toggles the
+  sample. F2/F3 pages are placeholders. keymaps.json's `tab-colours` became
+  `page-main`, `tab-fonts` was dropped (automatically).
 
 ### 7. Order of work
 
