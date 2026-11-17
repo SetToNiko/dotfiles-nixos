@@ -94,9 +94,9 @@ configs/font-switch.sh        <name> | no argument for a rofi picker
 | Everything that asks for "monospace" or "sans-serif" (Firefox page text, Electron apps, …) | `fontconfig/conf.d/60-theme-fonts.conf` (aliases to the mono and ui fonts) | none                                                                        | When each app is restarted     |
 | nvim, yazi, starship                                                                       | follow Ghostty                                                             |                                                                             |                                |
 
-Not covered: Discord's own UI font (hard-coded in its CSS), and the boot
-splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
-`fonts.json` at build time if you want).
+Not covered: Discord's own UI font (hard-coded in its CSS). (The boot
+splash, also listed here at first, draws no text; the login screen after it
+follows the monospace font since Phase 7d.)
 
 - 🔸 **Per-host sizes.** At the moment the bar font is 9 on the desktop and 12
   on the laptop. Sizes in `fonts.json` would be the base, and an optional
@@ -1372,7 +1372,7 @@ Each step is committed separately and keeps the studio working.
   it used to inherit); `/etc/lightdm/lightdm-mini-greeter.conf` links to
   `/var/lib/ascii-boot/greeter.conf`.
 
-## Phase 8: polish
+## Phase 8: polish ✅ done
 
 - **Launching** ✅ (done early): `$mod+Ctrl+t` runs
   `ghostty --class=floating.theme-studio -e theme-studio`; an i3 rule floats
@@ -1383,9 +1383,18 @@ Each step is committed separately and keeps the studio working.
   numbers in the titles, ¹ key list, ² colour picker, ³ nvim, ⁴ shell/yazi;
   the number keys jump there (3 and 4 give that window the keyboard, F12
   hands it back). The Phase 5 fonts tab continues the numbering.
-- A status line shows unsaved changes, the active palette and font preset,
-  and warnings (missing Nerd Font, terminal too small, low contrast).
-- README section and comments in the same style as the existing scripts.
+- ~~A status line with unsaved changes, the active palette and font preset,
+  and warnings~~: dropped (decided after Phase 7d). Already covered: the
+  theme name and ● in the tab row (Phase 7 step 1), font warnings on the
+  role rows (7d), contrast ratios on the colour rows, and the "too small"
+  screen.
+- **Docs** ✅: a "Themes and fonts" section in the README, and
+  `docs/theme-studio.md` for the studio (themes and their parts, the font
+  roles, switching keys, the pages, the main keys, the files, building and
+  tests). The `--help` text, `default.nix` and the out-of-date module
+  comments (`main.rs`, `fonts.rs`, `fonts_ui.rs`) now describe themes and
+  the Main page instead of a palette editor and a Fonts tab.
+- Not now (asked): the login screen's colours following the palette.
 
 ---
 
@@ -1407,7 +1416,8 @@ curl are already installed. `bat` is assumed for the demo script.
 3. Phase 4: the full live preview.
 4. Phases 5–6: fonts in the studio.
 5. Phase 7 steps 1–3, Phases 7b and 7c, then Phase 7 step 4 (the tournament).
-6. Phase 7d (role requirements, the login screen font), then Phase 8.
+6. Phase 7d (role requirements, the login screen font), then Phase 8
+   (docs).
 
 Each step is committed separately in the repo it belongs to (`configs/` or
 the outer repo).

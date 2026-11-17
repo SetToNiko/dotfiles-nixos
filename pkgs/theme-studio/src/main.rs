@@ -1,4 +1,6 @@
-//! Theme Studio: edit palettes.json palettes with a live preview.
+//! Theme Studio: edit themes (a palette from palettes.json plus a font preset
+//! from fonts.json) with a live preview of the desktop, and download fonts.
+//! See docs/theme-studio.md.
 
 mod app;
 mod behaviour;
@@ -46,20 +48,26 @@ use app::{App, Start};
 use store::Store;
 
 const USAGE: &str = "\
-Usage: theme-studio [--fonts] [PALETTE | --new]
+Usage: theme-studio [--fonts] [THEME | PALETTE | --new]
        theme-studio --init-config
 
-Edit a palette from palettes.json (default: the active one), or start a
-new one; --fonts opens on the Fonts tab. Press ? inside for keys.
+Edit a theme from themes.json (default: the active one), or a palette from
+palettes.json, or start a new theme; --fonts starts with the keyboard on the
+font roles. Press ? inside for keys.
 --init-config writes any missing settings files, updates palettes.json and
-fonts.json to the current file format, and exits.
+fonts.json to their current file formats, makes the first theme from the
+active palette and fonts if there is none, and exits.
 
 Settings: $XDG_CONFIG_HOME/theme-studio (default ~/.config/theme-studio):
   keymaps.json   keymap presets and the active one
   settings.json  startup defaults
 
 Environment:
-  THEME_STUDIO_CONFIGS  dotfiles configs folder (default ~/dotfiles-nixos/configs)";
+  THEME_STUDIO_CONFIGS  dotfiles configs folder (default ~/dotfiles-nixos/configs)
+  THEME_STUDIO_TIMING   set: log font preview render times to
+                        ~/.local/state/theme-studio/timing.log
+
+More: docs/theme-studio.md in the dotfiles";
 
 fn main() -> Result<()> {
     // every write the studio makes keeps the old file in the history
@@ -76,7 +84,7 @@ fn main() -> Result<()> {
         Some("--init-config") => {
             let dir = config::dir();
             let loaded = config::load(&dir, true);
-            // palettes.json / fonts.json to the version-2 layout too
+            // palettes.json / fonts.json to their current file formats too
             let store = Store::locate();
             let fonts = fonts::FontStore {
                 dir: store.dir.clone(),

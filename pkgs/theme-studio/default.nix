@@ -1,4 +1,5 @@
-# Theme Studio: TUI palette editor with a live preview (docs/theme-studio-plan.md).
+# Theme Studio: themes (palettes and fonts) with a live preview of the desktop
+# (docs/theme-studio.md; how it was built: docs/theme-studio-plan.md).
 { lib, rustPlatform }:
 rustPlatform.buildRustPackage {
   pname = "theme-studio";

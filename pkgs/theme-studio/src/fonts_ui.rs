@@ -1,5 +1,5 @@
-//! Drawing the Fonts tab: ¹ the three role slots, ² the installed fonts,
-//! and the sample image in place of the preview.
+//! Drawing the Main page's fonts column: ¹ the three roles, ² the installed
+//! fonts (only those that fit while picking for a role), ³ the sample.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;

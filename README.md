@@ -21,6 +21,24 @@ Program configs are shared. Anything that differs per machine lives in
 `configs/hosts/<host>/`, which home-manager links to `~/.config/host`
 (e.g. `i3/config` includes `~/.config/host/i3.conf`).
 
+## Themes and fonts
+
+A theme is a colour palette plus a font preset, applied across the desktop
+(Ghostty, nvim, i3 and its bar, rofi, GTK, the lock and login screens).
+
+- `$mod+t` picks a theme, `$mod+p` only a palette, `$mod+Shift+t` only a
+  font preset (rofi menus; Alt+BackSpace deletes).
+- `$mod+Ctrl+t` opens Theme Studio (`pkgs/theme-studio/`), which edits
+  them with a live preview and downloads fonts.
+- The data is in `configs/`: `themes.json`, `palettes.json` and
+  `fonts.json`, applied by `themes-switch.sh`, `theme-switch.sh` and
+  `font-switch.sh`. Font sizes get a per-host offset from
+  `configs/hosts/<host>/fonts.json`.
+- Fonts downloaded in the studio are listed in `home/fonts-installed.json`
+  and installed by Nix on the next rebuild.
+
+More in [docs/theme-studio.md](docs/theme-studio.md).
+
 ## Building
 
 ```sh
@@ -35,7 +53,9 @@ After the first switch, the `nrs` alias rebuilds the current host.
 1. Create `hosts/<name>/` with `default.nix`, `home.nix` and the machine's
    `hardware-configuration.nix` (from `nixos-generate-config`).
 2. Add `<name> = mkHost "<name>";` to `flake.nix`.
-3. Create `configs/hosts/<name>/i3.conf`.
+3. Create `configs/hosts/<name>/i3.conf`, and optionally
+   `configs/hosts/<name>/fonts.json` (font size offsets, e.g.
+   `{"monospace": 0, "proportional": 3, "icons": 3}`).
 
 ## Dev shells
 

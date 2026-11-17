@@ -1,6 +1,7 @@
-//! Fonts tab: font presets (configs/fonts.json, applied by font-switch.sh),
-//! the installed fonts (fontconfig), and the sample image (ImageMagick +
-//! Pango, shown with the kitty graphics protocol).
+//! The fonts column of the Main page: font presets (configs/fonts.json,
+//! applied by font-switch.sh) with their Monospace, Proportional and Icons
+//! roles, the installed fonts (fontconfig), and the sample image
+//! (ImageMagick + Pango, shown with the kitty graphics protocol).
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
