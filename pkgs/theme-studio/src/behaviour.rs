@@ -22,6 +22,8 @@ pub enum LookId {
 /// A row of the Behaviour tab.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BhRow {
+    /// A blank line before a group (not selectable).
+    Gap,
     /// A group's title (not selectable).
     Header(&'static str),
     /// A look as it's set (not selectable).
@@ -65,7 +67,7 @@ impl BhRow {
     }
 
     pub fn selectable(self) -> bool {
-        !matches!(self, BhRow::Header(_) | BhRow::Sample(_))
+        !matches!(self, BhRow::Gap | BhRow::Header(_) | BhRow::Sample(_))
     }
 
     /// A button rather than a value.
@@ -116,7 +118,15 @@ pub fn behaviour_rows() -> Vec<BhRow> {
         R::Spacing,
         R::NerdFont,
     ]);
-    v
+    // a blank line before each group's title but the first
+    let mut out = Vec::new();
+    for r in v {
+        if matches!(r, R::Header(_)) && !out.is_empty() {
+            out.push(R::Gap);
+        }
+        out.push(r);
+    }
+    out
 }
 
 /// The first and last selectable rows.
@@ -209,32 +219,41 @@ impl App {
         }
     }
 
-    /// Keys while the list of palette keys is open.
+    /// Keys while the list of palette keys is open. Moving shows each key on
+    /// the setting (in the draft); Enter keeps it, Esc puts `original` back.
     pub fn choose_key_key(
         &mut self,
         row: BhRow,
         mut sel: usize,
+        original: String,
         k: ratatui::crossterm::event::KeyEvent,
     ) {
-        use ratatui::crossterm::event::KeyCode;
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
         let keys = theme_keys();
+        let last = keys.len() - 1;
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         match k.code {
-            KeyCode::Esc => self.overlay = Overlay::None,
+            KeyCode::Esc => {
+                self.overlay = Overlay::None;
+                return self.set_colour_setting(row, &original);
+            }
             KeyCode::Enter => {
                 self.overlay = Overlay::None;
-                self.set_colour_setting(row, keys[sel]);
+                return self.set_colour_setting(row, keys[sel]);
             }
-            KeyCode::Up | KeyCode::Char('k') => sel = sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => sel = (sel + 1).min(keys.len() - 1),
+            KeyCode::Up | KeyCode::Char('k') if !ctrl => sel = sel.saturating_sub(1),
+            KeyCode::Char('p') if ctrl => sel = sel.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') if !ctrl => sel = (sel + 1).min(last),
+            KeyCode::Char('n') if ctrl => sel = (sel + 1).min(last),
             KeyCode::PageUp => sel = sel.saturating_sub(10),
-            KeyCode::PageDown => sel = (sel + 10).min(keys.len() - 1),
+            KeyCode::PageDown => sel = (sel + 10).min(last),
             KeyCode::Home | KeyCode::Char('g') => sel = 0,
-            KeyCode::End | KeyCode::Char('G') => sel = keys.len() - 1,
+            KeyCode::End | KeyCode::Char('G') => sel = last,
             _ => {}
         }
-        if matches!(self.overlay, Overlay::ChooseKey { .. }) {
-            self.overlay = Overlay::ChooseKey { row, sel };
-        }
+        // still open: preview the highlighted key
+        self.set_colour_setting(row, keys[sel]);
+        self.overlay = Overlay::ChooseKey { row, sel, original };
     }
 
     // ----- rows ----------------------------------------------------------------
@@ -252,7 +271,7 @@ impl App {
             ratatui::crossterm::event::KeyModifiers::NONE,
         );
         match row {
-            BhRow::Header(_) | BhRow::Sample(_) => String::new(),
+            BhRow::Gap | BhRow::Header(_) | BhRow::Sample(_) => String::new(),
             BhRow::Leader => display_seq(&[self.keymap.leader], none),
             BhRow::Tabs => s.layout.tabs.clone(),
             BhRow::InnerTabs => s.layout.inner_tabs.clone(),
@@ -284,6 +303,7 @@ impl App {
 
     pub fn behaviour_label(row: BhRow) -> String {
         match row {
+            BhRow::Gap => String::new(),
             BhRow::Header(h) => h.into(),
             BhRow::Sample(_) => "Sample".into(),
             BhRow::Leader => "Leader key (of the active keymap preset)".into(),
@@ -312,43 +332,6 @@ impl App {
         }
     }
 
-    /// Moves the cursor over selectable rows; false if the action isn't a
-    /// move.
-    fn move_behaviour(&mut self, rows: &[BhRow], a: Action) -> bool {
-        let (first, last) = selectable_ends(rows);
-        let sel = self.settings_page.bh_sel;
-        let next = |from: usize, up: bool| -> usize {
-            let mut i = from;
-            loop {
-                if up {
-                    if i == 0 {
-                        return from;
-                    }
-                    i -= 1;
-                } else {
-                    if i + 1 >= rows.len() {
-                        return from;
-                    }
-                    i += 1;
-                }
-                if rows[i].selectable() {
-                    return i;
-                }
-            }
-        };
-        let to = match a {
-            Action::Up => next(sel, true),
-            Action::Down => next(sel, false),
-            Action::PageUp => (0..10).fold(sel, |s, _| next(s, true)),
-            Action::PageDown => (0..10).fold(sel, |s, _| next(s, false)),
-            Action::Top => first,
-            Action::Bottom => last,
-            _ => return false,
-        };
-        self.settings_page.bh_sel = to;
-        true
-    }
-
     /// The cursor is on the first (`up`) or last selectable row.
     pub fn behaviour_at_edge(&self, up: bool) -> bool {
         let (first, last) = selectable_ends(&behaviour_rows());
@@ -360,7 +343,8 @@ impl App {
         if !rows[self.settings_page.bh_sel.min(rows.len() - 1)].selectable() {
             self.settings_page.bh_sel = selectable_ends(&rows).0;
         }
-        if self.move_behaviour(&rows, a) {
+        let ok: Vec<bool> = rows.iter().map(|r| r.selectable()).collect();
+        if crate::settings::move_over(&mut self.settings_page.bh_sel, &ok, a) {
             return;
         }
         let d = match a {
@@ -379,7 +363,11 @@ impl App {
             let cur = self.colour_setting(row).cloned().unwrap_or_default();
             let i = keys.iter().position(|k| *k == cur).unwrap_or(0);
             if a == Action::Confirm {
-                self.overlay = Overlay::ChooseKey { row, sel: i };
+                self.overlay = Overlay::ChooseKey {
+                    row,
+                    sel: i,
+                    original: cur,
+                };
             } else {
                 self.set_colour_setting(row, keys[wrap(i, d, keys.len())]);
             }

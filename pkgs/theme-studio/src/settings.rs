@@ -27,8 +27,11 @@ pub const TABS: [(Tab, &str); 3] = [
 /// A row of the Keymaps tab.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KmRow {
-    /// Which preset is active (left/right to switch).
+    /// The preset button (opens the preset list).
     Preset,
+    /// A blank line before a group (not selectable).
+    Gap,
+    /// A group's title (not selectable).
     Header(Context),
     Binding(Context, Action),
 }
@@ -264,6 +267,50 @@ pub fn diff_lines(now: &Value, then: &Value, all: bool) -> Vec<DiffLine> {
     out
 }
 
+/// The first and last rows the cursor can rest on.
+pub(crate) fn ends(ok: &[bool]) -> (usize, usize) {
+    (
+        ok.iter().position(|o| *o).unwrap_or(0),
+        ok.iter().rposition(|o| *o).unwrap_or(0),
+    )
+}
+
+/// Moves `sel` over the rows where `ok` is true (skipping titles and
+/// blank lines); false if `a` isn't a move.
+pub(crate) fn move_over(sel: &mut usize, ok: &[bool], a: Action) -> bool {
+    let next = |from: usize, up: bool| -> usize {
+        let mut i = from;
+        loop {
+            if up {
+                if i == 0 {
+                    return from;
+                }
+                i -= 1;
+            } else {
+                if i + 1 >= ok.len() {
+                    return from;
+                }
+                i += 1;
+            }
+            if ok[i] {
+                return i;
+            }
+        }
+    };
+    let (first, last) = ends(ok);
+    let s = (*sel).min(ok.len().saturating_sub(1));
+    *sel = match a {
+        Action::Up => next(s, true),
+        Action::Down => next(s, false),
+        Action::PageUp => (0..10).fold(s, |s, _| next(s, true)),
+        Action::PageDown => (0..10).fold(s, |s, _| next(s, false)),
+        Action::Top => first,
+        Action::Bottom => last,
+        _ => return false,
+    };
+    true
+}
+
 pub(crate) fn wrap(i: usize, d: i32, n: usize) -> usize {
     if n == 0 {
         0
@@ -485,8 +532,9 @@ impl App {
         match self.settings_page.tab {
             Tab::Keymaps if self.settings_page.browse.is_some() => false,
             Tab::Keymaps => {
-                let n = self.show_draft(|app| app.keymap_rows().len());
-                at(self.settings_page.km_sel, n)
+                let ok = self.show_draft(|app| Self::keymap_selectable(&app.keymap_rows()));
+                let (first, last) = ends(&ok);
+                self.settings_page.km_sel == if up { first } else { last }
             }
             Tab::Behaviour => self.behaviour_at_edge(up),
             Tab::History => match self.settings_page.hist_focus {
@@ -516,10 +564,19 @@ impl App {
             if actions.is_empty() {
                 continue;
             }
+            // a blank line before each group's title
+            rows.push(KmRow::Gap);
             rows.push(KmRow::Header(ctx));
             rows.extend(actions.into_iter().map(|a| KmRow::Binding(ctx, a)));
         }
         rows
+    }
+
+    /// The cursor can rest on the preset button and the bindings.
+    pub fn keymap_selectable(rows: &[KmRow]) -> Vec<bool> {
+        rows.iter()
+            .map(|r| matches!(r, KmRow::Preset | KmRow::Binding(..)))
+            .collect()
     }
 
     fn move_sel(sel: &mut usize, n: usize, a: Action) -> bool {
@@ -542,7 +599,11 @@ impl App {
             return self.run_browse(a);
         }
         let rows = self.keymap_rows();
-        if Self::move_sel(&mut self.settings_page.km_sel, rows.len(), a) {
+        if move_over(
+            &mut self.settings_page.km_sel,
+            &Self::keymap_selectable(&rows),
+            a,
+        ) {
             return;
         }
         let row = rows.get(self.settings_page.km_sel).copied();

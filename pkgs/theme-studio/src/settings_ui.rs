@@ -196,6 +196,7 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
                     ),
                 ])
             }
+            KmRow::Gap => Line::raw(""),
             KmRow::Header(ctx) => {
                 Line::styled(format!(" {}", ctx.title()), Style::new().bold().cyan())
             }
@@ -227,7 +228,7 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
                 Line::from(spans)
             }
         };
-        let clickable = !matches!(row, KmRow::Header(_));
+        let clickable = !matches!(row, KmRow::Header(_) | KmRow::Gap);
         let mut style = selected_style(on, true);
         if clickable && app.hits.add(r, Target::SettingsRow(i)) && !on {
             style = hover(style);
@@ -304,6 +305,9 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
 
 // ----- Behaviour -------------------------------------------------------------
 
+/// The Behaviour tab's value column (the longest value fits).
+const VALUE_W: usize = 20;
+
 fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = behaviour_rows();
     // the cursor never rests on a group title or a sample
@@ -339,6 +343,7 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
     {
         let r = row_rect(list, i - scroll);
         let line = match *row {
+            BhRow::Gap => Line::raw(""),
             BhRow::Header(h) => Line::styled(format!(" {h}"), Style::new().bold().cyan()),
             BhRow::Sample(LookId::Hover) => Line::from(vec![
                 Span::styled("   Sample:  ", Style::new().dark_gray()),
@@ -371,22 +376,38 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
                 Line::from(spans)
             }
             _ => {
+                // columns: label | swatch | value | what Enter does
                 let label = App::behaviour_label(*row);
                 let value = app.behaviour_value(*row);
-                let mut spans = vec![Span::raw(format!("   {label:<50} "))];
-                if row.is_button() {
-                    spans.push(Span::styled("[ Enter ]", Style::new().cyan()));
+                let (swatch, text, style, note) = if row.is_button() {
+                    (None, "[ Enter ]".to_string(), Style::new().cyan(), "")
                 } else if row.is_colour() {
-                    spans.push(Span::styled(
-                        "██ ",
-                        Style::new().fg(app.theme_colour(&value)),
-                    ));
-                    spans.push(Span::styled(format!("‹ {value} ›"), Style::new().yellow()));
-                    spans.push(Span::styled("  Enter: list", Style::new().dark_gray()));
+                    // a colour: « key » in magenta, unlike the ‹ choices ›
+                    (
+                        Some(app.theme_colour(&value)),
+                        format!("« {value} »"),
+                        Style::new().magenta(),
+                        "Enter: choose",
+                    )
+                } else if *row == BhRow::Leader {
+                    (
+                        None,
+                        format!("‹ {value} ›"),
+                        Style::new().yellow(),
+                        "Enter: press the new key",
+                    )
                 } else {
-                    spans.push(Span::styled(format!("‹ {value} ›"), Style::new().yellow()));
-                }
-                Line::from(spans)
+                    (None, format!("‹ {value} ›"), Style::new().yellow(), "")
+                };
+                Line::from(vec![
+                    Span::raw(format!("   {label:<50} ")),
+                    match swatch {
+                        Some(c) => Span::styled("██ ", Style::new().fg(c)),
+                        None => Span::raw("   "),
+                    },
+                    Span::styled(format!("{text:<VALUE_W$}"), style),
+                    Span::styled(format!("  {note}"), Style::new().dark_gray()),
+                ])
             }
         };
         let on = i == sel;

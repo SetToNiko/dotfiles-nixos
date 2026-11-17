@@ -1647,16 +1647,18 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 lines,
             );
         }
-        Overlay::ChooseKey { row, sel } => {
+        Overlay::ChooseKey { sel, original, .. } => {
             let keys = crate::behaviour::theme_keys();
-            let r = centered(
+            // at the right edge, so the rows it previews stay in view
+            let mut r = centered(
                 area,
                 40,
                 area.height.saturating_sub(4).min(keys.len() as u16 + 3),
             );
+            r.x = area.right().saturating_sub(r.width + 2).max(area.x);
             let list_h = r.height.saturating_sub(3) as usize;
             let start = sel.saturating_sub(list_h.saturating_sub(1));
-            let current = app.behaviour_value(*row);
+            let current = original.clone();
             let mut lines = vec![Line::styled(
                 " j/k move, Enter choose, Esc cancel",
                 Style::new().dark_gray(),

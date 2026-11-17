@@ -114,6 +114,8 @@ pub enum Overlay {
     ChooseKey {
         row: crate::behaviour::BhRow,
         sel: usize,
+        /// The key before the list opened (Esc puts it back).
+        original: String,
     },
     /// Settings page: a yes / no question.
     Ask {
@@ -1456,8 +1458,8 @@ impl App {
         self.overlay = match overlay {
             Overlay::Help => Overlay::None,
             // Settings page pop-ups edit the draft (see draft.rs)
-            Overlay::ChooseKey { row, sel } => {
-                self.with_draft(|app| app.choose_key_key(row, sel, k));
+            Overlay::ChooseKey { row, sel, original } => {
+                self.with_draft(|app| app.choose_key_key(row, sel, original, k));
                 return;
             }
             Overlay::Capture { what, keys } => {
@@ -1832,15 +1834,20 @@ impl App {
                 self.fonts.click_chip(c);
             }
             T::OverlayRow(i) => {
-                if let Overlay::ChooseKey { row, sel } = self.overlay {
+                if let Overlay::ChooseKey { row, sel, original } = &self.overlay {
+                    let (row, sel, original) = (*row, *sel, original.clone());
+                    // a click previews the key; a second click keeps it
+                    let key = crate::behaviour::theme_keys()[i];
                     if sel == i {
                         self.overlay = Overlay::None;
-                        self.with_draft(|app| {
-                            app.set_colour_setting(row, crate::behaviour::theme_keys()[i])
-                        });
                     } else {
-                        self.overlay = Overlay::ChooseKey { row, sel: i };
+                        self.overlay = Overlay::ChooseKey {
+                            row,
+                            sel: i,
+                            original,
+                        };
                     }
+                    self.with_draft(|app| app.set_colour_setting(row, key));
                 } else if let Overlay::Open { sel, .. } = &mut self.overlay {
                     if *sel == i {
                         // a second click opens it, like Enter
@@ -3049,9 +3056,31 @@ mod tests {
             .iter()
             .position(|k| *k == "bg3")
             .unwrap();
-        if let Overlay::ChooseKey { row, .. } = app.overlay {
-            app.overlay = Overlay::ChooseKey { row, sel: target };
-        }
+        // moving previews; Esc puts the old colour back
+        press(&mut app, "j");
+        assert!(
+            matches!(app.overlay, Overlay::ChooseKey { .. }),
+            "stays open"
+        );
+        assert_ne!(
+            app.show_draft(|a| a.settings.hover.look.highlight_colour.clone()),
+            "bg3"
+        );
+        press(&mut app, "\x1b");
+        assert!(matches!(app.overlay, Overlay::None));
+        let before = app.show_draft(|a| a.settings.hover.look.highlight_colour.clone());
+        press(&mut app, "\n");
+        // move to bg3 with the keys, Enter keeps it
+        let at_now = crate::behaviour::theme_keys()
+            .iter()
+            .position(|k| *k == before)
+            .unwrap();
+        let steps = if target >= at_now {
+            "j".repeat(target - at_now)
+        } else {
+            "k".repeat(at_now - target)
+        };
+        press(&mut app, &steps);
         press(&mut app, "\n");
         assert_eq!(
             app.show_draft(|a| a.settings.hover.look.highlight_colour.clone()),
