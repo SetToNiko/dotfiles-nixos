@@ -265,7 +265,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match arrangement {
         Arrangement::TooSmall { .. } => {}
         Arrangement::Page { body, status } => {
-            if app.page == Page::Settings {
+            if app.page == Page::Downloads {
+                crate::fonts_dl_ui::draw_downloads(f, app, body);
+            } else if app.page == Page::Settings {
                 // as edited; Save / Discard drawn with what's live
                 let changes = app.draft_changes();
                 app.show_draft(|app| crate::settings_ui::draw_settings(f, app, body));
@@ -1202,6 +1204,23 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("{} reset", k(A::ResetSizes)),
                 format!("{} done", k(A::Back)),
             ]
+        } else if app.page == Page::Downloads && app.dl.searching {
+            vec!["type to search".into(), "Enter/Esc done".into()]
+        } else if app.page == Page::Downloads {
+            let mut v: Vec<String> = [
+                hint(&[A::Down, A::Up], "move"),
+                hint(&[A::Confirm], "install"),
+                hint(&[A::Delete], "remove"),
+                hint(&[A::Search], "search"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            if app.dl.tab == crate::fonts_dl::DlTab::Google {
+                v.extend(hint(&[A::Left, A::Right], "category"));
+            }
+            v.extend(hint(&[A::TabPrev, A::TabNext], "tabs"));
+            v
         } else if app.page == Page::Settings && app.settings_page.tabs_focused {
             let back = if app.settings.layout.inner_tabs_on_top() {
                 A::Down

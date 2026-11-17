@@ -188,6 +188,8 @@ pub enum Context {
     Colours,
     ColourList,
     Picker,
+    /// The Download fonts page.
+    Downloads,
     /// The Settings page (Keymaps, Behaviour, History tabs).
     Settings,
     /// Resize mode (`<leader>r`): keys move the focused pane's edges.
@@ -199,7 +201,7 @@ pub enum Context {
 }
 
 impl Context {
-    pub const ALL: [Context; 9] = [
+    pub const ALL: [Context; 10] = [
         Context::Global,
         Context::Colours,
         Context::ColourList,
@@ -207,6 +209,7 @@ impl Context {
         Context::Fonts,
         Context::FontRoles,
         Context::FontList,
+        Context::Downloads,
         Context::Settings,
         Context::Resize,
     ];
@@ -221,6 +224,7 @@ impl Context {
             Context::Fonts => "fonts",
             Context::FontRoles => "font-roles",
             Context::FontList => "font-list",
+            Context::Downloads => "downloads",
             Context::Settings => "settings",
             Context::Resize => "resize",
         }
@@ -239,6 +243,7 @@ impl Context {
             Context::Fonts => "Fonts",
             Context::FontRoles => "Font roles",
             Context::FontList => "Font list",
+            Context::Downloads => "Download fonts page",
             Context::Settings => "Settings page",
             Context::Resize => "Resize mode",
         }
@@ -978,7 +983,7 @@ impl Keymap {
             (C::Global, A::Help, &["?", "<leader>?"]),
             (C::Colours, A::Redo, &["U"]),
         ];
-        for ctx in [C::ColourList, C::FontList, C::Settings] {
+        for ctx in [C::ColourList, C::FontList, C::Settings, C::Downloads] {
             rows.push((ctx, A::Top, &["gg", "<Home>"]));
             rows.push((ctx, A::Bottom, &["ge", "<End>"]));
         }
@@ -1010,6 +1015,8 @@ impl Keymap {
             (C::FontList, A::Search, &["<C-s>", "/"]),
             (C::Resize, A::Back, &["<Esc>", "<CR>", "<C-g>"]),
             (C::Settings, A::Back, &["<Esc>", "<C-g>"]),
+            (C::Downloads, A::Back, &["<Esc>", "<C-g>"]),
+            (C::Downloads, A::Search, &["<C-s>", "/"]),
         ];
         Keymap::derived("Emacs", "<C-c>", &rows).moves_without_letters(&[
             (A::Up, &["<C-p>"]),
@@ -1068,6 +1075,7 @@ impl Keymap {
             (C::Colours, A::Redo, &["<C-y>", "<C-S-z>"]),
             (C::Colours, A::CopyHex, &["<C-c>"]),
             (C::FontList, A::Search, &["<C-f>", "/"]),
+            (C::Downloads, A::Search, &["<C-f>", "/"]),
         ];
         Keymap::arrows(Keymap::derived("VS Code", "<C-k>", &rows))
     }
@@ -1094,6 +1102,7 @@ impl Keymap {
             (C::Colours, A::Redo, &["<C-S-z>"]),
             (C::Colours, A::CopyHex, &["<C-c>"]),
             (C::FontList, A::Search, &["<C-f>", "/"]),
+            (C::Downloads, A::Search, &["<C-f>", "/"]),
         ];
         Keymap::arrows(Keymap::derived("JetBrains", "<Space>", &rows))
     }
@@ -1118,6 +1127,20 @@ impl Keymap {
             (C::Global, A::Panel(7), &["<leader>7"]),
             (C::Global, A::ResizeMode, &["<leader>r"]),
             (C::Global, A::UndoConfig, &["<leader>u"]),
+            (C::Downloads, A::Up, &["k", "<Up>"]),
+            (C::Downloads, A::Down, &["j", "<Down>"]),
+            (C::Downloads, A::Left, &["h", "<Left>"]),
+            (C::Downloads, A::Right, &["l", "<Right>"]),
+            (C::Downloads, A::Top, &["g", "<Home>"]),
+            (C::Downloads, A::Bottom, &["G", "<End>"]),
+            (C::Downloads, A::PageUp, &["<PageUp>"]),
+            (C::Downloads, A::PageDown, &["<PageDown>"]),
+            (C::Downloads, A::Confirm, &["<CR>"]),
+            (C::Downloads, A::Back, &["<Esc>"]),
+            (C::Downloads, A::Search, &["/"]),
+            (C::Downloads, A::Delete, &["d", "<Del>"]),
+            (C::Downloads, A::TabNext, &["]"]),
+            (C::Downloads, A::TabPrev, &["["]),
             (C::Settings, A::Up, &["k", "<Up>"]),
             (C::Settings, A::Down, &["j", "<Down>"]),
             (C::Settings, A::Left, &["h", "<Left>"]),

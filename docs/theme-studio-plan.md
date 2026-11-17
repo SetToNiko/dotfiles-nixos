@@ -724,7 +724,11 @@ Asked for after phase 5b; the decisions are settled.
    and the quit prompt.
 5. ✅ The preset browser with its difference view, delete and new-from.
 
-## Phase 6: downloading fonts
+## Phase 6: downloading fonts ✅
+
+On the Fonts page (F2): Google Fonts, Nerd Fonts and Installed tabs, search
+and category chips, details with Install / Remove; progress in the status
+line. Below, what was planned; differences are noted.
 
 - **Google Fonts:** search through the Fontsource API, which needs no key
   and lists ~2,100 fonts with category, licence and weights. The files come
@@ -740,8 +744,11 @@ Asked for after phase 5b; the decisions are settled.
   refreshes). Download progress shows in the status line, and the
   download runs in the background so the UI stays responsive.
 - **Making it permanent in Nix:** each download is added to
-  `configs/fonts-installed.json` (`{ "Inter": { "source": "google" } }`).
-  A new `home/fonts.nix` reads that list and installs:
+  `home/fonts-installed.json` in the main repo (changed from
+  `configs/`: that repo is ignored by the flake, and pure evaluation
+  can't read it). The path is a setting, `fonts.installed-list`
+  (default: next to settings.json). A new `home/fonts.nix` reads the
+  list and installs:
   - Google fonts with `pkgs.google-fonts.override { fonts = [ … ]; }`
   - Nerd Fonts with `pkgs.nerd-fonts.<attr>`
   - anything else with `fetchurl` plus the hash recorded at download time.

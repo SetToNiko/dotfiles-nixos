@@ -191,6 +191,8 @@ pub struct App {
     /// Every keymap preset (listed on the Settings page).
     pub presets: Vec<Keymap>,
     pub settings: crate::config::Settings,
+    /// The Download fonts page.
+    pub dl: crate::fonts_dl::DlPage,
     /// The Settings page's tabs and selections.
     pub settings_page: crate::settings::SettingsPage,
     /// Keys of a sequence typed so far (e.g. the leader), waiting for the rest.
@@ -266,6 +268,7 @@ impl App {
             config_dir: config.dir.clone(),
             settings: config.settings.clone(),
             settings_page: Default::default(),
+            dl: Default::default(),
             pending_keys: Vec::new(),
             store,
             name,
@@ -329,6 +332,10 @@ impl App {
             self.preview.sync_draft(&self.palette);
             if self.page == Page::Main && self.sample_visible {
                 self.update_sample();
+            }
+            // downloads: the catalogue, progress, finished installs
+            if self.poll_downloads() {
+                redraw = true;
             }
             if self.preview.take_dirty() || redraw {
                 terminal.draw(|f| crate::ui::draw(f, self))?;
@@ -913,7 +920,7 @@ impl App {
         match self.page {
             Page::Main => {}
             Page::Settings => return [Context::Settings, Context::Global, Context::Global],
-            Page::Downloads => return [Context::Global; 3],
+            Page::Downloads => return [Context::Downloads, Context::Global, Context::Global],
         }
         match self.side {
             Side::Fonts => match self.fonts.focus {
@@ -1167,6 +1174,9 @@ impl App {
         self.message = None;
         // Text fields: keys are typing, not actions.
         if self.pending_keys.is_empty() {
+            if self.page == Page::Downloads && self.dl.searching {
+                return self.dl_search_key(k);
+            }
             if self.side == Side::Colours && self.focus == Focus::Hex {
                 return self.on_hex_key(k);
             }
@@ -1209,6 +1219,9 @@ impl App {
         );
         if self.page == Page::Settings && !page_action {
             return self.run_settings(a);
+        }
+        if self.page == Page::Downloads && !page_action {
+            return self.run_downloads(a);
         }
         if self.page != Page::Main && !page_action {
             return;
@@ -1699,6 +1712,9 @@ impl App {
                     Some((_, t @ (T::SettingsRow(_) | T::SettingsDiff))) => {
                         self.settings_scroll(t, d)
                     }
+                    Some((_, T::DlRow(_))) => {
+                        self.run_downloads(if d > 0 { Action::Down } else { Action::Up })
+                    }
                     _ => {}
                 }
             }
@@ -1862,6 +1878,9 @@ impl App {
             | T::HistFile(_)
             | T::SettingsDiff
             | T::PresetRow(_) => self.settings_click(t),
+            T::DlTab(_) | T::DlRow(_) | T::DlChip(_) | T::DlSearch | T::DlButton(_) => {
+                self.dl_click(t)
+            }
             T::SettingsButton('s') => self.settings_save(),
             T::SettingsButton(_) => self.settings_discard(),
             T::ConfirmChoice(c) => {
@@ -1938,7 +1957,7 @@ pub fn open_matches(entries: &[(String, Vec<Rgb>)], filter: &str) -> Vec<usize> 
         .collect()
 }
 
-fn base64(data: &[u8]) -> String {
+pub(crate) fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::new();
     for chunk in data.chunks(3) {
@@ -3402,5 +3421,95 @@ mod tests {
             "not the padding or value:\n{row}"
         );
         std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
+    }
+
+    #[test]
+    fn download_page_lists_searches_and_removes() {
+        use crate::download::{Catalogue, Entry, Source};
+        use crate::fonts_dl::{DlRow, DlStatus, DlTab};
+        use crate::hit::Target as T;
+        let store = temp_store("dl");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        let entry = |id: &str, family: &str, cat: &str, source: Source| Entry {
+            id: id.into(),
+            family: family.into(),
+            category: cat.into(),
+            license: "OFL-1.1".into(),
+            weights: vec![400, 700],
+            italic: false,
+            variable: false,
+            source,
+        };
+        app.dl.catalogue = Some(Catalogue {
+            google: vec![
+                entry("inter", "Inter", "sans-serif", Source::Google),
+                entry("roboto-mono", "Roboto Mono", "monospace", Source::Google),
+                entry("zen-loop", "Zen Loop", "display", Source::Google),
+            ],
+            nerd: vec![entry(
+                "nerd-heavydata",
+                "HeavyData Nerd Font",
+                "nerd font",
+                Source::Nerd {
+                    asset: "HeavyData".into(),
+                    url: "u".into(),
+                    size: 1,
+                },
+            )],
+            nerd_tag: "v3.5.1".into(),
+        });
+        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        assert_eq!(app.page, Page::Downloads);
+        assert_eq!(app.contexts()[0], Context::Downloads);
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Google Fonts")
+                && screen.contains("Roboto Mono")
+                && screen.contains("3 fonts"),
+            "{screen}"
+        );
+        // a category: right steps to Sans
+        press(&mut app, "l");
+        assert_eq!(app.dl_rows(), vec![DlRow::Entry(0)]);
+        press(&mut app, "h");
+        // search: / then typing; Enter leaves the box
+        press(&mut app, "/mono\n");
+        assert_eq!(app.dl_rows(), vec![DlRow::Entry(1)]);
+        assert!(render(&mut app, 160, 45).contains("Install"));
+        app.dl.search.clear();
+        // something in the list counts as installed and can be removed
+        let list = app.installed_list_path();
+        let mut m = serde_json::Map::new();
+        m.insert(
+            "Zen Loop".into(),
+            serde_json::json!({"source": "google", "id": "zen-loop"}),
+        );
+        crate::download::write_list(&list, m).unwrap();
+
+        let zen = app.dl_entries()[2].clone();
+        let listed = crate::download::read_list(&list);
+        assert_eq!(app.dl_status(&zen, &listed), DlStatus::Listed);
+        // the Installed tab (a click) lists it; d removes it
+        render(&mut app, 160, 45);
+        click_on(&mut app, T::DlTab(2));
+        assert_eq!(app.dl.tab, DlTab::Installed);
+        assert_eq!(app.dl_rows(), vec![DlRow::Listed("Zen Loop".into())]);
+        press(&mut app, "d");
+        assert!(crate::download::read_list(&list).is_empty());
+        assert!(app.dl_rows().is_empty());
+        // Nerd Fonts tab, with the release
+        press(&mut app, "]");
+        assert_eq!(app.dl.tab, DlTab::Google, "wraps around");
+        press(&mut app, "]");
+        assert!(render(&mut app, 160, 45).contains("release v3.5.1"));
+        // up from the first row reaches the tabs
+        press(&mut app, "k");
+        assert!(app.dl.tabs_focused);
+        press(&mut app, "j\x1b");
+        assert_eq!(app.page, Page::Main);
+        render(&mut app, 100, 40); // narrow
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

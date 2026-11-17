@@ -50,6 +50,13 @@ pub enum Target {
     SettingsButton(char),
     /// Keymaps tab: a preset in the preset list.
     PresetRow(usize),
+    /// Download fonts page: a tab, a list row, a category chip, the search
+    /// box, Install ('i') / Remove ('r').
+    DlTab(u8),
+    DlRow(usize),
+    DlChip(u8),
+    DlSearch,
+    DlButton(char),
 }
 
 impl Target {

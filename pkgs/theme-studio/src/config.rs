@@ -113,6 +113,9 @@ pub struct FontSettings {
     pub sample_at_start: String,
     /// Opening the font list unfolds the groups of the role's current font.
     pub list_opens_to_current_font: bool,
+    /// The list of downloaded fonts that home/fonts.nix reads ("": next to
+    /// settings.json; "~/" works).
+    pub installed_list: String,
 }
 
 impl Default for FontSettings {
@@ -120,6 +123,7 @@ impl Default for FontSettings {
         FontSettings {
             sample_at_start: "shown".into(),
             list_opens_to_current_font: true,
+            installed_list: String::new(),
         }
     }
 }
