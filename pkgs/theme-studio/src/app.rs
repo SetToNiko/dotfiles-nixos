@@ -134,6 +134,10 @@ pub struct App {
     pub sample_image: Option<StatefulProtocol>,
     pub sample_error: Option<String>,
     pub keymap: Keymap,
+    /// Every keymap preset (listed on the Settings page, rework step 6).
+    #[allow(dead_code)]
+    pub presets: Vec<Keymap>,
+    pub settings: crate::config::Settings,
     /// Keys of a sequence typed so far (e.g. the leader), waiting for the rest.
     pub pending_keys: Vec<Key>,
     /// The Open / Save as pop-up is for font presets, not palettes.
@@ -148,7 +152,17 @@ pub enum Start {
 }
 
 impl App {
+    /// Starts with the settings in ~/.config/theme-studio (creating or
+    /// topping up the files).
     pub fn new(store: Store, start: Start) -> Result<App> {
+        App::with_config(
+            store,
+            start,
+            crate::config::load(&crate::config::dir(), true),
+        )
+    }
+
+    pub fn with_config(store: Store, start: Start, config: crate::config::Loaded) -> Result<App> {
         let active = store.active_name();
         let (name, palette, is_new) = match start {
             Start::Named(n) => {
@@ -172,7 +186,9 @@ impl App {
             sample_image: None,
             sample_error: None,
             overlay_fonts: false,
-            keymap: Keymap::vim(),
+            keymap: config.keymap,
+            presets: config.presets,
+            settings: config.settings.clone(),
             pending_keys: Vec::new(),
             store,
             name,
@@ -199,6 +215,10 @@ impl App {
             quit: false,
         };
         app.load_picker();
+        app.fonts.filters = app.settings.font_list.filters();
+        if !config.warnings.is_empty() {
+            app.error(format!("Settings: {}", config.warnings.join("; ")));
+        }
         Ok(app)
     }
 
@@ -1305,7 +1325,14 @@ mod tests {
 
     /// An app whose preview never starts nvim, the shell or yazi.
     fn test_app(store: Store, start: Start) -> App {
-        let mut app = App::new(store, start).unwrap();
+        // the shipped defaults, never your ~/.config/theme-studio
+        let config = crate::config::Loaded {
+            keymap: Keymap::vim(),
+            presets: Keymap::builtin(),
+            settings: crate::config::Settings::default(),
+            warnings: Vec::new(),
+        };
+        let mut app = App::with_config(store, start, config).unwrap();
         app.preview.set_headless();
         app
     }

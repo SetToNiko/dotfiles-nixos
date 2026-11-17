@@ -2,6 +2,7 @@
 
 mod app;
 mod color;
+mod config;
 mod desktop;
 mod font_tree;
 mod fonts;
@@ -25,9 +26,15 @@ use store::Store;
 
 const USAGE: &str = "\
 Usage: theme-studio [--fonts] [PALETTE | --new]
+       theme-studio --init-config
 
 Edit a palette from palettes.json (default: the active one), or start a
 new one; --fonts opens on the Fonts tab. Press ? inside for keys.
+--init-config writes any missing settings files and exits.
+
+Settings: $XDG_CONFIG_HOME/theme-studio (default ~/.config/theme-studio):
+  keymaps.json   keymap presets and the active one
+  settings.json  startup defaults
 
 Environment:
   THEME_STUDIO_CONFIGS  dotfiles configs folder (default ~/dotfiles-nixos/configs)";
@@ -42,6 +49,15 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("--new") => Start::New,
+        Some("--init-config") => {
+            let dir = config::dir();
+            let loaded = config::load(&dir, true);
+            println!("{}", dir.display());
+            for w in loaded.warnings {
+                eprintln!("warning: {w}");
+            }
+            return Ok(());
+        }
         Some(name) => Start::Named(name.to_string()),
         None => Start::Active,
     };

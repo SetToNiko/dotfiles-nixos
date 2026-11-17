@@ -4,6 +4,8 @@
 
 use std::collections::HashSet;
 
+use serde_json::{Map, Value};
+
 use anyhow::{Result, anyhow, bail};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -193,6 +195,23 @@ impl Context {
         Context::FontList,
     ];
 
+    /// The context's name in keymaps.json.
+    pub fn id(self) -> &'static str {
+        match self {
+            Context::Global => "global",
+            Context::Colours => "colours",
+            Context::ColourList => "colour-list",
+            Context::Picker => "picker",
+            Context::Fonts => "fonts",
+            Context::FontRoles => "font-roles",
+            Context::FontList => "font-list",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Context> {
+        Context::ALL.into_iter().find(|c| c.id() == id)
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Context::Global => "Everywhere",
@@ -258,7 +277,134 @@ pub enum Action {
     Filter(char),
 }
 
+/// Every action, in the order the keymaps file and the Settings page list them.
+pub fn all_actions() -> Vec<Action> {
+    use Action as A;
+    let mut v = vec![
+        A::Quit,
+        A::Help,
+        A::TabColours,
+        A::TabFonts,
+        A::PreviewCycle,
+        A::SavePalette,
+        A::SaveFonts,
+        A::ApplyPalette,
+        A::ApplyFonts,
+        A::Save,
+        A::SaveAs,
+        A::Apply,
+        A::Open,
+        A::New,
+        A::Undo,
+        A::Redo,
+    ];
+    v.extend((1..=9).map(A::Panel));
+    v.extend([
+        A::FocusNext,
+        A::FocusPrev,
+        A::Back,
+        A::Confirm,
+        A::Up,
+        A::Down,
+        A::Left,
+        A::Right,
+        A::UpBig,
+        A::DownBig,
+        A::LeftBig,
+        A::RightBig,
+        A::Top,
+        A::Bottom,
+        A::PageUp,
+        A::PageDown,
+        A::Pin,
+        A::CopyHex,
+        A::CopyFrom,
+        A::HexEntry,
+        A::ToggleYazi,
+        A::ToggleRofi,
+        A::ToggleView,
+        A::SizeUp,
+        A::SizeDown,
+        A::PickFont,
+        A::Search,
+    ]);
+    v.extend(crate::fonts::CHIPS.iter().map(|(c, _)| A::Filter(*c)));
+    v
+}
+
+/// Names for the filter chips in the keymaps file.
+const FILTER_IDS: [(char, &str); 8] = [
+    ('m', "filter-mono"),
+    ('p', "filter-propo"),
+    ('n', "filter-nerd-font"),
+    ('M', "filter-nerd-font-mono"),
+    ('P', "filter-nerd-font-propo"),
+    ('x', "filter-no-nerd-font"),
+    ('b', "show-bitmap"),
+    ('c', "show-cjk-emoji-math"),
+];
+
 impl Action {
+    /// The action's name in keymaps.json.
+    pub fn id(self) -> String {
+        use Action as A;
+        let s = match self {
+            A::Quit => "quit",
+            A::Help => "help",
+            A::TabColours => "tab-colours",
+            A::TabFonts => "tab-fonts",
+            A::PreviewCycle => "preview-cycle",
+            A::SavePalette => "save-palette",
+            A::SaveFonts => "save-fonts",
+            A::ApplyPalette => "apply-palette",
+            A::ApplyFonts => "apply-fonts",
+            A::Save => "save",
+            A::SaveAs => "save-as",
+            A::Apply => "apply",
+            A::Open => "open",
+            A::New => "new",
+            A::Undo => "undo",
+            A::Redo => "redo",
+            A::Panel(n) => return format!("panel-{n}"),
+            A::FocusNext => "focus-next",
+            A::FocusPrev => "focus-previous",
+            A::Back => "back",
+            A::Confirm => "confirm",
+            A::Up => "up",
+            A::Down => "down",
+            A::Left => "left",
+            A::Right => "right",
+            A::UpBig => "up-big",
+            A::DownBig => "down-big",
+            A::LeftBig => "left-big",
+            A::RightBig => "right-big",
+            A::Top => "top",
+            A::Bottom => "bottom",
+            A::PageUp => "page-up",
+            A::PageDown => "page-down",
+            A::Pin => "pin",
+            A::CopyHex => "copy-hex",
+            A::CopyFrom => "copy-from",
+            A::HexEntry => "hex-entry",
+            A::ToggleYazi => "toggle-yazi",
+            A::ToggleRofi => "toggle-rofi",
+            A::ToggleView => "toggle-view",
+            A::SizeUp => "size-up",
+            A::SizeDown => "size-down",
+            A::PickFont => "pick-font",
+            A::Search => "search",
+            A::Filter(c) => FILTER_IDS
+                .iter()
+                .find(|(k, _)| *k == c)
+                .map(|(_, id)| *id)
+                .unwrap_or("filter"),
+        };
+        s.to_string()
+    }
+
+    pub fn from_id(id: &str) -> Option<Action> {
+        all_actions().into_iter().find(|a| a.id() == id)
+    }
     /// Short description, for the help screen, hints and the leader popup.
     pub fn describe(self) -> String {
         match self {
@@ -336,6 +482,8 @@ pub enum Lookup {
 
 #[derive(Clone, Debug)]
 pub struct Keymap {
+    /// (context, action) pairs deliberately left without keys.
+    pub unbound: HashSet<(Context, Action)>,
     pub name: String,
     pub leader: Key,
     pub bindings: Vec<Binding>,
@@ -362,6 +510,7 @@ impl Keymap {
             name: name.to_string(),
             leader,
             bindings,
+            unbound: HashSet::new(),
         })
     }
 
@@ -420,6 +569,113 @@ impl Keymap {
                 .find(|b| b.context == *c && b.action == action)
                 .map(|b| display_seq(&b.keys, self.leader))
         })
+    }
+
+    /// The preset as stored in keymaps.json:
+    /// `{ "leader": "<Space>", "bindings": { context: { action: [keys…] } } }`.
+    /// Actions with no keys in a context are left out of that context.
+    pub fn to_json(&self) -> Value {
+        let mut contexts = Map::new();
+        for ctx in Context::ALL {
+            let mut actions = Map::new();
+            for a in all_actions() {
+                let seqs: Vec<Value> = self
+                    .bindings
+                    .iter()
+                    .filter(|b| b.context == ctx && b.action == a)
+                    .map(|b| Value::String(display_seq(&b.keys, self.leader)))
+                    .collect();
+                if !seqs.is_empty() || self.unbound.contains(&(ctx, a)) {
+                    actions.insert(a.id(), Value::Array(seqs));
+                }
+            }
+            if !actions.is_empty() {
+                contexts.insert(ctx.id().to_string(), Value::Object(actions));
+            }
+        }
+        let mut m = Map::new();
+        m.insert("leader".into(), Value::String(self.leader.display()));
+        m.insert("bindings".into(), Value::Object(contexts));
+        Value::Object(m)
+    }
+
+    /// Reads a preset from keymaps.json. Problems (unknown names, keys that
+    /// don't parse) are skipped and reported. With `base`, actions the file
+    /// doesn't mention for a context keep `base`'s keys, so actions added in
+    /// a newer version show up; an empty list means deliberately unbound.
+    pub fn from_json(name: &str, v: &Value, base: Option<&Keymap>) -> (Keymap, Vec<String>) {
+        let mut warnings = Vec::new();
+        let space = Key::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let leader = match v.get("leader").and_then(Value::as_str) {
+            Some(s) => match Key::parse_seq(s, space) {
+                Ok(k) if k.len() == 1 => k[0],
+                _ => {
+                    warnings.push(format!("{name}: leader \"{s}\" isn't one key; using Space"));
+                    space
+                }
+            },
+            None => base.map(|b| b.leader).unwrap_or(space),
+        };
+        let mut km = Keymap {
+            name: name.to_string(),
+            leader,
+            bindings: Vec::new(),
+            unbound: HashSet::new(),
+        };
+        let mut mentioned: HashSet<(Context, Action)> = HashSet::new();
+        if let Some(contexts) = v.get("bindings").and_then(Value::as_object) {
+            for (cid, actions) in contexts {
+                let Some(ctx) = Context::from_id(cid) else {
+                    warnings.push(format!("{name}: unknown context \"{cid}\""));
+                    continue;
+                };
+                let Some(actions) = actions.as_object() else {
+                    continue;
+                };
+                for (aid, seqs) in actions {
+                    let Some(action) = Action::from_id(aid) else {
+                        warnings.push(format!("{name}: unknown action \"{aid}\""));
+                        continue;
+                    };
+                    mentioned.insert((ctx, action));
+                    let list = seqs.as_array().cloned().unwrap_or_default();
+                    if list.is_empty() {
+                        km.unbound.insert((ctx, action));
+                    }
+                    for s in list.iter().filter_map(Value::as_str) {
+                        match Key::parse_seq(s, leader) {
+                            Ok(keys) => km.bindings.push(Binding {
+                                context: ctx,
+                                keys,
+                                action,
+                            }),
+                            Err(e) => warnings.push(format!("{name}: {cid}.{aid}: {e}")),
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(base) = base {
+            for b in &base.bindings {
+                if !mentioned.contains(&(b.context, b.action)) {
+                    // re-read with this preset's leader
+                    let text = display_seq(&b.keys, base.leader);
+                    if let Ok(keys) = Key::parse_seq(&text, leader) {
+                        km.bindings.push(Binding {
+                            context: b.context,
+                            keys,
+                            action: b.action,
+                        });
+                    }
+                }
+            }
+        }
+        (km, warnings)
+    }
+
+    /// The presets that ship with the studio.
+    pub fn builtin() -> Vec<Keymap> {
+        vec![Keymap::vim()]
     }
 
     /// The shipped Vim preset: the studio's original keys, plus leader

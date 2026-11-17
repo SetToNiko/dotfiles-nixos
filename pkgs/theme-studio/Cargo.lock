@@ -1873,6 +1873,7 @@ dependencies = [
  "portable-pty",
  "ratatui",
  "ratatui-image",
+ "serde",
  "serde_json",
  "vt100",
 ]
