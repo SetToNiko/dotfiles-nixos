@@ -320,6 +320,147 @@ to whatever size it gets.
 - **Mouse:** click a role, a chip or a row (a second click opens a group or
   uses the font); the wheel scrolls the list.
 
+## Phase 5b: layout rework, settings and keymaps (before Phase 6)
+
+### Decisions
+
+| | Choice |
+|---|---|
+| ✅ Layout | One main page, three columns: fonts, colours, preview |
+| ✅ Narrow windows | Fonts and colours side by side on top; the preview becomes a full-width row underneath |
+| ✅ Pages | Main, Download fonts (Phase 6), Settings (Keymaps + Behaviour) |
+| ✅ Colour groups | Collapsible like the font groups; only Base open at start |
+| ✅ Picker | Hidden at start; opens when you edit a colour; hides on Esc; `<leader>cp` toggles it |
+| ✅ Visibility defaults | All of them adjustable on the Settings page |
+| ✅ Leader | Space, changeable; a popup after it lists what can follow |
+| ✅ Keymaps | Every action rebindable on the Settings page; presets Vim (current keys), Helix, Emacs, VS Code, JetBrains; editable, save your own |
+| ✅ Storage | `$XDG_CONFIG_HOME/theme-studio/` (default `~/.config/theme-studio/`); on this system linked to `configs/theme-studio/` in the dotfiles |
+| ✅ On start | Always from the Settings defaults (sizes, open groups, picker); nothing remembered between runs |
+
+Smaller defaults I picked are marked 🔸.
+
+### 1. Pages
+
+- **Main** (`F1`): everything below.
+- **Download fonts** (`F2`): Phase 6 goes here; a placeholder until then.
+- **Settings** (`F3`): two tabs, **Keymaps** and **Behaviour**.
+- 🔸 `F1`–`F3` in every preset (also on the leader: `<leader>1`–`3`).
+
+### 2. Main page layout
+
+```
+wide (≈150+ columns)
+┌¹Fonts────────┐┌⁴Palette: novmbr───┐┌⁶nvim──────────────────┐
+│ mono  …      ││ ▾ Base            ││                        │
+│ ui    …      ││   bg0  ██ #241d1a ││                        │
+│ bar   …      ││ ▸ Backgrounds 10  │├⁷shell─────────────────┤
+├²Installed────┤│ ▸ Text …       5  ││                        │
+│ ▸ DejaVu  3  ││ ▸ Greys        3  ││                        │
+│ ▾ JetBrains… │├⁵Colour (picker)───┤│                        │
+├³Sample───────┤│ (hidden until you ││                        │
+│ [image]      ││  edit a colour)   ││ 1 2 3      vol │ 18:41 │
+└──────────────┘└───────────────────┘└────────────────────────┘
+
+narrow
+┌¹²³ fonts column─┐┌⁴⁵ colours column─┐
+│                 ││                  │
+└─────────────────┘└──────────────────┘
+┌⁶nvim─────────────────┐┌⁷shell─────────────────┐
+└──────────────────────┘└───────────────────────┘
+ 1 2 3                                vol │ 18:41
+```
+
+- **Left column, fonts:** ¹ roles, ² installed fonts, ³ sample image.
+- **Centre column, colours:** ⁴ colour list, ⁵ picker. While the picker is
+  hidden, the list gets the whole column.
+- **Right column, preview:** ⁶ nvim on top, ⁷ shell (or yazi, `Y`) below,
+  the i3 bar at the bottom; the rofi overlay (`R`) is drawn over the
+  column. `V` still switches the column to the swatch view.
+- **Narrow:** the preview's two windows go side by side in the bottom row.
+- Panel numbers ¹–⁷ jump to each pane, as now.
+- 🔸 **Saving:** `s`/`S`/`a`/`o`/`n` act on the column with focus (palette or
+  font preset). Explicit versions on the leader: `<leader>sp` / `<leader>sf`
+  save palette / fonts, `<leader>ap` / `<leader>af` apply.
+
+### 3. Resizing panes
+
+- **Mouse:** drag the border between two columns, or between two panes in
+  a column.
+- **Keyboard:** 🔸 `<leader>r` enters a resize mode, like i3's `$mod+r`:
+  `h`/`l` move the focused pane's side edge, `j`/`k` its lower edge (capitals
+  for bigger steps), `=` resets to the defaults, Esc or Enter leaves. The
+  status line shows `RESIZE` while it's on.
+- Every pane has a minimum size; sizes are shares of the window, so they
+  scale when the window is resized. nvim, the shell and yazi follow, as now.
+- Default sizes come from Settings (decision: nothing is remembered).
+
+### 4. Visibility
+
+- **Colour groups** get ▸/▾ rows like the font groups (`l`/`h`/Enter/click);
+  only Base is open at start.
+- **Picker:** hidden at start. Enter or a click on a colour opens it and moves
+  the focus there; Esc back to the list hides it. `<leader>cp` shows or hides
+  it whenever the colour list or picker has focus.
+- **Behaviour settings** (the Settings page), all defaults for each start:
+  - which colour groups start open (each group on/off; Base on)
+  - picker at start: hidden / shown
+  - picker after editing: hides on Esc / stays open
+  - font list: groups closed / open to the role's current font when opened
+  - font list filters at start (bitmap and CJK·emoji·math hidden, the chips)
+  - font sample pane: shown / hidden (`<leader>fs` toggles it)
+  - default pane sizes (set by resizing, then "save as default")
+
+### 5. Leader key and keymaps
+
+- **Actions:** every key-driven action gets a name and a context, e.g.
+  `list.down` (colour list), `picker.toggle` (colour list and picker),
+  `fonts.save` (fonts column), `preview.leave` (inside a preview window),
+  `resize.left` (resize mode). The current keys become the **Vim** preset, and
+  tests check it behaves exactly as today.
+- **Bindings** are a key or a sequence: `j`, `C-r`, `<leader>cp`, `g g`,
+  `C-x C-s`. After the first key of a sequence, a small popup lists what can
+  follow (which-key style) until you press one or Esc.
+- **Leader:** Space by default, set on the Settings page. Each preset brings
+  its usual leader: Vim and Helix Space, Emacs `C-c`, VS Code `C-k`,
+  JetBrains Space.
+- **Presets:** Vim, Helix, Emacs, VS Code, JetBrains. They ship inside the
+  program, are written to `keymaps.json` on first run, and can be edited,
+  saved under a new name, or reset to the shipped version.
+- **Keymaps tab:** actions grouped by context with their keys; Enter rebinds
+  (press the new key or sequence, Enter to finish), Delete unbinds; it warns
+  about conflicts in the same context, about keys i3 takes first (Alt is your
+  `$mod`), and about leaving no way out of a preview window.
+- 🔸 **More distinct keys:** the studio asks Ghostty for the kitty keyboard
+  protocol (disambiguate mode) so combinations like Ctrl+Shift+Z or Ctrl+1
+  arrive as themselves; other terminals keep working with plain keys.
+- **JetBrains** Alt+number pane keys clash with i3's Alt, so they move to
+  `<leader>1`…`7`.
+
+### 6. Settings files
+
+- `$XDG_CONFIG_HOME/theme-studio/` (default `~/.config/theme-studio/`):
+  - `keymaps.json`: `{ "active": "Vim", "presets": { "Vim": { … }, … } }`
+  - `settings.json`: leader, visibility defaults, default pane sizes
+  - Missing files are created with the defaults; both are written in jq's
+    format like the other JSON files.
+- **On this system:** the files live in `configs/theme-studio/` (committed in
+  the configs repo) and `home/base.nix` links `~/.config/theme-studio` to
+  that folder, like nvim, i3 and the rest. I check the link after `nrs`.
+- palettes.json and fonts.json stay where they are (`THEME_STUDIO_CONFIGS`).
+
+### 7. Order of work
+
+Each step is committed separately and keeps the studio working.
+
+1. Action names and the keymap engine (sequences, leader, popup); the Vim
+   preset reproduces today's keys, checked by the existing tests.
+2. Settings files and the `~/.config/theme-studio` link.
+3. Main page: three columns, the narrow layout, panes ¹–⁷, pages F1–F3.
+4. Collapsible colour groups, the picker's visibility, the behaviour settings.
+5. Resizing: mouse drags and resize mode.
+6. Settings page: the Behaviour tab and the Keymaps tab.
+7. The Helix, Emacs, VS Code and JetBrains presets.
+
 ## Phase 6: downloading fonts
 
 - **Google Fonts:** search through the Fontsource API, which needs no key
