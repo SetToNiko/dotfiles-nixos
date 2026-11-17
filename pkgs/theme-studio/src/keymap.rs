@@ -269,6 +269,7 @@ pub enum Action {
     ResizeMode,
     ResetSizes,
     UndoConfig,
+    FillFamily,
     OpenPalette,
     OpenFonts,
     NewPalette,
@@ -344,6 +345,7 @@ pub fn all_actions() -> Vec<Action> {
         A::ResizeMode,
         A::ResetSizes,
         A::UndoConfig,
+        A::FillFamily,
         A::OpenPalette,
         A::OpenFonts,
         A::NewPalette,
@@ -436,6 +438,7 @@ impl Action {
             A::ResizeMode => "resize-mode",
             A::ResetSizes => "reset-sizes",
             A::UndoConfig => "undo-config-change",
+            A::FillFamily => "fill-roles-from-family",
             A::OpenPalette => "open-palette",
             A::OpenFonts => "open-font-preset",
             A::NewPalette => "new-palette",
@@ -528,6 +531,7 @@ impl Action {
             Action::ResizeMode => "resize panes (h/j/k/l move the edges)".into(),
             Action::ResetSizes => "pane sizes back to the defaults".into(),
             Action::UndoConfig => "undo the last config change (again: redo)".into(),
+            Action::FillFamily => "every role from this font family".into(),
             Action::OpenPalette => "another palette for this theme".into(),
             Action::OpenFonts => "another font preset for this theme".into(),
             Action::NewPalette => "a new palette for this theme".into(),
@@ -1260,6 +1264,7 @@ impl Keymap {
             (C::FontList, A::Confirm, &["<CR>"]),
             (C::FontList, A::Back, &["<Esc>"]),
             (C::FontList, A::Search, &["/"]),
+            (C::FontList, A::FillFamily, &["F"]),
         ];
         const CHIP_KEYS: [&str; 8] = ["m", "p", "n", "M", "P", "x", "b", "c"];
         for (i, (c, _)) in crate::fonts::CHIPS.iter().enumerate() {

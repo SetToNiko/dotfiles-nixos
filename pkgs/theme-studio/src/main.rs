@@ -11,6 +11,7 @@ mod font_tree;
 mod fonts;
 mod fonts_dl;
 mod fonts_dl_ui;
+mod fonts_pick;
 mod fonts_ui;
 mod history;
 mod hit;

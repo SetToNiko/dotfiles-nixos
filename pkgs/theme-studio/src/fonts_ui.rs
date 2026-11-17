@@ -42,10 +42,17 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
     let title2 = Line::from(vec![
         panel_number(2),
         "Installed fonts".into(),
-        Span::styled(
-            format!(" for {} ", ROLES[app.fonts.slot]),
-            Style::new().dark_gray(),
-        ),
+        // picking for a role: which, and its filter (Enter applies it)
+        match app.fonts.picking {
+            Some(r) => Span::styled(
+                format!(" picking {} ({}) ", ROLES[r], app.fonts.role_filters[r]),
+                Style::new().yellow(),
+            ),
+            None => Span::styled(
+                format!(" for {} ", ROLES[app.fonts.slot]),
+                Style::new().dark_gray(),
+            ),
+        },
     ]);
     let title2 = pane_title(app, list_area, title2, 2);
     let t = &app.fonts;

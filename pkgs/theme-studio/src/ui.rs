@@ -1325,6 +1325,7 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                         (&[A::Down, A::Up], "browse"),
                         (&[A::Right, A::Left], "open/close"),
                         (&[A::Confirm], "use"),
+                        (&[A::FillFamily], "whole family"),
                         (&[A::Search], "search"),
                         (&chips, "filters"),
                         (&[A::Back], "back"),

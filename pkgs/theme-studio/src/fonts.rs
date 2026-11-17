@@ -598,6 +598,15 @@ pub struct FontsTab {
     pub dpi: u32,
     pub sample: SampleRenderer,
     pub load_error: Option<String>,
+    /// Picking a font for this role (the list opened from it, with its
+    /// filter on).
+    pub picking: Option<usize>,
+    /// The user's filters while a role's filter is on.
+    pub saved_filters: Option<Filters>,
+    /// A font was just picked (the app saves and applies it).
+    pub picked: bool,
+    /// Each role's filter when picking (settings).
+    pub role_filters: [String; 3],
 }
 
 impl FontsTab {
@@ -638,6 +647,10 @@ impl FontsTab {
             dpi: 96,
             sample: SampleRenderer::new(draft_dir, dirty),
             load_error,
+            picking: None,
+            saved_filters: None,
+            picked: false,
+            role_filters: crate::fonts_pick::ROLE_FILTER_DEFAULTS.map(String::from),
         }
     }
 
@@ -737,7 +750,7 @@ impl FontsTab {
     }
 
     /// Group paths leading to a font in the tree.
-    fn path_to(&self, index: usize) -> Vec<String> {
+    pub(crate) fn path_to(&self, index: usize) -> Vec<String> {
         fn find(nodes: &[Node], index: usize, parent: &str, out: &mut Vec<String>) -> bool {
             for n in nodes {
                 match n {
@@ -764,7 +777,7 @@ impl FontsTab {
         out
     }
 
-    fn clamp_sel(&mut self) {
+    pub(crate) fn clamp_sel(&mut self) {
         self.list_sel = self.list_sel.min(self.rows().len().saturating_sub(1));
     }
 
@@ -899,6 +912,9 @@ impl FontsTab {
         if let Some(i) = self.highlighted() {
             self.preset.fonts[self.slot].family = self.installed[i].family.clone();
             self.focus = FontFocus::Slots;
+            // the app saves and applies it (fonts_pick.rs)
+            self.end_pick();
+            self.picked = true;
         }
     }
 
@@ -975,7 +991,10 @@ impl FontsTab {
                 },
                 Action::Left => self.go_up(),
                 Action::Confirm => self.activate(),
-                Action::Back => self.focus = FontFocus::Slots,
+                Action::Back => {
+                    self.end_pick();
+                    self.focus = FontFocus::Slots
+                }
                 Action::Filter(c) => {
                     self.filters.toggle(c);
                     self.clamp_sel();
@@ -989,7 +1008,7 @@ impl FontsTab {
                 Action::Left | Action::SizeDown => self.resize(-1),
                 Action::RightBig => self.resize(4),
                 Action::LeftBig => self.resize(-4),
-                Action::Confirm | Action::PickFont => self.open_list(),
+                Action::Confirm | Action::PickFont => self.start_pick(),
                 _ => return false,
             },
         }

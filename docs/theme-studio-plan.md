@@ -797,8 +797,9 @@ move to Phase 8.)
 - **Enter (or `f`) on a role** (mono, ui, bar) moves to Installed fonts with
   that role's filter on. The filter chips can be switched off as now, to
   pick anything.
-  - **mono:** Nerd Font Mono, falling back to Mono when the family has no
-    Nerd Font.
+  - **mono:** Mono (monospaced; this includes the Nerd Font Mono
+    variants). "Nerd Font Mono, falling back to Mono" depends on the
+    family, which a list filter can't express; `F` (below) does it.
   - **ui:** Propo (proportional).
   - **bar:** Nerd Font (the bar shows icons).
   - The filters per role are settings (Behaviour tab, Fonts pane group).
@@ -809,13 +810,17 @@ move to Phase 8.)
 
 ### 3. A whole family at once
 
-- **`F` on a family** in Installed fonts fills every role from it:
+- **`F` on a family** in Installed fonts fills every role from it. The
+  family is the group plus fonts named like it (the font tree can put a
+  family's Nerd Font variants in a group of their own); a font in no group
+  is its own family.
   - **mono:** the family's Nerd Font Mono, else its monospaced face.
   - **ui:** its Nerd Font Propo, else its proportional face, else the
     base.
   - **bar:** its Nerd Font, else its Nerd Font Propo, else the base.
-- **Applies at once,** like a single pick; the message says what went where
-  and what the family lacked.
+- **Applies at once,** like a single pick; the message says what went where.
+  A role the family has no face for keeps its font (no proportional font
+  in the terminal).
 
 ### 4. Previews on the Fonts (download) page
 
@@ -879,9 +884,9 @@ move to Phase 8.)
 
 ### 6. Order of work
 
-1. Themes: the data, migration, the studio's titles and Save / Open, the
+1. ✅ Themes: the data, migration, the studio's titles and Save / Open, the
    scripts and rofi.
-2. Role picking with filters and applying at once; filling from a family.
+2. ✅ Role picking with filters and applying at once; filling from a family.
 3. Preview fetching and rendering, the texts, the preview pane.
 4. The tournament.
 

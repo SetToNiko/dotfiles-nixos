@@ -346,6 +346,7 @@ impl App {
         app.load_picker();
         app.fonts.filters = app.settings.font_list.filters();
         app.fonts.unfold_current = app.settings.fonts.list_opens_to_current_font;
+        app.fonts.role_filters = app.settings.fonts.role_filters();
         app.fonts.refresh_installed();
         // palettes.json / fonts.json: version 1 files become version 2 (once;
         // the old file goes to the history)
@@ -1357,10 +1358,47 @@ impl App {
                     self.fonts.focus = FontFocus::Slots;
                 }
             }
+            Action::FillFamily if fonts && self.fonts.focus == FontFocus::List => {
+                match self.fonts.fill_from_family() {
+                    Ok(what) => self.apply_picked_fonts(what),
+                    Err(e) => self.info(e),
+                }
+            }
             _ if fonts => {
+                let role = self.fonts.slot;
                 self.fonts.act(a);
+                if self.fonts.picked {
+                    let what = format!(
+                        "{}: {}",
+                        crate::fonts::ROLES[role],
+                        self.fonts.preset.fonts[role].family
+                    );
+                    self.apply_picked_fonts(what);
+                }
             }
             _ => self.run_colours(a),
+        }
+    }
+
+    /// A font was picked (or a family filled the roles): save the theme's
+    /// font preset and apply it straight away.
+    fn apply_picked_fonts(&mut self, what: String) {
+        self.fonts.picked = false;
+        let name = if self.fonts.is_new {
+            self.theme.clone()
+        } else {
+            self.fonts.name.clone()
+        };
+        let result = self
+            .fonts
+            .save_as(&name)
+            .and_then(|_| self.fonts.store.apply(&name));
+        match result {
+            Ok(()) => {
+                self.fonts.active = Some(name.clone());
+                self.info(format!("{what}: saved to \"{name}\" and applied"));
+            }
+            Err(e) => self.error(format!("{what}: {e:#}")),
         }
     }
 
@@ -1921,7 +1959,16 @@ impl App {
             }
             T::FontRow(i) => {
                 self.side = Side::Fonts;
+                let role = self.fonts.slot;
                 self.fonts.click_row(i);
+                if self.fonts.picked {
+                    let what = format!(
+                        "{}: {}",
+                        crate::fonts::ROLES[role],
+                        self.fonts.preset.fonts[role].family
+                    );
+                    self.apply_picked_fonts(what);
+                }
             }
             T::FontSearch => {
                 self.side = Side::Fonts;
@@ -2419,7 +2466,17 @@ mod tests {
             },
         ]);
         // bar (third role): pick C Mono from the list, two sizes bigger
-        press(&mut app, "jj\nG\nll");
+        // Enter on bar opens the list with bar's filter (Nerd Font): only A
+        press(&mut app, "jj\n");
+        assert_eq!(app.fonts.picking, Some(2));
+        assert_eq!(app.fonts.rows().len(), 1);
+        // n turns the filter off; G Enter picks C Mono (saved and applied:
+        // font-switch.sh isn't in the temp folder, so applying reports it)
+        press(&mut app, "nG\n");
+        assert_eq!(app.fonts.picking, None);
+        assert!(!app.fonts.filters.is_on('n'), "the user's filters are back");
+        assert!(!app.fonts.dirty(), "saved straight away");
+        press(&mut app, "ll");
         assert_eq!(app.fonts.preset.fonts[2].family, "C Mono");
         assert_eq!(app.fonts.preset.fonts[2].size, 11);
         // number keys: 2 opens the list, 1 goes back
@@ -3638,6 +3695,96 @@ mod tests {
         press(&mut app, "j\x1b");
         assert_eq!(app.page, Page::Main);
         render(&mut app, 100, 40); // narrow
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_family_fills_every_role() {
+        use crate::fonts::{Installed, Row};
+        let store = temp_store("family");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.fonts.store.dir = dir.clone();
+        let f = |family: &str, mono: bool, nerd: bool| Installed {
+            family: family.into(),
+            mono,
+            nerd,
+            bitmap: false,
+            special: false,
+        };
+        app.fonts.set_installed(vec![
+            f("JetBrains Mono", true, false),
+            f("JetBrains Mono NL", true, false),
+            f("JetBrainsMono Nerd Font", true, true),
+            f("JetBrainsMono Nerd Font Mono", true, true),
+            f("JetBrainsMono Nerd Font Propo", false, true),
+            f("Inter", false, false),
+        ]);
+        press(&mut app, " 2");
+        // the family's group row, then F
+        let g = app
+            .fonts
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Group { name, .. } if name.starts_with("JetBrains")))
+            .unwrap();
+        app.fonts.list_sel = g;
+        press(&mut app, "F");
+        let fams: Vec<&str> = app
+            .fonts
+            .preset
+            .fonts
+            .iter()
+            .map(|f| f.family.as_str())
+            .collect();
+        assert_eq!(
+            fams,
+            [
+                "JetBrainsMono Nerd Font Mono",
+                "JetBrainsMono Nerd Font Propo",
+                "JetBrainsMono Nerd Font"
+            ]
+        );
+        assert!(!app.fonts.dirty(), "saved straight away");
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, _)| m.contains("From JetBrains")),
+            "{:?}",
+            app.message
+        );
+        // a font in no group: the family is its own name, so Inter for all
+        let i = app
+            .fonts
+            .installed
+            .iter()
+            .position(|f| f.family == "Inter")
+            .unwrap();
+        let inter = app
+            .fonts
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Font { index, .. } if *index == i))
+            .unwrap();
+        app.fonts.focus = crate::fonts::FontFocus::List;
+        app.fonts.list_sel = inter;
+        press(&mut app, "F");
+        let fams: Vec<&str> = app
+            .fonts
+            .preset
+            .fonts
+            .iter()
+            .map(|f| f.family.as_str())
+            .collect();
+        // mono keeps its font: Inter has no monospaced face
+        assert_eq!(fams, ["JetBrainsMono Nerd Font Mono", "Inter", "Inter"]);
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, _)| m.contains("mono kept")),
+            "{:?}",
+            app.message
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

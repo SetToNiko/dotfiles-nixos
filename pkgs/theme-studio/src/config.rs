@@ -116,6 +116,21 @@ pub struct FontSettings {
     /// The list of downloaded fonts that home/fonts.nix reads ("": next to
     /// settings.json; "~/" works).
     pub installed_list: String,
+    /// The font list's filter when picking for mono, ui and bar ("any",
+    /// "mono", "propo", "nerd-font", "nerd-font-mono", "nerd-font-propo").
+    pub mono_filter: String,
+    pub ui_filter: String,
+    pub bar_filter: String,
+}
+
+impl FontSettings {
+    pub fn role_filters(&self) -> [String; 3] {
+        [
+            self.mono_filter.clone(),
+            self.ui_filter.clone(),
+            self.bar_filter.clone(),
+        ]
+    }
 }
 
 impl Default for FontSettings {
@@ -124,6 +139,9 @@ impl Default for FontSettings {
             sample_at_start: "shown".into(),
             list_opens_to_current_font: true,
             installed_list: String::new(),
+            mono_filter: "mono".into(),
+            ui_filter: "propo".into(),
+            bar_filter: "nerd-font".into(),
         }
     }
 }
