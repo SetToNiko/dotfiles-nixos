@@ -122,10 +122,33 @@ impl Default for FontSettings {
     }
 }
 
+/// Where things go on screen.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct LayoutSettings {
+    /// The page tabs: "bottom" (in the status line) or "top" (their own row).
+    pub tabs: String,
+}
+
+impl Default for LayoutSettings {
+    fn default() -> Self {
+        LayoutSettings {
+            tabs: "bottom".into(),
+        }
+    }
+}
+
+impl LayoutSettings {
+    pub fn tabs_on_top(&self) -> bool {
+        self.tabs == "top"
+    }
+}
+
 /// settings.json: how things look when the studio starts.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Settings {
+    pub layout: LayoutSettings,
     pub colours: ColourSettings,
     pub fonts: FontSettings,
     pub font_list: FontListSettings,

@@ -100,23 +100,6 @@ pub enum Overlay {
     Help,
 }
 
-/// Screen areas from the last draw, for mouse hit-testing.
-#[derive(Default)]
-pub struct Areas {
-    pub list: Rect,
-    /// First list row shown, and which key (if any) each visible row is.
-    pub list_rows: Vec<Option<usize>>,
-    pub square: Rect,
-    pub hue: Rect,
-    pub slider_h: Rect,
-    pub slider_s: Rect,
-    pub slider_l: Rect,
-    pub hex: Rect,
-    /// The fonts column and its sample pane (mouse routing).
-    pub fonts_column: Rect,
-    pub sample: Rect,
-}
-
 pub struct App {
     pub store: Store,
     pub name: String,
@@ -143,7 +126,10 @@ pub struct App {
     /// Status-line message and whether it's an error.
     pub message: Option<(String, bool)>,
     pub overlay: Overlay,
-    pub areas: Areas,
+    /// What's clickable where (from the last draw), and where the mouse is.
+    pub hits: crate::hit::HitMap,
+    /// The pointer is currently the hand (OSC 22).
+    pointer_hand: bool,
     pub preview: Preview,
     pub side: Side,
     pub page: Page,
@@ -262,7 +248,8 @@ impl App {
             terminal,
             message: None,
             overlay: Overlay::None,
-            areas: Areas::default(),
+            hits: Default::default(),
+            pointer_hand: false,
             quit: false,
         };
         app.load_picker();
@@ -286,6 +273,7 @@ impl App {
             }
             if self.preview.take_dirty() || redraw {
                 terminal.draw(|f| crate::ui::draw(f, self))?;
+                self.update_pointer();
                 redraw = false;
             }
             // Short poll: the preview's programs can print at any time.
@@ -300,6 +288,16 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// The mouse pointer is a hand over anything clickable (OSC 22; Ghostty
+    /// supports it, other terminals ignore it).
+    fn update_pointer(&mut self) {
+        let hand = self.hits.hovered().is_some();
+        if hand != self.pointer_hand {
+            self.pointer_hand = hand;
+            set_pointer(if hand { "pointer" } else { "default" });
+        }
     }
 
     pub fn key(&self) -> &'static str {
@@ -1452,119 +1450,164 @@ impl App {
     }
 
     fn handle_mouse(&mut self, m: MouseEvent) {
-        if self.page != Page::Main {
-            return;
-        }
+        use crate::hit::Target as T;
         let (x, y) = (m.column, m.row);
-        let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-        // The fonts column: roles, chips and rows (fonts.click), the sample.
-        if inside(self.areas.fonts_column) && matches!(self.overlay, Overlay::None) {
-            match m.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    self.preview.focus = None;
-                    self.side = Side::Fonts;
-                    if inside(self.areas.sample) {
-                        self.fonts.focus = crate::fonts::FontFocus::Sample;
-                    } else {
-                        self.fonts.click(x, y);
-                    }
-                }
-                MouseEventKind::ScrollDown => self.fonts.scroll(1),
-                MouseEventKind::ScrollUp => self.fonts.scroll(-1),
-                _ => {}
-            }
+        self.hits.mouse = Some((x, y));
+        let target = self.hits.at(x, y);
+        // With a pop-up open (other than "copy from"), only the pop-up responds.
+        let popup = !matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. });
+        if popup && !matches!(target, Some((_, T::OverlayRow(_) | T::ConfirmChoice(_)))) {
             return;
         }
-        // Clicking a preview window gives it the keyboard; clicking anywhere
-        // else gives it back to the editor.
-        if let MouseEventKind::Down(_) = m.kind {
-            let hit = self
-                .preview
-                .rects
-                .iter()
-                .find(|(_, r)| inside(*r))
-                .map(|(id, _)| *id);
-            if hit.is_some() || self.preview.focus.is_some() {
-                self.preview.focus = hit;
-                if hit.is_some() {
-                    return;
+        match m.kind {
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                let d = if m.kind == MouseEventKind::ScrollDown {
+                    1
+                } else {
+                    -1
+                };
+                match target {
+                    Some((_, T::ColourRow(_))) => self.move_row(d),
+                    Some((_, T::FontRow(_))) => self.fonts.scroll(d),
+                    _ => {}
                 }
             }
-        }
-        let frac = |r: Rect, v: u16, len: u16| {
-            if len <= 1 {
-                0.0
-            } else {
-                (v.saturating_sub(r.x.min(v)) as f64 / (len - 1) as f64).clamp(0.0, 1.0)
+            MouseEventKind::Down(MouseButton::Left) => {
+                // a click outside a preview window gives the keyboard back
+                if !matches!(target, Some((_, T::Preview(_)))) {
+                    self.preview.focus = None;
+                }
+                if let Some((r, t)) = target {
+                    self.click(r, t, x, y, false);
+                }
             }
-        };
-        match m.kind {
-            MouseEventKind::ScrollDown if inside(self.areas.list) => self.move_row(1),
-            MouseEventKind::ScrollUp if inside(self.areas.list) => self.move_row(-1),
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
-                let a = &self.areas;
-                let (sq, hue, sh, ss, sl, hex, list) = (
-                    a.square, a.hue, a.slider_h, a.slider_s, a.slider_l, a.hex, a.list,
-                );
-                self.side = Side::Colours;
-                if inside(list) {
-                    if !matches!(m.kind, MouseEventKind::Down(_)) {
-                        return; // dragging over the list does nothing
-                    }
-                    if let Some(Some(r)) = self.areas.list_rows.get((y - list.y) as usize).copied()
-                    {
-                        let again = r == self.row_sel
-                            && self.focus == Focus::List
-                            && self.side == Side::Colours;
-                        self.row_sel = r;
-                        match self.colour_rows().get(r).copied() {
-                            Some(ColourRow::Group { index, expanded }) if again => {
-                                self.set_group_open(index, !expanded)
-                            }
-                            Some(ColourRow::Key(k)) => {
-                                self.select_key(k);
-                                if again && matches!(self.overlay, Overlay::None) {
-                                    self.open_picker();
-                                    return;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if matches!(self.overlay, Overlay::None) {
-                        self.side = Side::Colours;
-                        self.focus = Focus::List;
-                    }
-                } else if inside(sq) {
-                    self.focus = Focus::Square;
-                    let s = frac(sq, x, sq.width);
-                    let v =
-                        1.0 - ((y - sq.y) as f64 / (sq.height.max(2) - 1) as f64).clamp(0.0, 1.0);
-                    self.set_hsv(self.hsv.0, s, v);
-                } else if inside(hue) {
-                    self.focus = Focus::Hue;
-                    let t = ((y - hue.y) as f64 / (hue.height.max(2) - 1) as f64).clamp(0.0, 1.0);
-                    let (_, s, v) = self.hsv;
-                    self.set_hsv(t * 360.0, s, v);
-                } else if inside(sh) {
-                    self.focus = Focus::SliderH;
-                    let (_, s, v) = self.hsv;
-                    self.set_hsv(frac(sh, x, sh.width) * 360.0, s, v);
-                } else if inside(ss) {
-                    self.focus = Focus::SliderS;
-                    let (_, l) = self.hsl();
-                    self.set_hsl(frac(ss, x, ss.width), l);
-                } else if inside(sl) {
-                    self.focus = Focus::SliderL;
-                    let (s, _) = self.hsl();
-                    self.set_hsl(s, frac(sl, x, sl.width));
-                } else if inside(hex) {
-                    self.focus = Focus::Hex;
-                    self.hex_input = "#".into();
+            MouseEventKind::Drag(MouseButton::Left) => {
+                // dragging works on the picker's controls only
+                if let Some((r, t @ (T::Square | T::Hue | T::SliderH | T::SliderS | T::SliderL))) =
+                    target
+                {
+                    self.click(r, t, x, y, true);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => self.last_edit = None,
             _ => {}
+        }
+    }
+
+    /// A click (or a drag step) on a target at `r`.
+    fn click(&mut self, r: Rect, t: crate::hit::Target, x: u16, y: u16, drag: bool) {
+        use crate::fonts::FontFocus;
+        use crate::hit::Target as T;
+        let frac = |v: u16, start: u16, len: u16| {
+            if len <= 1 {
+                0.0
+            } else {
+                (v.saturating_sub(start) as f64 / (len - 1) as f64).clamp(0.0, 1.0)
+            }
+        };
+        match t {
+            T::PageTab(p) => self.page = p,
+            T::PaneTitle(n) => self.focus_pane(n),
+            T::PaneBody(3) => self.focus_pane(3),
+            T::PaneBody(_) => {}
+            T::Preview(id) => {
+                self.preview.mode = PreviewMode::Desktop;
+                self.preview.focus = Some(id);
+            }
+            T::ColourRow(row) => {
+                let copying = matches!(self.overlay, Overlay::CopyFrom { .. });
+                let again =
+                    row == self.row_sel && self.focus == Focus::List && self.side == Side::Colours;
+                self.side = Side::Colours;
+                self.focus = Focus::List;
+                self.row_sel = row;
+                match self.colour_rows().get(row).copied() {
+                    Some(ColourRow::Group { index, expanded }) if again => {
+                        self.set_group_open(index, !expanded)
+                    }
+                    Some(ColourRow::Key(k)) => {
+                        self.select_key(k);
+                        if again && !copying {
+                            self.open_picker();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            T::Square => {
+                self.side = Side::Colours;
+                self.focus = Focus::Square;
+                let s = frac(x, r.x, r.width);
+                let v = 1.0 - frac(y, r.y, r.height.max(2));
+                self.set_hsv(self.hsv.0, s, v);
+            }
+            T::Hue => {
+                self.side = Side::Colours;
+                self.focus = Focus::Hue;
+                let (_, s, v) = self.hsv;
+                self.set_hsv(frac(y, r.y, r.height.max(2)) * 360.0, s, v);
+            }
+            T::SliderH => {
+                self.side = Side::Colours;
+                self.focus = Focus::SliderH;
+                let (_, s, v) = self.hsv;
+                self.set_hsv(frac(x, r.x, r.width) * 360.0, s, v);
+            }
+            T::SliderS | T::SliderL => {
+                self.side = Side::Colours;
+                self.focus = if t == T::SliderS {
+                    Focus::SliderS
+                } else {
+                    Focus::SliderL
+                };
+                let (s, l) = self.hsl();
+                let u = frac(x, r.x, r.width);
+                if t == T::SliderS {
+                    self.set_hsl(u, l)
+                } else {
+                    self.set_hsl(s, u)
+                }
+            }
+            T::Hex if !drag => {
+                self.side = Side::Colours;
+                self.focus = Focus::Hex;
+                self.hex_input = "#".into();
+            }
+            T::Hex => {}
+            T::FontRole(i) => {
+                self.side = Side::Fonts;
+                self.fonts.click_role(i);
+            }
+            T::FontRow(i) => {
+                self.side = Side::Fonts;
+                self.fonts.click_row(i);
+            }
+            T::FontSearch => {
+                self.side = Side::Fonts;
+                self.fonts.focus = FontFocus::Search;
+            }
+            T::Chip(c) => {
+                self.side = Side::Fonts;
+                self.fonts.click_chip(c);
+            }
+            T::OverlayRow(i) => {
+                if let Overlay::Open { sel, .. } = &mut self.overlay {
+                    if *sel == i {
+                        // a second click opens it, like Enter
+                        self.on_overlay_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                    } else {
+                        *sel = i;
+                    }
+                }
+            }
+            T::ConfirmChoice(c) => {
+                let code = if c == 'n' {
+                    KeyCode::Esc
+                } else {
+                    KeyCode::Char(c)
+                };
+                self.on_overlay_key(KeyEvent::new(code, KeyModifiers::NONE));
+            }
         }
     }
 
@@ -1612,6 +1655,12 @@ impl App {
             self.hex_input = "#".into(); // typing replaces the colour; Esc restores it
         }
     }
+}
+
+/// Sets the mouse pointer shape (OSC 22): "pointer" (hand) or "default".
+pub fn set_pointer(shape: &str) {
+    let mut out = std::io::stdout();
+    let _ = write!(out, "\x1b]22;{shape}\x1b\\").and_then(|_| out.flush());
 }
 
 /// Indices of entries whose name contains `filter` (case-insensitive).
@@ -2113,6 +2162,110 @@ mod tests {
             magenta,
             "preview frame drawn in magenta while capturing keys"
         );
+    }
+
+    fn mouse(app: &mut App, kind: MouseEventKind, x: u16, y: u16) {
+        app.on_mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    /// Clicks the middle of wherever `t` was last drawn.
+    fn click_on(app: &mut App, t: crate::hit::Target) {
+        let r = app
+            .hits
+            .rect_of(t)
+            .unwrap_or_else(|| panic!("{t:?} not on screen"));
+        let (x, y) = (r.x + r.width / 2, r.y + r.height / 2);
+        mouse(app, MouseEventKind::Moved, x, y);
+        mouse(app, MouseEventKind::Down(MouseButton::Left), x, y);
+        mouse(app, MouseEventKind::Up(MouseButton::Left), x, y);
+    }
+
+    #[test]
+    fn hover_highlights_and_clicks_through_the_click_map() {
+        use crate::hit::Target as T;
+        let mut app = test_app(temp_store("mouse"), Start::Named("One".into()));
+        let mut t = Terminal::new(TestBackend::new(200, 50)).unwrap();
+        let mut draw = |app: &mut App| {
+            t.draw(|f| crate::ui::draw(f, app)).unwrap();
+            t.backend().buffer().clone()
+        };
+        draw(&mut app);
+        // hovering a tab highlights it; clicking it opens the page
+        let tab = app.hits.rect_of(T::PageTab(Page::Settings)).unwrap();
+        mouse(&mut app, MouseEventKind::Moved, tab.x + 1, tab.y);
+        let buf = draw(&mut app);
+        assert_eq!(
+            buf[(tab.x + 1, tab.y)].bg,
+            ratatui::style::Color::DarkGray,
+            "hover"
+        );
+        assert_eq!(app.hits.hovered(), Some(T::PageTab(Page::Settings)));
+        click_on(&mut app, T::PageTab(Page::Settings));
+        assert_eq!(app.page, Page::Settings);
+        draw(&mut app);
+        click_on(&mut app, T::PageTab(Page::Main));
+        assert_eq!(app.page, Page::Main);
+        draw(&mut app);
+        // a group row: select, then open
+        let backgrounds = app
+            .colour_rows()
+            .iter()
+            .position(|r| matches!(r, ColourRow::Group { index: 1, .. }))
+            .unwrap();
+        click_on(&mut app, T::ColourRow(backgrounds));
+        click_on(&mut app, T::ColourRow(backgrounds));
+        assert!(app.expanded_groups.contains(&1));
+        draw(&mut app);
+        // a colour row twice opens the picker; dragging in the square edits
+        click_on(&mut app, T::ColourRow(1)); // bg0
+        click_on(&mut app, T::ColourRow(1));
+        assert!(app.picker_visible && app.focus == Focus::Square);
+        draw(&mut app);
+        let before = app.palette.get("bg0");
+        let sq = app.hits.rect_of(T::Square).unwrap();
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            sq.x + sq.width - 1,
+            sq.y,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            sq.x + sq.width - 2,
+            sq.y,
+        );
+        assert_ne!(app.palette.get("bg0"), before);
+        press(&mut app, "\n"); // keep it
+        draw(&mut app);
+        // a pane title focuses the pane
+        click_on(&mut app, T::PaneTitle(1));
+        assert_eq!(app.current_pane(), 1);
+        // a preview window takes the keyboard
+        click_on(&mut app, T::Preview(PaneId::Nvim));
+        assert_eq!(app.preview.focus, Some(PaneId::Nvim));
+        // clicking the studio again gives it back
+        draw(&mut app);
+        click_on(&mut app, T::PaneTitle(4));
+        assert_eq!(app.preview.focus, None);
+        // pop-up buttons: the unsaved-changes prompt's Esc
+        press(&mut app, "q");
+        assert!(matches!(app.overlay, Overlay::Confirm(_)));
+        draw(&mut app);
+        click_on(&mut app, T::ConfirmChoice('n'));
+        assert!(matches!(app.overlay, Overlay::None));
+        // tabs on top: their own first row
+        app.settings.layout.tabs = "top".into();
+        let buf = draw(&mut app);
+        let row0: String = (0..40).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        assert!(row0.contains("F1 Main"), "{row0}");
+        let last: String = (0..60).map(|x| buf[(x, 49)].symbol().to_string()).collect();
+        assert!(!last.contains("F1 Main"), "{last}");
     }
 
     #[test]

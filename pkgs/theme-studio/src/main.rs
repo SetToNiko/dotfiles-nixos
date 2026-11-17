@@ -7,6 +7,7 @@ mod desktop;
 mod font_tree;
 mod fonts;
 mod fonts_ui;
+mod hit;
 mod keymap;
 mod palette;
 mod preview;
@@ -76,6 +77,7 @@ fn main() -> Result<()> {
             .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks()),
     );
     let result = app.run(&mut terminal);
+    app::set_pointer("default");
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result

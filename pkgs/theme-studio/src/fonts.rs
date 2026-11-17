@@ -18,7 +18,6 @@ use crate::font_tree::Node;
 use crate::keymap::Action;
 use crate::palette::Palette;
 use crate::store::to_jq_string;
-use ratatui::layout::Rect;
 
 /// The three font roles, in fonts.json and on screen.
 pub const ROLES: [&str; 3] = ["mono", "ui", "bar"];
@@ -356,14 +355,6 @@ impl Row {
     }
 }
 
-/// Screen areas of the Fonts tab from the last draw, for mouse clicks.
-#[derive(Clone, Debug, Default)]
-pub struct FontAreas {
-    pub slots: Rect,
-    pub list: Rect,
-    pub chips: Vec<(char, Rect)>,
-}
-
 /// The X server's DPI (Xft.dpi), so the sample is the size the fonts really are.
 pub fn screen_dpi() -> u32 {
     Command::new("xrdb")
@@ -601,7 +592,6 @@ pub struct FontsTab {
     pub expanded: HashSet<String>,
     pub search: String,
     pub filters: Filters,
-    pub areas: FontAreas,
     /// Opening the list unfolds the groups of the role's current font (a setting).
     pub unfold_current: bool,
     pub list_sel: usize,
@@ -643,7 +633,6 @@ impl FontsTab {
             expanded: HashSet::new(),
             search: String::new(),
             filters: Filters::default(),
-            areas: FontAreas::default(),
             unfold_current: true,
             list_sel: 0,
             list_scroll: 0,
@@ -819,30 +808,32 @@ impl FontsTab {
         }
     }
 
-    /// Mouse: a click on a role, a filter chip, or a list row (a second click
-    /// on the highlighted row opens the group / uses the font).
-    pub fn click(&mut self, x: u16, y: u16) {
-        let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-        if let Some(&(c, _)) = self.areas.chips.iter().find(|(_, r)| inside(*r)) {
-            self.filters.toggle(c);
+    /// Mouse: a click on one of the three roles.
+    pub fn click_role(&mut self, role: usize) {
+        if role < 3 {
+            self.slot = role;
+            self.focus = FontFocus::Slots;
+        }
+    }
+
+    /// Mouse: a click on a filter chip.
+    pub fn click_chip(&mut self, c: char) {
+        self.filters.toggle(c);
+        self.focus = FontFocus::List;
+        self.clamp_sel();
+    }
+
+    /// Mouse: a click on a list row; a second click on the highlighted row
+    /// opens the group or uses the font.
+    pub fn click_row(&mut self, i: usize) {
+        if i >= self.rows().len() {
+            return;
+        }
+        if i == self.list_sel && self.focus == FontFocus::List {
+            self.activate();
+        } else {
+            self.list_sel = i;
             self.focus = FontFocus::List;
-            self.clamp_sel();
-        } else if inside(self.areas.slots) {
-            let role = ((y - self.areas.slots.y) / 3) as usize;
-            if role < 3 {
-                self.slot = role;
-                self.focus = FontFocus::Slots;
-            }
-        } else if inside(self.areas.list) {
-            let i = self.list_scroll + (y - self.areas.list.y) as usize;
-            if i < self.rows().len() {
-                if i == self.list_sel && self.focus == FontFocus::List {
-                    self.activate();
-                } else {
-                    self.list_sel = i;
-                    self.focus = FontFocus::List;
-                }
-            }
         }
     }
 
@@ -1268,22 +1259,18 @@ mod tests {
             font("JetBrainsMono Nerd Font Mono", true, true),
             font("Zeta", false, false),
         ]);
-        t.areas = FontAreas {
-            slots: Rect::new(0, 0, 50, 9),
-            list: Rect::new(0, 20, 50, 10),
-            chips: vec![('m', Rect::new(0, 15, 8, 1))],
-        };
-        t.click(3, 7); // third role (bar)
+        t.click_role(2); // bar
         assert_eq!((t.slot, t.focus), (2, FontFocus::Slots));
-        t.click(3, 20); // first row: select the group
+        t.click_row(0); // the group: select it
         assert_eq!((t.list_sel, t.focus), (0, FontFocus::List));
-        t.click(3, 20); // again: open it
+        t.click_row(0); // again: open it
         assert_eq!(t.rows().len(), 4);
-        t.click(3, 22); // second font: select, then use it
-        t.click(3, 22);
+        t.click_row(2); // second font: select, then use it
+        t.click_row(2);
         assert_eq!(t.preset.fonts[2].family, "JetBrainsMono Nerd Font Mono");
-        t.click(2, 15); // mono chip
+        t.click_chip('m');
         assert!(t.filters.is_on('m'));
         assert!(!labels(&t).contains(&"Zeta".to_string()));
+        t.click_row(99); // past the end: nothing
     }
 }

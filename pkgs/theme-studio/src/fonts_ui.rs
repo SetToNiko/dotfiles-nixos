@@ -9,8 +9,9 @@ use ratatui::widgets::{Block, Paragraph};
 use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::{App, Side};
-use crate::fonts::{CHIPS, FontAreas, FontFocus, ROLE_USE, ROLES, Row};
-use crate::ui::panel_number;
+use crate::fonts::{CHIPS, FontFocus, ROLE_USE, ROLES, Row};
+use crate::hit::{Target, hover};
+use crate::ui::{pane_title, panel_number};
 
 fn block(title: Line<'static>, focused: bool) -> Block<'static> {
     let b = Block::bordered().title(title);
@@ -22,29 +23,45 @@ fn block(title: Line<'static>, focused: bool) -> Block<'static> {
 }
 
 /// ¹ the font roles and ² the installed fonts (the fonts column; the sample
-/// is drawn by `draw_sample`).
+/// is drawn by `draw_sample`). Roles, the search line, chips and rows are
+/// clickable and highlighted under the mouse.
 pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rect) {
     // the fonts column has the keyboard (and not a preview window)
     let active = app.side == Side::Fonts && app.preview.focus.is_none();
-    let t = &app.fonts;
 
-    // ¹ roles
-    let title = Line::from(vec![
+    // titles first (they're clickable too)
+    let title1 = Line::from(vec![
         panel_number(1),
         "Fonts: ".into(),
-        Span::styled(t.name.clone(), Style::new().bold()),
-        if t.dirty() {
+        Span::styled(app.fonts.name.clone(), Style::new().bold()),
+        if app.fonts.dirty() {
             Span::styled(" ●", Style::new().yellow())
         } else {
             "".into()
         },
         " ".into(),
     ]);
-    let b = block(title, active && t.focus == FontFocus::Slots);
+    let title1 = pane_title(app, slots_area, title1, 1);
+    let title2 = Line::from(vec![
+        panel_number(2),
+        "Installed fonts".into(),
+        Span::styled(
+            format!(" for {} ", ROLES[app.fonts.slot]),
+            Style::new().dark_gray(),
+        ),
+    ]);
+    let title2 = pane_title(app, list_area, title2, 2);
+    let t = &app.fonts;
+
+    // ¹ roles: three lines each
+    let b = block(title1, active && t.focus == FontFocus::Slots);
     let inner = b.inner(slots_area);
-    let slots_inner = inner;
     f.render_widget(b, slots_area);
     let mut lines = Vec::new();
+    if let Some(e) = &t.load_error {
+        lines.push(Line::styled(format!(" {e}"), Style::new().red()));
+    }
+    let first_role_line = lines.len() as u16;
     for (i, font) in t.preset.fonts.iter().enumerate() {
         let selected = i == t.slot;
         let name_style = if selected {
@@ -52,42 +69,46 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         } else {
             Style::new()
         };
-        lines.push(Line::from(vec![
-            Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
-            Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
-            Span::styled(format!(" {}", font.family), name_style),
-        ]));
         let eff = t.effective_size(i, font.size);
         let size = if eff != font.size {
             format!("{} → {eff} here", font.size)
         } else {
             font.size.to_string()
         };
-        lines.push(Line::from(vec![
-            Span::raw(format!("         {size:<12}")),
-            Span::styled(ROLE_USE[i], Style::new().dark_gray()),
-        ]));
-        match t.warnings(i).first() {
-            Some(w) => lines.push(Line::styled(
-                format!("         ⚠ {w}"),
-                Style::new().yellow(),
-            )),
-            None => lines.push(Line::raw("")),
+        let mut role = vec![
+            Line::from(vec![
+                Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
+                Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
+                Span::styled(format!(" {}", font.family), name_style),
+            ]),
+            Line::from(vec![
+                Span::raw(format!("         {size:<12}")),
+                Span::styled(ROLE_USE[i], Style::new().dark_gray()),
+            ]),
+            match t.warnings(i).first() {
+                Some(w) => Line::styled(format!("         ⚠ {w}"), Style::new().yellow()),
+                None => Line::raw(""),
+            },
+        ];
+        let r = Rect {
+            y: inner.y + first_role_line + 3 * i as u16,
+            height: 3,
+            ..inner
         }
-    }
-    if let Some(e) = &t.load_error {
-        lines.insert(0, Line::styled(format!(" {e}"), Style::new().red()));
+        .intersection(inner);
+        if app.hits.add(r, Target::FontRole(i)) {
+            role = role
+                .into_iter()
+                .map(|l| l.patch_style(hover(Style::new())))
+                .collect();
+        }
+        lines.extend(role);
     }
     f.render_widget(Paragraph::new(lines), inner);
 
     // ² installed fonts: search, filter chips, then the grouped list
     let browsing = active && matches!(t.focus, FontFocus::List | FontFocus::Search);
-    let title = Line::from(vec![
-        panel_number(2),
-        "Installed fonts".into(),
-        Span::styled(format!(" for {} ", ROLES[t.slot]), Style::new().dark_gray()),
-    ]);
-    let b = block(title, browsing);
+    let b = block(title2, browsing);
     let inner = b.inner(list_area);
     f.render_widget(b, list_area);
     if inner.height < 4 {
@@ -104,12 +125,19 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
             _ => 0,
         })
         .sum();
-    let search_style = if t.focus == FontFocus::Search {
+    let searching = t.focus == FontFocus::Search;
+    let mut search_style = if searching {
         Style::new().yellow()
     } else {
         Style::new().dark_gray()
     };
-    let search_text = if t.focus == FontFocus::Search {
+    if app
+        .hits
+        .add(Rect { height: 1, ..inner }, Target::FontSearch)
+    {
+        search_style = hover(search_style);
+    }
+    let search_text = if searching {
         format!("{}▏", t.search)
     } else if t.search.is_empty() {
         "search".to_string()
@@ -122,8 +150,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         Span::styled(format!("   {fonts_shown} fonts"), Style::new().dark_gray()),
     ])];
 
-    // Chips, wrapped to the panel width; their positions are kept for clicks.
-    let mut chips: Vec<(char, Rect)> = Vec::new();
+    // Chips, wrapped to the panel width; each is clickable.
     let mut chip_lines: Vec<Vec<Span>> = vec![vec![" ".into()]];
     let mut x = 1u16;
     for (c, label) in CHIPS {
@@ -134,20 +161,20 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
             x = 1;
         }
         let row = chip_lines.len() as u16 - 1;
-        chips.push((
-            c,
-            Rect {
-                x: inner.x + x,
-                y: inner.y + 1 + row,
-                width: w,
-                height: 1,
-            },
-        ));
-        let style = if t.filters.is_on(c) {
+        let r = Rect {
+            x: inner.x + x,
+            y: inner.y + 1 + row,
+            width: w,
+            height: 1,
+        };
+        let mut style = if t.filters.is_on(c) {
             Style::new().black().on_yellow()
         } else {
             Style::new().dark_gray()
         };
+        if app.hits.add(r, Target::Chip(c)) {
+            style = hover(style);
+        }
         let line = chip_lines.last_mut().unwrap();
         line.push(Span::styled(text, style));
         line.push(" ".into());
@@ -216,6 +243,16 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
                 Line::from(spans)
             }
         };
+        let r = Rect {
+            y: inner.y + lines.len() as u16,
+            height: 1,
+            ..inner
+        };
+        let line = if app.hits.add(r, Target::FontRow(row_i)) {
+            line.patch_style(hover(Style::new()))
+        } else {
+            line
+        };
         lines.push(line);
     }
     if t.installed.is_empty() {
@@ -230,17 +267,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         ));
     }
     f.render_widget(Paragraph::new(lines), inner);
-    let t = &mut app.fonts;
-    t.list_scroll = scroll;
-    t.areas = FontAreas {
-        slots: slots_inner,
-        list: Rect {
-            y: inner.y + list_top,
-            height: height as u16,
-            ..inner
-        },
-        chips,
-    };
+    app.fonts.list_scroll = scroll;
 }
 
 /// The sample image: the fonts drawn by Pango at this machine's sizes and
@@ -263,6 +290,7 @@ pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
             Style::new().dark_gray(),
         ),
     ]);
+    let title = pane_title(app, area, title, 3);
     let b = Block::bordered().title(title).border_style(
         if app.side == Side::Fonts
             && app.preview.focus.is_none()
@@ -274,6 +302,7 @@ pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
         },
     );
     let inner = b.inner(area);
+    app.hits.add(inner, Target::PaneBody(3));
     f.render_widget(b, area);
     f.render_widget(
         Block::new().style(Style::new().bg(app.palette.get("bg0").color())),

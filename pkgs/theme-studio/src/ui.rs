@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::{App, ColourRow, Focus, Overlay, Page, Side, open_matches};
 use crate::color::{self, Rgb};
+use crate::hit::{Target, hover};
 use crate::keymap::{Action, Context};
 use crate::palette::{self, GROUPS, TEXT_KEYS};
 use crate::preview::Mode as PreviewMode;
@@ -151,42 +152,81 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangemen
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
-    let area = f.area();
-    match arrange(area, app.page, app.picker_visible, app.sample_visible) {
-        Arrangement::TooSmall { need_w, need_h } => draw_too_small(f, area, need_w, need_h),
+    app.hits.clear();
+    let full = f.area();
+    // tabs on top: their own row; at the bottom they share the status line
+    let top = app.settings.layout.tabs_on_top();
+    let (tabs_row, area) = if top && full.height > 1 {
+        let [t, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(full);
+        (Some(t), rest)
+    } else {
+        (None, full)
+    };
+    let arrangement = arrange(area, app.page, app.picker_visible, app.sample_visible);
+    if let Arrangement::TooSmall { need_w, need_h } = arrangement {
+        return draw_too_small(f, full, need_w, need_h + top as u16);
+    }
+    if let Some(t) = tabs_row {
+        draw_tabs(f, app, t);
+    }
+    match arrangement {
+        Arrangement::TooSmall { .. } => {}
         Arrangement::Page { body, status } => {
-            app.areas = Default::default();
             draw_page(f, app, body);
             draw_status(f, app, status);
-            draw_overlay(f, app, area);
-            draw_pending(f, app, area);
         }
         Arrangement::Main(l) => {
             app.wide = l.wide;
-            app.areas.fonts_column = l
-                .roles
-                .union(l.font_list)
-                .union(l.sample.unwrap_or(l.roles));
             crate::fonts_ui::draw_fonts(f, app, l.roles, l.font_list);
-            app.areas.sample = l.sample.unwrap_or_default();
             if let Some(s) = l.sample {
                 crate::fonts_ui::draw_sample(f, app, s);
             }
             draw_list(f, app, l.colour_list);
-            match l.picker {
-                Some(p) => draw_picker(f, app, p),
-                None => {
-                    let a = &mut app.areas;
-                    (a.square, a.hue, a.slider_h, a.slider_s, a.slider_l, a.hex) =
-                        Default::default();
-                }
+            if let Some(p) = l.picker {
+                draw_picker(f, app, p);
             }
             draw_preview(f, app, l.preview, l.wide);
             draw_status(f, app, l.status);
-            draw_overlay(f, app, area);
-            draw_pending(f, app, area);
         }
     }
+    draw_overlay(f, app, full);
+    draw_pending(f, app, full);
+}
+
+/// The page tabs (F1 Main, F2 Fonts, F3 Settings), clickable; returns the
+/// width used.
+fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) -> u16 {
+    let mut x = area.x;
+    for (label, action, page) in [
+        ("Main", Action::PageMain, Page::Main),
+        ("Fonts", Action::PageDownloads, Page::Downloads),
+        ("Settings", Action::PageSettings, Page::Settings),
+    ] {
+        let key = app
+            .keymap
+            .key_for(&[Context::Global], action)
+            .map(|k| friendly(&k))
+            .unwrap_or_default();
+        let text = format!(" {key} {label} ");
+        let w = (text.chars().count() as u16).min((area.x + area.width).saturating_sub(x));
+        let r = Rect {
+            x,
+            y: area.y,
+            width: w,
+            height: 1,
+        };
+        let mut style = if app.page == page {
+            Style::new().reversed().bold()
+        } else {
+            Style::new().dark_gray()
+        };
+        if app.hits.add(r, Target::PageTab(page)) {
+            style = hover(style);
+        }
+        f.render_widget(Paragraph::new(Span::styled(text, style)), r);
+        x += w;
+    }
+    x - area.x
 }
 
 /// The Download fonts and Settings pages (filled in by later steps).
@@ -263,6 +303,21 @@ fn focused_block(title: Line<'static>, focused: bool) -> Block<'static> {
     }
 }
 
+/// A pane title that focuses the pane when clicked (hover-highlighted).
+pub fn pane_title(app: &mut App, area: Rect, title: Line<'static>, pane: u8) -> Line<'static> {
+    let r = Rect {
+        x: area.x + 1,
+        y: area.y,
+        width: (title.width() as u16).min(area.width.saturating_sub(2)),
+        height: 1,
+    };
+    if app.hits.add(r, Target::PaneTitle(pane)) {
+        title.patch_style(hover(Style::new()))
+    } else {
+        title
+    }
+}
+
 /// A swatch with a thin frame, visible even when it matches the background.
 fn framed(c: Rgb) -> Span<'static> {
     Span::styled("▕    ▏", Style::new().bg(c.color()).fg(Color::DarkGray))
@@ -289,6 +344,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     ]);
     let focused =
         app.side == Side::Colours && app.focus == Focus::List && app.preview.focus.is_none();
+    let title = pane_title(app, area, title, 4);
     let block = focused_block(title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -380,9 +436,22 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     }
     app.list_scroll = app.list_scroll.min(rows.len().saturating_sub(h.max(1)));
     let shown: Vec<Line> = lines.into_iter().skip(app.list_scroll).take(h).collect();
-    app.areas.list = inner;
-    app.areas.list_rows = (app.list_scroll..app.list_scroll + shown.len())
-        .map(Some)
+    // each row is clickable; the one under the mouse is highlighted
+    let shown: Vec<Line> = shown
+        .into_iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let r = Rect {
+                y: inner.y + i as u16,
+                height: 1,
+                ..inner
+            };
+            if app.hits.add(r, Target::ColourRow(app.list_scroll + i)) {
+                line.patch_style(hover(Style::new()))
+            } else {
+                line
+            }
+        })
         .collect();
     f.render_widget(Paragraph::new(shown), inner);
 }
@@ -417,6 +486,7 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.side == Side::Colours
         && !matches!(app.focus, Focus::List)
         && app.preview.focus.is_none();
+    let title = pane_title(app, area, title, 5);
     let block = focused_block(title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -437,6 +507,31 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let (h, s, v) = app.hsv;
     let current = app.palette.get(key);
+    // clickable parts (registered before drawing, so hover can be shown)
+    let track_w = inner.width.saturating_sub(10);
+    let track = |row: u16| Rect {
+        x: inner.x + 3,
+        y: inner.y + rows + row,
+        width: track_w,
+        height: 1,
+    };
+    let sq_hover = app.hits.add(sq, Target::Square);
+    let hue_hover = app.hits.add(hue, Target::Hue);
+    let slider_hover = [
+        app.hits.add(track(0), Target::SliderH),
+        app.hits.add(track(1), Target::SliderS),
+        app.hits.add(track(2), Target::SliderL),
+    ];
+    let hex_hover = app.hits.add(
+        Rect {
+            x: inner.x,
+            y: inner.y + rows + 4,
+            width: 14,
+            height: 1,
+        },
+        Target::Hex,
+    );
+    let mouse = app.hits.mouse;
     let buf = f.buffer_mut();
 
     // Saturation (left to right) × value (top to bottom), two pixels per cell
@@ -457,6 +552,17 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
         "○"
     };
     set_cell(buf, mx, my, marker, current.text_on(), current);
+    // hovering the square: a crosshair where a click would pick
+    if sq_hover && let Some((x, y)) = mouse {
+        let under = buf
+            .cell((x, y))
+            .and_then(|c| match c.fg {
+                Color::Rgb(r, g, b) => Some(Rgb(r, g, b)),
+                _ => None,
+            })
+            .unwrap_or(current);
+        set_cell(buf, x, y, "┼", under.text_on(), under);
+    }
 
     // Hue strip
     for cy in 0..rows {
@@ -475,10 +581,17 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
             Style::new()
         });
     }
+    // hovering the hue strip: a pale marker at the hue a click would pick
+    if hue_hover
+        && let Some((_, y)) = mouse
+        && let Some(cell) = buf.cell_mut((hue.x + hue.width, y))
+        && cell.symbol() != "◀"
+    {
+        cell.set_symbol("◁").set_style(Style::new().dark_gray());
+    }
 
     // H, S, L sliders, each showing what moving it would give
     let (sl_s, sl_l) = app.hsl();
-    let track_w = inner.width.saturating_sub(10);
     let sliders: [(Focus, &str, f64, String); 3] = [
         (
             Focus::SliderH,
@@ -501,11 +614,14 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
     ];
     for (row, (focus, label, t, value)) in sliders.into_iter().enumerate() {
         let y = inner.y + rows + row as u16;
-        let label_style = if app.focus == focus {
+        let mut label_style = if app.focus == focus {
             Style::new().yellow().bold()
         } else {
             Style::new()
         };
+        if slider_hover[row] {
+            label_style = hover(label_style);
+        }
         if let Some(cell) = buf.cell_mut((inner.x + 1, y)) {
             cell.set_symbol(label).set_style(label_style);
         }
@@ -532,11 +648,6 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
         };
         set_cell(buf, tx, y, "┃", under.text_on(), under);
         buf.set_string(track.x + track.width + 1, y, value, label_style);
-        match focus {
-            Focus::SliderH => app.areas.slider_h = track,
-            Focus::SliderS => app.areas.slider_s = track,
-            _ => app.areas.slider_l = track,
-        }
     }
 
     // Hex input, and the colour before and after editing
@@ -554,14 +665,14 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let old = app.saved.get(key);
     let line = Line::from(vec![
-        Span::styled(
-            " hex ",
-            if editing {
+        Span::styled(" hex ", {
+            let s = if editing {
                 Style::new().yellow().bold()
             } else {
                 Style::new()
-            },
-        ),
+            };
+            if hex_hover { hover(s) } else { s }
+        }),
         Span::styled(hex_text, hex_style),
         "   saved ".dark_gray(),
         framed(old),
@@ -575,14 +686,6 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
         height: 1,
     };
     f.render_widget(Paragraph::new(line), hex_row);
-    app.areas.square = sq;
-    app.areas.hue = hue;
-    app.areas.hex = Rect {
-        x: inner.x,
-        y,
-        width: 14,
-        height: 1,
-    };
 }
 
 // ----- preview (simple, until the live desktop preview) --------------------
@@ -642,6 +745,28 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
         &app.name,
         stack,
     );
+    // nvim and the shell are clickable (a click hands them the keyboard);
+    // hovering one lights its frame in the capture colour
+    let rects = app.preview.rects.clone();
+    for (id, r) in rects {
+        if app.hits.add(r, Target::Preview(id)) && app.preview.focus != Some(id) {
+            let buf = f.buffer_mut();
+            for x in r.x..r.x + r.width {
+                for y in [r.y, r.y + r.height.saturating_sub(1)] {
+                    if let Some(c) = buf.cell_mut((x, y)) {
+                        c.set_fg(Color::Magenta);
+                    }
+                }
+            }
+            for y in r.y..r.y + r.height {
+                for x in [r.x, r.x + r.width.saturating_sub(1)] {
+                    if let Some(c) = buf.cell_mut((x, y)) {
+                        c.set_fg(Color::Magenta);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Every key as a swatch, plus static samples (V switches to this view).
@@ -873,29 +998,21 @@ fn draw_swatches(f: &mut Frame, app: &App, area: Rect) {
 
 // ----- status line --------------------------------------------------------
 
-fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    // pages, labelled with their keys (F1 Main, F2 Fonts, F3 Settings)
-    let page = |label: &str, action: Action, on: bool| {
-        let key = app
-            .keymap
-            .key_for(&[Context::Global], action)
-            .map(|k| friendly(&k))
-            .unwrap_or_default();
-        Span::styled(
-            format!(" {key} {label} "),
-            if on {
-                Style::new().reversed().bold()
-            } else {
-                Style::new().dark_gray()
-            },
-        )
+fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
+    // the page tabs start the line unless they're on top (settings: layout.tabs)
+    let used = if app.settings.layout.tabs_on_top() {
+        0
+    } else {
+        draw_tabs(f, app, area)
     };
+    let area = Rect {
+        x: area.x + used,
+        width: area.width.saturating_sub(used),
+        ..area
+    };
+    let app = &*app;
     let fonts = app.side == Side::Fonts;
-    let mut spans = vec![
-        page("Main", Action::PageMain, app.page == Page::Main),
-        page("Fonts", Action::PageDownloads, app.page == Page::Downloads),
-        page("Settings", Action::PageSettings, app.page == Page::Settings),
-    ];
+    let mut spans: Vec<Span> = Vec::new();
     if let Some((msg, err)) = &app.message {
         spans.push(Span::styled(
             format!(" {msg} "),
@@ -1144,7 +1261,7 @@ fn draw_pending(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::new().yellow());
     f.render_widget(Paragraph::new(lines).block(block), r);
 }
-fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
+fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
     match &app.overlay {
         Overlay::None | Overlay::CopyFrom { .. } => {
             if let Overlay::CopyFrom { target } = app.overlay {
@@ -1220,17 +1337,42 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             }
         }
         Overlay::Confirm(_) => {
-            let save = if app.is_new { "" } else { "   s  save first" };
+            let r = centered(area, 56, 5);
+            let y = r.y + 3;
+            // the choices are clickable, like their keys
+            let mut button = |text: &'static str, x: u16, choice: char, base: Style| {
+                let w = text.chars().count() as u16;
+                let hovered = app.hits.add(
+                    Rect {
+                        x,
+                        y,
+                        width: w,
+                        height: 1,
+                    },
+                    Target::ConfirmChoice(choice),
+                );
+                (
+                    Span::styled(text, if hovered { hover(base) } else { base }),
+                    x + w,
+                )
+            };
+            let (discard, x) = button(" y  discard them ", r.x + 1, 'y', Style::new().yellow());
+            let mut spans = vec![discard];
+            let mut x = x;
+            if !app.is_new {
+                spans.push("  ".into());
+                let (save, nx) = button(" s  save first ", x + 2, 's', Style::new());
+                spans.push(save);
+                x = nx;
+            }
+            spans.push("  ".into());
+            spans.push(button(" Esc  cancel ", x + 2, 'n', Style::new()).0);
             let lines = vec![
                 Line::raw(format!(" \"{}\" has unsaved changes.", app.name)),
                 Line::raw(""),
-                Line::from(vec![
-                    Span::styled(" y  discard them", Style::new().yellow()),
-                    Span::raw(save),
-                    Span::raw("   Esc  cancel"),
-                ]),
+                Line::from(spans),
             ];
-            popup(f, centered(area, 56, 5), "Unsaved changes", lines);
+            popup(f, r, "Unsaved changes", lines);
         }
         Overlay::SaveAs {
             input, overwrite, ..
@@ -1298,7 +1440,19 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 if app.active.as_deref() == Some(name) {
                     spans.push(Span::styled(" active", Style::new().dark_gray()));
                 }
-                lines.push(Line::from(spans));
+                // rows are clickable (a second click opens), hover-highlighted
+                let rr = Rect {
+                    x: r.x + 1,
+                    y: r.y + 1 + lines.len() as u16,
+                    width: r.width.saturating_sub(2),
+                    height: 1,
+                };
+                let line = Line::from(spans);
+                lines.push(if app.hits.add(rr, Target::OverlayRow(row)) {
+                    line.patch_style(hover(Style::new()))
+                } else {
+                    line
+                });
             }
             popup(
                 f,
