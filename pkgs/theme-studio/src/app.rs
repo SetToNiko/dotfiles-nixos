@@ -4522,4 +4522,71 @@ mod tests {
         std::fs::remove_dir_all(fonts).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn prefetching_keeps_the_main_loop_quick() {
+        use crate::download::{Catalogue, Entry, Msg, Source};
+        use std::sync::mpsc::Sender;
+        // downloads answer at once (no network)
+        fn stub(e: Entry, tx: Sender<Msg>) {
+            let _ = tx.send(Msg::Preview {
+                id: e.id,
+                result: Ok(e.family),
+            });
+        }
+        let store = temp_store("prefetch-loop");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        let entry = |i: usize, category: &str, source: Source| Entry {
+            id: format!("font-{i}"),
+            family: format!("Font {i}"),
+            category: category.into(),
+            license: String::new(),
+            weights: vec![400],
+            italic: false,
+            variable: false,
+            source,
+            subset: "latin".into(),
+        };
+        let nerd = |i| Source::Nerd {
+            asset: format!("N{i}"),
+            url: String::new(),
+            size: 1,
+        };
+        app.dl.catalogue = Some(Catalogue {
+            google: (0..2000)
+                .map(|i| entry(i, "monospace", Source::Google))
+                .collect(),
+            nerd: (2000..2005)
+                .map(|i| entry(i, "nerd font", nerd(i)))
+                .collect(),
+            nerd_tag: String::new(),
+        });
+        app.settings.fonts_page.prefetch = true;
+        app.settings.fonts_page.prefetch_categories = vec!["monospace".into(), "nerd font".into()];
+        app.prefetch.fetch = Some(stub);
+        let (start, mut slowest) = (Instant::now(), Duration::ZERO);
+        while app.prefetch.done < 2005 || app.prefetch.active() {
+            let t = Instant::now();
+            app.poll_downloads();
+            app.poll_prefetch();
+            slowest = slowest.max(t.elapsed());
+            assert!(
+                app.prefetch.nerd_in_flight.len() <= 1,
+                "archives one at a time"
+            );
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "stuck at {}",
+                app.prefetch.done
+            );
+        }
+        assert_eq!((app.prefetch.done, app.prefetch.total), (2005, 2005));
+        // a tick never takes long (generous for a debug build)
+        assert!(
+            slowest < Duration::from_millis(20),
+            "a tick took {slowest:?}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

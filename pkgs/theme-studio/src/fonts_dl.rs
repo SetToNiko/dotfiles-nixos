@@ -214,15 +214,17 @@ impl App {
             download::load_catalogue(self.dl.tx.clone());
         }
         let mut changed = false;
+        // only what shows on screen asks for a redraw (prefetching sends a lot)
         while let Ok(m) = self.dl.rx.try_recv() {
-            changed = true;
             match m {
                 Msg::Catalogue(Ok(c)) => {
                     self.dl.loading = false;
+                    changed = true;
                     self.dl.catalogue = Some(c);
                 }
                 Msg::Catalogue(Err(e)) => {
                     self.dl.loading = false;
+                    changed = true;
                     self.dl.catalogue = Some(Catalogue::default());
                     self.dl.load_error = Some(e);
                 }
@@ -230,6 +232,7 @@ impl App {
                     let Some(job) = self.dl.jobs.get_mut(&id) else {
                         continue;
                     };
+                    changed = true;
                     (job.1, job.2) = (done, total);
                     let pct = if total > 0 {
                         format!("{}%", done * 100 / total.max(1))
@@ -240,12 +243,27 @@ impl App {
                     self.info(format!("Downloading {family}: {pct}"));
                 }
                 Msg::Preview { id, result } => {
-                    self.prefetch.finished(&id);
+                    // the font on screen, or one the page asked for
+                    let ours = self.prefetch.finished(&id);
                     let pv = self.pv();
+                    changed |= !ours || pv.last.as_deref() == Some(id.as_str());
                     pv.fetching.remove(&id);
                     pv.families.insert(id, result);
                 }
+                Msg::PrefetchQueue {
+                    categories,
+                    queue,
+                    total,
+                } => {
+                    self.prefetch.queued(categories, queue, total);
+                    changed = true;
+                }
+                Msg::PreviewsSize(bytes) => {
+                    self.prefetch.measured(bytes);
+                    changed = true;
+                }
                 Msg::Installed { id, result } => {
+                    changed = true;
                     let family = self.dl.jobs.remove(&id).map_or(id, |j| j.0);
                     match result {
                         Ok((name, entry)) => self.record_install(&name, entry),

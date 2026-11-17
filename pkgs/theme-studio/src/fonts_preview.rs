@@ -37,7 +37,7 @@ pub struct FontPreview {
     pub error: Option<String>,
     renderer: SampleRenderer,
     /// The highlighted font, and since when.
-    last: Option<String>,
+    pub last: Option<String>,
     since: Instant,
     /// The pane's size in cells (from the last draw, once settled).
     pub area: (u16, u16),

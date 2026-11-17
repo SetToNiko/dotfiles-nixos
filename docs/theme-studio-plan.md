@@ -1179,7 +1179,12 @@ Each step is committed separately and keeps the studio working.
    ImageMagick under `nice`. Not needed: the terminal encode stays on the
    main thread (about 7 ms), and the Rust renderer. `THEME_STUDIO_TIMING=1`
    logs each render to `~/.local/state/theme-studio/timing.log`.
-6. Prefetching off the main thread (7).
+6. ✅ Prefetching off the main thread (7). The queue and the space used
+   are worked out on threads; only what shows asks for a redraw (the
+   progress at most 4 times a second); curl, tar, sha256sum, fc-scan and
+   fc-cache run under `nice -n 10`, ImageMagick under `nice -n 5`; Nerd
+   Font archives one at a time. With 2,005 fonts queued and stubbed
+   downloads, the slowest main-loop tick was 0.6 ms (debug build).
 7. Then the tournament (Phase 7 step 4).
 
 ## Phase 8: polish

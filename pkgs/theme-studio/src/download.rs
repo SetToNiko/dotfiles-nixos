@@ -74,6 +74,15 @@ pub enum Msg {
         id: String,
         result: Result<String, String>,
     },
+    /// Prefetching's queue, made on a thread: for which categories, the
+    /// fonts still to fetch, and how many there are in all.
+    PrefetchQueue {
+        categories: Vec<String>,
+        queue: Vec<Entry>,
+        total: usize,
+    },
+    /// The space the preview fonts take (measured on a thread).
+    PreviewsSize(u64),
 }
 
 fn home() -> PathBuf {
@@ -104,6 +113,14 @@ fn cache_dir() -> PathBuf {
     xdg("XDG_CACHE_HOME", ".cache").join("theme-studio")
 }
 
+/// A command at a lower priority (nice), so downloads, unpacking and font
+/// scans in the background never slow the studio, nvim or the shell.
+fn low(program: &str) -> Command {
+    let mut c = Command::new("nice");
+    c.args(["-n", "10", program]);
+    c
+}
+
 /// Expands a leading `~/`.
 pub fn expand(p: &str) -> PathBuf {
     match p.strip_prefix("~/") {
@@ -116,7 +133,7 @@ pub fn expand(p: &str) -> PathBuf {
 
 /// GETs a URL's body (small JSON answers).
 fn get(url: &str) -> Result<String> {
-    let out = Command::new("curl")
+    let out = low("curl")
         .args([
             "-sS",
             "-f",
@@ -137,7 +154,7 @@ fn get(url: &str) -> Result<String> {
 
 /// Downloads a URL to `out`, calling `progress(bytes so far)` as it goes.
 fn fetch(url: &str, out: &Path, mut progress: impl FnMut(u64)) -> Result<()> {
-    let mut child = Command::new("curl")
+    let mut child = low("curl")
         .args(["-sS", "-f", "-L", "--max-time", "600", "-o"])
         .arg(out)
         .arg(url)
@@ -311,7 +328,7 @@ pub fn google_dirs(e: &Entry) -> Vec<String> {
 
 /// sha256 as a Nix SRI hash (for fetchurl in home/fonts.nix).
 fn sri(file: &Path) -> Result<String> {
-    let out = Command::new("sha256sum")
+    let out = low("sha256sum")
         .arg(file)
         .output()
         .context("running sha256sum")?;
@@ -442,7 +459,7 @@ fn install_nerd(e: &Entry, dir: &Path, tx: &Sender<Msg>) -> Result<Value> {
         dir,
         tx,
     )?;
-    let out = Command::new("tar")
+    let out = low("tar")
         .arg("-xJf")
         .arg(&archive)
         .arg("-C")
@@ -470,7 +487,7 @@ pub fn install(e: Entry, root: PathBuf, tx: Sender<Msg>) {
                 Source::Fontsource => install_fontsource(&e, &dir, &tx)?,
                 Source::Nerd { .. } => install_nerd(&e, &dir, &tx)?,
             };
-            let _ = Command::new("fc-cache").arg(&root).output();
+            let _ = low("fc-cache").arg(&root).output();
             let name = match &e.source {
                 Source::Nerd { asset, .. } => asset.clone(),
                 _ => e.family.clone(),
@@ -589,7 +606,7 @@ fn keep_regular_only(dir: &Path) {
 
 /// The family name inside a font file (fc-scan).
 fn family_of(file: &Path) -> Option<String> {
-    let out = Command::new("fc-scan")
+    let out = low("fc-scan")
         .args(["--format", "%{family[0]}"])
         .arg(file)
         .output()
@@ -683,7 +700,7 @@ pub fn remove_files(root: &Path, id: &str) -> Result<()> {
     let dir = root.join(id);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
-        let _ = Command::new("fc-cache").arg(root).output();
+        let _ = low("fc-cache").arg(root).output();
     }
     Ok(())
 }
@@ -815,7 +832,7 @@ mod tests {
                 match rx.recv_timeout(Duration::from_secs(120)).unwrap() {
                     Msg::Progress { .. } => progress += 1,
                     Msg::Installed { result, .. } => break result,
-                    Msg::Catalogue(_) | Msg::Preview { .. } => {}
+                    _ => {}
                 }
             };
             let (name, entry) = result.unwrap();

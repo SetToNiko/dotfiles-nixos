@@ -1,41 +1,68 @@
 //! Fetching font previews ahead of time (settings.json: fonts-page.prefetch
 //! and prefetch-categories), so the Fonts page and the tournament draw at
-//! once. A few download at a time in the background; fonts already fetched
-//! are skipped, so it carries on where it stopped after a restart.
+//! once. Everything slow happens off the main thread: the queue is made on a
+//! thread (it checks ~1,700 folders), each download is a thread of its own
+//! (curl and tar under nice), and the screen is redrawn for the progress at
+//! most a few times a second. Fonts already fetched are skipped, so it
+//! carries on where it stopped after a restart.
 
 use std::collections::HashSet;
+use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use crate::app::App;
-use crate::download::{self, Catalogue, Entry, Source};
+use crate::download::{self, Catalogue, Entry, Msg, Source};
 
-/// How many previews download at once.
+/// How many previews download at once (Nerd Font archives: one).
 const AT_ONCE: usize = 3;
+
+/// The status line's progress is redrawn at most this often.
+const PROGRESS_EVERY: Duration = Duration::from_millis(250);
+
+/// The Behaviour tab's "space used" is measured again after this long.
+const SIZE_EVERY: Duration = Duration::from_secs(5);
 
 /// A Google / Fontsource preview file, about.
 const GOOGLE_FILE: u64 = 100_000;
 /// A Nerd Font's Regular, kept once its archive is unpacked, about.
 const NERD_KEPT: u64 = 2_500_000;
 
+/// What fetches a preview (a stub in tests).
+pub type Fetch = fn(Entry, Sender<Msg>);
+
 #[derive(Debug, Default)]
 pub struct Prefetch {
-    /// The categories the queue was made for (made again when they change).
+    /// The categories the queue was made for, and ones it's being made for.
     built_for: Option<Vec<String>>,
+    building: Option<Vec<String>>,
     /// Still to fetch (taken from the end).
     queue: Vec<Entry>,
     in_flight: HashSet<String>,
+    /// Nerd Font archives among them.
+    pub(crate) nerd_in_flight: HashSet<String>,
     /// Fonts in the chosen categories, and how many have a preview.
     pub total: usize,
     pub done: usize,
+    /// The progress last drawn, and when.
+    drawn: (usize, Option<Instant>),
+    /// The space the previews take, and when it was measured (None while
+    /// it's being measured for the first time).
+    pub used: Option<u64>,
+    measured: Option<Instant>,
+    measuring: bool,
+    /// Tests swap the downloads for a stub.
+    pub fetch: Option<Fetch>,
 }
 
 impl Prefetch {
     /// Downloading (or about to).
     pub fn active(&self) -> bool {
-        !self.queue.is_empty() || !self.in_flight.is_empty()
+        !self.queue.is_empty() || !self.in_flight.is_empty() || self.building.is_some()
     }
 
     /// A preview finished; true if it was one of these.
     pub fn finished(&mut self, id: &str) -> bool {
+        self.nerd_in_flight.remove(id);
         let ours = self.in_flight.remove(id);
         if ours {
             self.done += 1;
@@ -43,9 +70,30 @@ impl Prefetch {
         ours
     }
 
+    /// The queue made on a thread arrived.
+    pub fn queued(&mut self, categories: Vec<String>, queue: Vec<Entry>, total: usize) {
+        if self.building.as_ref() != Some(&categories) {
+            return; // the choice changed since: another is on its way
+        }
+        self.building = None;
+        self.done = total - queue.len();
+        self.total = total;
+        self.queue = queue;
+        self.built_for = Some(categories);
+    }
+
+    /// The space used, measured.
+    pub fn measured(&mut self, bytes: u64) {
+        self.used = Some(bytes);
+        self.measured = Some(Instant::now());
+        self.measuring = false;
+    }
+
     /// Starts over (after the previews were deleted).
     pub fn reset(&mut self) {
+        let fetch = self.fetch;
         *self = Prefetch::default();
+        self.fetch = fetch;
     }
 }
 
@@ -101,15 +149,18 @@ pub fn size(b: u64) -> String {
 }
 
 impl App {
-    /// Each loop: keeps a few previews downloading while prefetching is on.
-    /// True when something changed.
+    /// Each loop: keeps a few previews downloading while prefetching is on,
+    /// and the Behaviour tab's "space used" up to date. Quick: the slow
+    /// parts run on threads. True when the screen should be redrawn.
     pub fn poll_prefetch(&mut self) -> bool {
+        self.measure_previews();
         let s = &self.settings.fonts_page;
         if !s.prefetch {
             // ones on their way still land; nothing new starts
             let was = self.prefetch.active();
             self.prefetch.queue.clear();
             self.prefetch.built_for = None;
+            self.prefetch.building = None;
             return was && !self.prefetch.active();
         }
         let Some(cat) = &self.dl.catalogue else {
@@ -120,19 +171,36 @@ impl App {
             return false;
         };
         let cats = s.prefetch_categories.clone();
-        let mut changed = false;
         if self.prefetch.built_for.as_ref() != Some(&cats) {
-            let (q, total) = queue(cat, &cats, download::has_preview);
-            self.prefetch.done = total - q.len();
-            self.prefetch.total = total;
-            self.prefetch.queue = q;
-            self.prefetch.built_for = Some(cats);
-            changed = true;
+            // the queue is made on a thread (it checks every font's folder)
+            if self.prefetch.building.as_ref() != Some(&cats) {
+                self.prefetch.building = Some(cats.clone());
+                let (cat, tx) = (cat.clone(), self.dl_sender());
+                std::thread::spawn(move || {
+                    let (queue, total) = queue(&cat, &cats, download::has_preview);
+                    let _ = tx.send(Msg::PrefetchQueue {
+                        categories: cats,
+                        queue,
+                        total,
+                    });
+                });
+            }
+            return false;
         }
+        let fetch = self.prefetch.fetch.unwrap_or(download::fetch_preview);
         while self.prefetch.in_flight.len() < AT_ONCE {
-            let Some(e) = self.prefetch.queue.pop() else {
+            let Some(e) = self.prefetch.queue.last() else {
                 break;
             };
+            // Nerd Font archives one at a time
+            let nerd = matches!(e.source, Source::Nerd { .. });
+            if nerd && !self.prefetch.nerd_in_flight.is_empty() {
+                break;
+            }
+            let e = self.prefetch.queue.pop().unwrap();
+            if self.prefetch.in_flight.contains(&e.id) {
+                continue;
+            }
             let tx = self.dl_sender();
             let pv = self.pv();
             if pv.families.contains_key(&e.id) {
@@ -141,12 +209,37 @@ impl App {
             }
             // the page may be fetching it already; its result counts here too
             if pv.fetching.insert(e.id.clone()) {
-                download::fetch_preview(e.clone(), tx);
+                fetch(e.clone(), tx);
+            }
+            if nerd {
+                self.prefetch.nerd_in_flight.insert(e.id.clone());
             }
             self.prefetch.in_flight.insert(e.id);
-            changed = true;
         }
-        changed
+        // the status line's "fetching previews 12/72", a few times a second
+        let p = &mut self.prefetch;
+        let due = p.drawn.1.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY);
+        if p.drawn.0 != p.done && due {
+            p.drawn = (p.done, Some(Instant::now()));
+            return true;
+        }
+        false
+    }
+
+    /// The Behaviour tab shows the space the previews take: measured on a
+    /// thread while it's open, every few seconds.
+    fn measure_previews(&mut self) {
+        let shown = self.page == crate::app::Page::Settings
+            && self.settings_page.tab == crate::settings::Tab::Behaviour;
+        let p = &mut self.prefetch;
+        if !shown || p.measuring || p.measured.is_some_and(|t| t.elapsed() < SIZE_EVERY) {
+            return;
+        }
+        p.measuring = true;
+        let tx = self.dl_sender();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::PreviewsSize(download::previews_size()));
+        });
     }
 }
 

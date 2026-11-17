@@ -374,10 +374,11 @@ impl App {
                     None => on,
                 }
             }
-            BhRow::ClearPreviews => format!(
-                "Enter  ({} used)",
-                crate::prefetch::size(crate::download::previews_size())
-            ),
+            // measured on a thread (prefetch.rs)
+            BhRow::ClearPreviews => match self.prefetch.used {
+                Some(b) => format!("Enter  ({} used)", crate::prefetch::size(b)),
+                None => "Enter  (measuring…)".into(),
+            },
         }
     }
 
@@ -500,9 +501,12 @@ impl App {
                 self.info("The current pane sizes become the default (when saved)");
             }
             BhRow::ClearPreviews => {
-                let used = crate::prefetch::size(crate::download::previews_size());
+                let question = match self.prefetch.used {
+                    Some(b) => format!("Delete the preview fonts ({})?", crate::prefetch::size(b)),
+                    None => "Delete the preview fonts?".into(),
+                };
                 self.overlay = Overlay::Ask {
-                    question: format!("Delete the preview fonts ({used})?"),
+                    question,
                     then: crate::settings::Deferred::ClearPreviews,
                 };
             }
