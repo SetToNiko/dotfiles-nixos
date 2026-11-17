@@ -28,7 +28,7 @@ A theme is a colour palette plus a font preset, applied across the desktop
 
 - `$mod+t` picks a theme, `$mod+p` only a palette, `$mod+Shift+t` only a
   font preset (rofi menus; Alt+BackSpace deletes).
-- `$mod+Ctrl+t` opens Theme Studio (`pkgs/theme-studio/`), which edits
+- `$mod+Ctrl+t` opens Theme Studio (`theme-studio/`, a project of its own), which edits
   them with a live preview and downloads fonts.
 - The data is in `configs/`: `themes.json`, `palettes.json` and
   `fonts.json`, applied by `themes-switch.sh`, `theme-switch.sh` and
@@ -37,7 +37,7 @@ A theme is a colour palette plus a font preset, applied across the desktop
 - Fonts downloaded in the studio are listed in `home/fonts-installed.json`
   and installed by Nix on the next rebuild.
 
-More in [docs/theme-studio.md](docs/theme-studio.md).
+More in [theme-studio/docs/theme-studio.md](theme-studio/docs/theme-studio.md).
 
 ## Building
 

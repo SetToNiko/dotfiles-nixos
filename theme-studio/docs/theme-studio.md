@@ -2,9 +2,11 @@
 
 A terminal tool for making themes: colour palettes and fonts, edited with a
 live preview of the desktop (i3 borders and bar, your real nvim, a shell or
-yazi, a rofi menu), all drawn in the palette before it's saved. The code is
-in `pkgs/theme-studio/` (Rust, ratatui); how it came about is in
-`theme-studio-plan.md`.
+yazi, a rofi menu), all drawn in the palette before it's saved. It's a
+project of its own in `~/dotfiles-nixos/theme-studio/`: the studio in
+`studio/` (Rust, ratatui), packaging in `packaging/`, these docs in
+`docs/`. How it came about is in `plan.md`; how it's being moved into its
+own folder, in `migration.md`.
 
 ## Themes, palettes and font presets
 
@@ -91,9 +93,9 @@ Three pages, on `F1`–`F3`:
 
 | Where                                   | What                                                   |
 | --------------------------------------- | ------------------------------------------------------ |
-| `configs/themes.json`                   | themes                                                 |
-| `configs/palettes.json`                 | palettes                                               |
-| `configs/fonts.json`                    | font presets                                           |
+| `configs/theme-studio/themes.json`      | themes                                                 |
+| `configs/theme-studio/palettes.json`    | palettes                                               |
+| `configs/theme-studio/fonts.json`       | font presets                                           |
 | `configs/terminal-colors.json`          | which palette key is each terminal colour              |
 | `configs/theme-studio/`                 | the studio's `keymaps.json` and `settings.json`, linked to `~/.config/theme-studio` |
 | `home/fonts-installed.json`             | fonts the studio downloaded, installed by `home/fonts.nix` on the next rebuild |
@@ -108,18 +110,23 @@ files when it starts, keeping the old one in the history.
 
 ## Building and testing
 
-The studio is built by the flake (`nix run ~/dotfiles-nixos#theme-studio`)
-and installed by `home/base.nix`. To work on it:
+The studio is built by `packaging/nix/package.nix`: by the dotfiles' flake
+(`nix run ~/dotfiles-nixos#theme-studio`, installed by `home/base.nix`), or
+on its own (`nix build ~/dotfiles-nixos/theme-studio`). To work on it:
 
 ```sh
-cd ~/dotfiles-nixos/pkgs/theme-studio
-nix develop ~/dotfiles-nixos#theme-studio --command cargo test
+cd ~/dotfiles-nixos/theme-studio/studio
+nix develop ~/dotfiles-nixos/theme-studio --command cargo test
 ```
 
-Tests that need the real `configs/` folder or a tool that isn't there
-skip themselves. Environment variables:
+Tests that need the real data or a tool that isn't there skip themselves.
+Environment variables:
 
-- `THEME_STUDIO_CONFIGS`: the configs folder (default
-  `~/dotfiles-nixos/configs`).
+- `THEME_STUDIO_DATA`: your palettes, font presets and themes (default
+  `~/.config/theme-studio`, here linked to `configs/theme-studio/`).
+- `THEME_STUDIO_SHARE`: the files the studio and scripts need (set by the
+  package).
+- `THEME_STUDIO_CONFIGS`: the old place for everything (default
+  `~/dotfiles-nixos/configs`), used while the move is under way.
 - `THEME_STUDIO_TIMING=1`: logs each font preview's render time to
   `~/.local/state/theme-studio/timing.log`.

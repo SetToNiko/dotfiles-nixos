@@ -192,6 +192,16 @@ try before going on; `nrs` checkpoints are yours to run.
   (`ls -l configs/palettes.json`); the History tab still lists the earlier
   versions.
 
+**Step 2 as built ✅** (configs `06d128e`): moved after step 1's `nrs`
+(the installed studio checked for the new code) with no studio running;
+the files were backed up and checked by hash after the move; the scripts
+read `~/.config/theme-studio/…` and their output was byte-for-byte the
+same; the history folders are by name, so they carry on. Your uncommitted
+edits to `palettes.json` and `fonts.json` came along as uncommitted edits
+at the new paths. Git records the old paths as a change of type (file →
+link), not a rename, because the old paths still exist: the files' earlier
+history is under the old names (`git log -- palettes.json`).
+
 ### 3. The project folder and the crate (main repo)
 
 - `git mv pkgs/theme-studio theme-studio/studio`; `theme-studio/README.md`
@@ -206,6 +216,20 @@ try before going on; `nrs` checkpoints are yours to run.
 - **Check:** `nix build .#theme-studio` gives the same program; `cargo test`
   from `theme-studio/studio`; **`nrs`**; the studio's README tab still shows
   the guide.
+
+**Step 3 as built ✅:**
+
+- The sources are the old ones apart from two lines naming the docs' new
+  paths (checked with `diff -r` against the last commit); `Cargo.toml` and
+  `Cargo.lock` are unchanged. 112 tests pass from `theme-studio/studio`.
+- `docs/` is gone rather than keeping a pointer: the README links to the new
+  place, and a `docs/theme-studio.md` left behind would be what the studio's
+  README tab finds first (`paths::guide`).
+- The project's own `flake.nix` follows `nixos-unstable` and has its own
+  `flake.lock`; the dotfiles use `master`. They build with different
+  toolchains, which only matters for `nix develop ./theme-studio` (a
+  separate download); `nix develop .#theme-studio` from the dotfiles uses
+  theirs.
 
 ### 4. Scripts and share files move (both repos)
 

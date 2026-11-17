@@ -51,8 +51,9 @@
         desktop = mkHost "desktop";
       };
 
-      # Programs in pkgs/, e.g. `nix run ~/dotfiles-nixos#theme-studio`.
-      packages.${system}.theme-studio = pkgs.callPackage ./pkgs/theme-studio { };
+      # Theme Studio (theme-studio/, a project of its own), e.g.
+      # `nix run ~/dotfiles-nixos#theme-studio`.
+      packages.${system}.theme-studio = pkgs.callPackage ./theme-studio/packaging/nix/package.nix { };
 
       # One dev shell per file in devshells/: devshells/<name>.nix becomes
       # devShells.<name>, used from a project with `use flake ~/dotfiles-nixos#<name>`.

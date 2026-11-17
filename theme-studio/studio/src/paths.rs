@@ -1,5 +1,5 @@
 //! Where things are. Four kinds of place, kept apart so the studio doesn't
-//! depend on one dotfiles layout (docs/theme-studio-migration.md):
+//! depend on one dotfiles layout (docs/migration.md):
 //!
 //! - the **data folder**: your palettes.json, fonts.json and themes.json
 //!   (`$THEME_STUDIO_DATA`, else `$XDG_CONFIG_HOME/theme-studio` once it
