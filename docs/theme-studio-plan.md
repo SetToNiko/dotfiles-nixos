@@ -1206,6 +1206,172 @@ Each step is committed separately and keeps the studio working.
    downloads, the slowest main-loop tick was 0.6 ms (debug build).
 7. ✅ Then the tournament (Phase 7 step 4).
 
+## Phase 7d: role requirements and the login screen font
+
+Asked for on 2026-11-17 after the tournament; built before Phase 8 (the
+README should describe the final names). Decisions marked ✅ were asked;
+smaller defaults I picked are marked 🔸.
+
+### Decisions
+
+|                    | Choice                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| ✅ Role names      | **Monospace** (was mono), **Proportional** (was ui), **Icons** (was bar): one word, naming what the font must be |
+| ✅ Requirements    | Monospace: a **Nerd Font Mono**. Proportional: any **proportional** font. Icons: a **Nerd Font Propo**         |
+| ✅ Hard filter     | While picking for a role, the Installed list only shows fonts that meet its requirement                     |
+| ✅ Rename scope    | Everywhere: fonts.json keys, font-switch.sh, the host offset files, settings.json, keymap action names       |
+| ✅ Login font      | At runtime, no rebuild: the login screen uses the Monospace font, like the lock screen                       |
+
+### 1. Names and what each role is for
+
+- **On screen:** the Fonts pane's rows read `Monospace`, `Proportional`,
+  `Icons`. The row's second line lists only what the role is used for:
+  - Monospace: terminal, nvim, lock and login screen, "monospace" text
+  - Proportional: rofi, GTK apps, "sans-serif" text (web pages, Electron)
+  - Icons: i3 window titles and the bar
+- **The requirement** ✅ isn't repeated on the row: it shows in the list's
+  locked chip while picking, in the help screen (`?`), and 🔸 in the status
+  line while the mouse is over a role's name ("Icons: needs a Nerd Font
+  Propo").
+- **Everywhere else** the same names: the `F` message ("From GeistMono:
+  Monospace …"), the tournament results' use-for keys, the Behaviour tab,
+  the help screen.
+
+### 2. The rename in the files
+
+- **fonts.json** version 3: preset keys `monospace`, `proportional`,
+  `icons`. The studio migrates the file once (a history snapshot first, as
+  every save does); `font-switch.sh` and its rofi menu read the new keys and
+  🔸 still accept the old ones, so a file written by an older studio keeps
+  working.
+- **Host offsets** (`configs/hosts/<host>/fonts.json`) get the same keys;
+  the studio migrates them with fonts.json, and font-switch.sh accepts both.
+  Icons still falls back to Proportional (as bar fell back to ui) when a
+  preset or an offset file doesn't have it.
+- **keymaps.json** version 3: `use-for-mono` / `-ui` / `-bar` become
+  `use-for-monospace` / `-proportional` / `-icons` (rebinds kept).
+- **settings.json:** the per-role filters (`fonts.mono-filter`,
+  `ui-filter`, `bar-filter`) and their Behaviour tab rows go: the
+  requirement is fixed now. Old entries are dropped on load.
+- **Not renamed:** the generated files in `~/.config/fonts/` (`ghostty`,
+  `i3`, `rofi.rasi`, `lock.sh`, …) are named after the app they're for.
+
+### 3. Picking: the hard filter
+
+```
+²Installed ─ picking Icons ────────────
+ [🔒 Nerd Font Propo]  b bitmap  c CJK·emoji
+ ▸ 0xProto
+ ▸ GeistMono
+   JetBrainsMono Nerd Font Propo
+```
+
+- ✅ **Locked chip:** the requirement is the first chip, drawn with a lock
+  and not clickable or toggleable. The chips that would conflict with it
+  (the spacing and Nerd Font chips: `m p n M P x`) are hidden while picking;
+  bitmap and CJK·emoji·math still toggle.
+- **Search** works inside the filtered list.
+- **Groups** only show fonts that fit; a group left with one font is
+  flattened, as now.
+- **Nothing fits** (e.g. no Nerd Font Propo installed): the list says so
+  and 🔸 Enter opens the Fonts page (F2) on Nerd Fonts, where any family
+  has all three variants.
+- **Browsing the list without picking** (number key or a click on the
+  pane) keeps the free chips, as now.
+
+### 4. Fonts that don't meet the requirement
+
+**In a preset** (✅ warn plus a one-key fix). All three current presets
+have one, e.g. "Geist Mono" uses `GeistMono Nerd Font` in every role.
+
+- The role's row gets a red mark and its note says what's wrong
+  ("not a Nerd Font Mono").
+- 🔸 `r` (the new `fix-role-font` action, `font-roles` context) swaps in
+  the same family's fitting face when it's installed
+  (`GeistMono Nerd Font` → `GeistMono Nerd Font Mono`), then saves and
+  applies like a pick. Not installed: the note says so, and `r` offers the
+  Nerd Fonts download (below).
+- Nothing changes on its own: old presets keep working as they are.
+
+**`F` and the tournament's `1` / `2` / `3`** (✅ use the family's fitting
+face, or offer the download):
+
+- Each role takes the family's face that meets its requirement
+  (JetBrains Mono → JetBrainsMono Nerd Font Mono, … Propo, …).
+- No fitting face installed, but Nerd Fonts has the family: a question
+  ("JetBrains Mono has no Nerd Font Propo installed. Download the Nerd
+  Font (12 MB)?"); yes installs it (as the Fonts page does) and then
+  fills the role.
+- Neither: the role keeps its font and the message says why
+  ("Proportional kept: Fira Code is monospaced").
+- The Proportional role takes any proportional face, Nerd Font Propo
+  included; a family that's only monospaced has none.
+
+### 5. The login screen font
+
+**Now:** the LightDM greeter's password box uses `monospace`. LightDM
+doesn't run as you, so it never sees your fonts or your fontconfig
+aliases. The Plymouth boot animation plays pre-rendered images and draws no
+text, so the greeter is the only place a boot-time font shows.
+
+**Becomes** (✅ at runtime, no rebuild):
+
+- **font-switch.sh** (🔸 rather than `ascii-boot` at shutdown, so a plain
+  `reboot` already has it) copies the Monospace font's regular file
+  (`fc-match -f '%{file}'`) to `/var/lib/ascii-boot/font/` and writes
+  `/var/lib/ascii-boot/greeter.conf` from a template with the family and
+  🔸 the size (the preset's size plus the host offset).
+- **modules/ascii-boot.nix:**
+  - the greeter config moves into a template (`/etc/ascii-boot/greeter.conf.in`,
+    the current settings with `@FONT@` / `@SIZE@`), and
+    `/etc/lightdm/lightdm-mini-greeter.conf` points at
+    `/var/lib/ascii-boot/greeter.conf` (overriding the module's own file);
+  - tmpfiles copies a default `greeter.conf` (font `monospace`) there
+    until font-switch.sh has run once, as it does for `greeter.png`;
+  - the system fontconfig gets `/var/lib/ascii-boot/font` as a font
+    folder, so the greeter finds the copied font.
+- **Check:** after `nrs`, switch fonts, then log out to see the greeter
+  (and a reboot).
+- Not covered: Plymouth (no text); the greeter's colours stay as they are
+  (🔸 they could follow the palette the same way later, say if you want
+  that).
+
+### 6. Order of work
+
+Each step is committed separately and keeps the studio working.
+
+1. ✅ The rename: fonts.json v3 and host offsets (studio migration,
+   font-switch.sh and its rofi menu accepting both), keymaps.json v3, the
+   settings entries dropped, the names on screen and the role notes.
+2. ✅ The hard filter: the locked chip, hidden conflicting chips, the empty
+   case.
+3. ✅ Misfits: the warning and `r` on the roles, `F` and the tournament's use
+   keys taking the fitting face, the download offer.
+4. ✅ The login screen font (outer repo: ascii-boot.nix; configs:
+   font-switch.sh). Needs an `nrs`.
+
+**As built (differences from the above):**
+
+- Steps 1–3 went in as one commit: dropping the filter settings needed the
+  fixed requirements in place.
+- **Flattening:** a group the filters leave with one font shows the font
+  itself, while browsing too (not only while picking).
+- **The warning** reads `⚠ not a Nerd Font Mono · r fixes` (the longer
+  wording was cut off in a narrow pane).
+- **Messages** name the missing face: "Fira Code has no Nerd Font Mono,
+  proportional or Nerd Font Propo face installed. Download FiraCode Nerd
+  Font (12.0 MB)?"; after the download the roles are filled straight away.
+  If the Nerd Fonts list isn't loaded yet, it starts loading and the next
+  try finds it.
+- **Login screen size** is in points (`14pt`, the Monospace size plus the
+  host offset), which GTK's CSS scales like the terminal does; no pixel
+  conversion needed. A font fontconfig can't find leaves the greeter on
+  `monospace` (with a warning on stderr).
+- The greeter config is now written whole from the template in
+  ascii-boot.nix (same settings as before, including the module's defaults
+  it used to inherit); `/etc/lightdm/lightdm-mini-greeter.conf` links to
+  `/var/lib/ascii-boot/greeter.conf`.
+
 ## Phase 8: polish
 
 - **Launching** ✅ (done early): `$mod+Ctrl+t` runs
@@ -1241,6 +1407,7 @@ curl are already installed. `bat` is assumed for the demo script.
 3. Phase 4: the full live preview.
 4. Phases 5–6: fonts in the studio.
 5. Phase 7 steps 1–3, Phases 7b and 7c, then Phase 7 step 4 (the tournament).
+6. Phase 7d (role requirements, the login screen font), then Phase 8.
 
 Each step is committed separately in the repo it belongs to (`configs/` or
 the outer repo).

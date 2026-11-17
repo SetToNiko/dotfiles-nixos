@@ -54,8 +54,6 @@ pub enum BhRow {
     PickerAfterEditing,
     SampleAtStart,
     ListOpensToCurrent,
-    /// The font list's filter when picking for a role (0 mono, 1 ui, 2 bar).
-    RoleFilter(usize),
     HideBitmap,
     HideSpecial,
     Spacing,
@@ -135,9 +133,6 @@ pub fn behaviour_rows() -> Vec<BhRow> {
     v.extend([
         R::SampleAtStart,
         R::ListOpensToCurrent,
-        R::RoleFilter(0),
-        R::RoleFilter(1),
-        R::RoleFilter(2),
         R::HideBitmap,
         R::HideSpecial,
         R::Spacing,
@@ -347,7 +342,6 @@ impl App {
             BhRow::PickerAfterEditing => s.colours.picker_after_editing.clone(),
             BhRow::SampleAtStart => s.fonts.sample_at_start.clone(),
             BhRow::ListOpensToCurrent => yes(s.fonts.list_opens_to_current_font),
-            BhRow::RoleFilter(r) => s.fonts.role_filters()[r].clone(),
             BhRow::HideBitmap => yes(s.font_list.hide_bitmap),
             BhRow::HideSpecial => yes(s.font_list.hide_cjk_emoji_math),
             BhRow::Spacing => s.font_list.spacing.clone(),
@@ -411,7 +405,6 @@ impl App {
             BhRow::PickerAfterEditing => "Colour picker after editing".into(),
             BhRow::SampleAtStart => "Sample at start".into(),
             BhRow::ListOpensToCurrent => "Installed fonts open at the role's current font".into(),
-            BhRow::RoleFilter(r) => format!("Picking a {} font shows", crate::fonts::ROLES[r]),
             BhRow::HideBitmap => "Hide bitmap fonts at start".into(),
             BhRow::HideSpecial => "Hide CJK / emoji / math fonts at start".into(),
             BhRow::Spacing => "Spacing filter at start".into(),
@@ -569,15 +562,6 @@ impl App {
                     BhRow::SampleAtStart => {
                         s.fonts.sample_at_start =
                             cycle(&s.fonts.sample_at_start, &["shown", "hidden"])
-                    }
-                    BhRow::RoleFilter(r) => {
-                        let next =
-                            cycle(&s.fonts.role_filters()[r], &crate::fonts_pick::ROLE_FILTERS);
-                        match r {
-                            0 => s.fonts.mono_filter = next,
-                            1 => s.fonts.ui_filter = next,
-                            _ => s.fonts.bar_filter = next,
-                        }
                     }
                     BhRow::ListOpensToCurrent => {
                         s.fonts.list_opens_to_current_font = !s.fonts.list_opens_to_current_font

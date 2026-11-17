@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Paragraph};
 use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::{App, Side};
-use crate::fonts::{CHIPS, FontFocus, ROLE_USE, ROLES, Row};
+use crate::fonts::{CHIPS, FontFocus, ROLE_NAMES, ROLE_NEEDS, ROLE_USE, Row};
 use crate::hit::{Target, hover};
 use crate::ui::{pane_title, panel_number};
 
@@ -42,14 +42,14 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
     let title2 = Line::from(vec![
         panel_number(2),
         "Installed fonts".into(),
-        // picking for a role: which, and its filter (Enter applies it)
+        // picking for a role: which (only fonts that fit it are listed)
         match app.fonts.picking {
             Some(r) => Span::styled(
-                format!(" picking {} ({}) ", ROLES[r], app.fonts.role_filters[r]),
+                format!(" picking {} ", ROLE_NAMES[r]),
                 Style::new().yellow(),
             ),
             None => Span::styled(
-                format!(" for {} ", ROLES[app.fonts.slot]),
+                format!(" for {} ", ROLE_NAMES[app.fonts.slot]),
                 Style::new().dark_gray(),
             ),
         },
@@ -71,6 +71,16 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         lines.push(Line::styled(format!(" {e}"), Style::new().red()));
     }
     let first_role_line = lines.len() as u16;
+    // the fix key, for fonts that don't fit their role
+    let fix_key = app
+        .keymap
+        .key_for(
+            &[crate::keymap::Context::FontRoles],
+            crate::keymap::Action::FixRoleFont,
+        )
+        .map(|k| crate::ui::friendly(&k));
+    // the names are as wide as the longest
+    let name_w = ROLE_NAMES.iter().map(|n| n.len()).max().unwrap_or(0);
     for (i, font) in t.preset.fonts.iter().enumerate() {
         let selected = i == t.slot;
         let name_style = if selected {
@@ -86,18 +96,19 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         };
         // wide layouts: the size beside the name; narrow: below it
         let (first, second) = if app.wide {
-            let room = (inner.width as usize).saturating_sub(9 + 2 + size.chars().count());
+            let room =
+                (inner.width as usize).saturating_sub(3 + name_w + 1 + 2 + size.chars().count());
             (
                 Line::from(vec![
                     Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
-                    Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
+                    Span::styled(format!("{:<name_w$}", ROLE_NAMES[i]), Style::new().bold()),
                     // the cursor on the name only, not the space before it
                     " ".into(),
                     Span::styled(truncate(&font.family, room.max(4)), name_style),
                     Span::raw(format!("  {size}")),
                 ]),
                 Line::from(vec![
-                    Span::raw("         "),
+                    Span::raw("   "),
                     Span::styled(ROLE_USE[i], Style::new().dark_gray()),
                 ]),
             )
@@ -105,12 +116,12 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
             (
                 Line::from(vec![
                     Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
-                    Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
+                    Span::styled(format!("{:<name_w$}", ROLE_NAMES[i]), Style::new().bold()),
                     " ".into(),
                     Span::styled(font.family.clone(), name_style),
                 ]),
                 Line::from(vec![
-                    Span::raw(format!("         {size:<12}")),
+                    Span::raw(format!("   {size:<12}")),
                     Span::styled(ROLE_USE[i], Style::new().dark_gray()),
                 ]),
             )
@@ -119,7 +130,14 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
             first,
             second,
             match t.warnings(i).first() {
-                Some(w) => Line::styled(format!("         ⚠ {w}"), Style::new().yellow()),
+                // a misfit: the key that swaps in a fitting face
+                Some(w) => {
+                    let fix = match (&fix_key, t.misfit(i)) {
+                        (Some(k), true) => format!(" · {k} fixes"),
+                        _ => String::new(),
+                    };
+                    Line::styled(format!("   ⚠ {w}{fix}"), Style::new().yellow())
+                }
                 None => Line::raw(""),
             },
         ];
@@ -129,6 +147,17 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
             ..inner
         }
         .intersection(inner);
+        // over the role's name: what its font has to be, in the status line
+        let name = Rect {
+            x: inner.x + 3,
+            width: name_w as u16,
+            height: 1,
+            ..r
+        }
+        .intersection(inner);
+        if app.hits.over(name) {
+            app.hover_note = Some(format!("{}: needs {}", ROLE_NAMES[i], ROLE_NEEDS[i]));
+        }
         if app.hits.add(r, Target::FontRole(i)) {
             // the row look on all three lines; the underline only under the
             // font's name
@@ -186,10 +215,21 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         Span::styled(format!("   {fonts_shown} fonts"), Style::new().dark_gray()),
     ])];
 
-    // Chips, wrapped to the panel width; each is clickable.
+    // Chips, wrapped to the panel width; each is clickable. Picking for a
+    // role: its requirement comes first, locked, and the chips it decides
+    // are hidden.
     let mut chip_lines: Vec<Vec<Span>> = vec![vec![" ".into()]];
     let mut x = 1u16;
-    for (c, label) in CHIPS {
+    if let Some(r) = t.filters.need {
+        let need = ROLE_NEEDS[r];
+        let need = need.strip_prefix("a ").unwrap_or(need);
+        let text = format!("[🔒 {need}]");
+        x += Span::raw(text.as_str()).width() as u16 + 1;
+        let line = chip_lines.last_mut().unwrap();
+        line.push(Span::styled(text, Style::new().black().on_yellow()));
+        line.push(" ".into());
+    }
+    for (c, label) in CHIPS.into_iter().filter(|(c, _)| t.filters.chip_free(*c)) {
         let text = format!("[{c} {label}]");
         let w = text.chars().count() as u16;
         if x + w > inner.width && x > 1 {
@@ -298,6 +338,20 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         lines.push(Line::styled(
             "   (no fonts from fc-list)",
             Style::new().red(),
+        ));
+    } else if rows.is_empty()
+        && t.search.is_empty()
+        && let Some(r) = t.filters.need
+    {
+        // picking, and nothing installed fits the role
+        let page = if r == 1 { "Google Fonts" } else { "Nerd Fonts" };
+        lines.push(Line::styled(
+            format!("   no installed font is {}", ROLE_NEEDS[r]),
+            Style::new().yellow(),
+        ));
+        lines.push(Line::styled(
+            format!("   Enter: get one ({page}, on the Fonts page)"),
+            Style::new().dark_gray(),
         ));
     } else if rows.is_empty() {
         lines.push(Line::styled(

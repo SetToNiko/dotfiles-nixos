@@ -39,6 +39,18 @@ pub fn to_jq_string(v: &Value) -> String {
 /// presets; version 2 wraps it as `{"version": 2, "palettes": { … }}` (fonts:
 /// `"presets"`), so the files can be migrated later. Both are read.
 pub const DATA_VERSION: u64 = 2;
+/// fonts.json's version. 3: the roles are `monospace`, `proportional` and
+/// `icons` (were `mono`, `ui` and `bar`).
+pub const FONTS_VERSION: u64 = 3;
+
+/// The version a data file is written as (by its map's field).
+fn version_of(field: &str) -> u64 {
+    if field == "presets" {
+        FONTS_VERSION
+    } else {
+        DATA_VERSION
+    }
+}
 
 /// The map inside a data file, whichever layout it has.
 pub fn data_map(v: Value, field: &str) -> Option<Map<String, Value>> {
@@ -53,10 +65,10 @@ pub fn data_map(v: Value, field: &str) -> Option<Map<String, Value>> {
     }
 }
 
-/// The version-2 file for a map of palettes / presets.
+/// The current file for a map of palettes / presets.
 pub fn data_file(field: &str, map: Map<String, Value>) -> Value {
     let mut m = Map::new();
-    m.insert("version".into(), Value::from(DATA_VERSION));
+    m.insert("version".into(), Value::from(version_of(field)));
     m.insert(field.into(), Value::Object(map));
     Value::Object(m)
 }
@@ -79,20 +91,26 @@ pub fn write_json_file(path: &std::path::Path, value: &Value) -> Result<()> {
     std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
-/// Rewrites a version-1 data file as version 2 (once). True if it did.
-pub fn migrate_data_file(path: &std::path::Path, field: &str) -> Result<bool> {
+/// Rewrites an older data file as the current version (once), passing its
+/// map through `update` on the way. The version it now has, if it did.
+pub fn migrate_data_file(
+    path: &std::path::Path,
+    field: &str,
+    update: impl Fn(Map<String, Value>) -> Map<String, Value>,
+) -> Result<Option<u64>> {
     let Ok(text) = std::fs::read_to_string(path) else {
-        return Ok(false);
+        return Ok(None);
     };
     let v: Value =
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    if v.get("version").is_some() {
-        return Ok(false);
+    let current = version_of(field);
+    if v.get("version").and_then(Value::as_u64).unwrap_or(1) >= current {
+        return Ok(None);
     }
     let map =
         data_map(v, field).ok_or_else(|| anyhow!("{} is not a JSON object", path.display()))?;
-    write_json_file(path, &data_file(field, map))?;
-    Ok(true)
+    write_json_file(path, &data_file(field, update(map)))?;
+    Ok(Some(current))
 }
 
 impl Store {
@@ -119,8 +137,8 @@ impl Store {
     }
 
     /// Rewrites palettes.json as version 2 if it's still version 1.
-    pub fn migrate(&self) -> Result<bool> {
-        migrate_data_file(&self.palettes_path(), "palettes")
+    pub fn migrate(&self) -> Result<Option<u64>> {
+        migrate_data_file(&self.palettes_path(), "palettes", |m| m)
     }
 
     pub fn load(&self, name: &str) -> Result<Palette> {
@@ -227,8 +245,8 @@ mod tests {
         .unwrap();
         let store = Store { dir: dir.clone() };
         assert_eq!(store.load_all().unwrap(), m, "version 1 reads");
-        assert!(store.migrate().unwrap());
-        assert!(!store.migrate().unwrap(), "only once");
+        assert_eq!(store.migrate().unwrap(), Some(2));
+        assert_eq!(store.migrate().unwrap(), None, "only once");
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("palettes.json")).unwrap())
                 .unwrap();

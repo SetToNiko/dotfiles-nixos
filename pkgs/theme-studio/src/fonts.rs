@@ -18,14 +18,37 @@ use crate::font_tree::Node;
 use crate::keymap::Action;
 use crate::palette::Palette;
 
-/// The three font roles, in fonts.json and on screen.
-pub const ROLES: [&str; 3] = ["mono", "ui", "bar"];
+/// The three font roles' keys in fonts.json (version 3) and the host
+/// offset files. Each is named after what its font has to be.
+pub const ROLES: [&str; 3] = ["monospace", "proportional", "icons"];
+/// The keys before version 3, still read.
+pub const OLD_ROLES: [&str; 3] = ["mono", "ui", "bar"];
+/// The roles on screen.
+pub const ROLE_NAMES: [&str; 3] = ["Monospace", "Proportional", "Icons"];
+/// What each role's font has to be (fonts_pick.rs checks it).
+pub const ROLE_NEEDS: [&str; 3] = ["a Nerd Font Mono", "proportional", "a Nerd Font Propo"];
 /// What each role is used for (font-switch.sh).
 pub const ROLE_USE: [&str; 3] = [
-    "terminal, nvim, lock screen",
-    "rofi, GTK apps",
-    "i3 window titles and bar",
+    "terminal, nvim, lock and login screen",
+    "rofi, GTK apps, sans-serif text",
+    "i3 window titles and the bar",
 ];
+
+/// A role's entry in a preset or an offset file: the new key, else the old.
+fn role_entry<'a>(obj: &'a Map<String, Value>, role: usize) -> Option<&'a Value> {
+    obj.get(ROLES[role]).or_else(|| obj.get(OLD_ROLES[role]))
+}
+
+/// A preset or offset file with the old role keys renamed (in place, so
+/// the order stays).
+pub fn rename_roles(obj: Map<String, Value>) -> Map<String, Value> {
+    obj.into_iter()
+        .map(|(k, v)| match OLD_ROLES.iter().position(|o| *o == k) {
+            Some(r) => (ROLES[r].to_string(), v),
+            None => (k, v),
+        })
+        .collect()
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Font {
@@ -33,7 +56,7 @@ pub struct Font {
     pub size: u32,
 }
 
-/// A font preset: mono, ui and bar fonts.
+/// A font preset: the Monospace, Proportional and Icons fonts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preset {
     pub fonts: [Font; 3],
@@ -42,21 +65,22 @@ pub struct Preset {
 }
 
 impl Preset {
-    /// Reads a preset; a missing "bar" falls back to "ui", like font-switch.sh.
+    /// Reads a preset (either key names); a missing Icons font falls back
+    /// to the Proportional one, like font-switch.sh.
     pub fn from_json(obj: &Map<String, Value>) -> Result<Preset> {
-        let font = |role: &str| -> Option<Font> {
-            let f = obj.get(role)?;
+        let font = |role: usize| -> Option<Font> {
+            let f = role_entry(obj, role)?;
             Some(Font {
                 family: f.get("family")?.as_str()?.to_string(),
                 size: f.get("size")?.as_u64()? as u32,
             })
         };
-        let mono = font("mono").ok_or_else(|| anyhow!("no mono font"))?;
-        let ui = font("ui").ok_or_else(|| anyhow!("no ui font"))?;
-        let bar = font("bar").unwrap_or_else(|| ui.clone());
+        let mono = font(0).ok_or_else(|| anyhow!("no monospace font"))?;
+        let ui = font(1).ok_or_else(|| anyhow!("no proportional font"))?;
+        let bar = font(2).unwrap_or_else(|| ui.clone());
         let extra = obj
             .iter()
-            .filter(|(k, _)| !ROLES.contains(&k.as_str()))
+            .filter(|(k, _)| !ROLES.contains(&k.as_str()) && !OLD_ROLES.contains(&k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         Ok(Preset {
@@ -120,9 +144,43 @@ impl FontStore {
         crate::store::data_map(v, "presets").ok_or_else(|| anyhow!("fonts.json has no presets"))
     }
 
-    /// Rewrites fonts.json as version 2 if it's still version 1.
-    pub fn migrate(&self) -> Result<bool> {
-        crate::store::migrate_data_file(&self.path(), "presets")
+    /// Brings fonts.json up to the current version (3: the new role keys),
+    /// and the host offset files (configs/hosts/*/fonts.json) with it.
+    pub fn migrate(&self) -> Result<Option<u64>> {
+        let done = crate::store::migrate_data_file(&self.path(), "presets", |presets| {
+            presets
+                .into_iter()
+                .map(|(name, p)| match p {
+                    Value::Object(o) => (name, Value::Object(rename_roles(o))),
+                    other => (name, other),
+                })
+                .collect()
+        })?;
+        self.migrate_offsets()?;
+        Ok(done)
+    }
+
+    /// The host offset files with the old role keys get the new ones (not
+    /// kept in the history: it's by file name, and fonts.json is taken).
+    fn migrate_offsets(&self) -> Result<()> {
+        let Ok(hosts) = std::fs::read_dir(self.dir.join("hosts")) else {
+            return Ok(());
+        };
+        for host in hosts.flatten() {
+            let path = host.path().join("fonts.json");
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&text) else {
+                continue;
+            };
+            if !OLD_ROLES.iter().any(|k| obj.contains_key(*k)) {
+                continue;
+            }
+            let new = crate::store::to_jq_string(&Value::Object(rename_roles(obj)));
+            std::fs::write(&path, new).with_context(|| format!("writing {}", path.display()))?;
+        }
+        Ok(())
     }
 
     pub fn load(&self, name: &str) -> Result<Preset> {
@@ -180,16 +238,22 @@ impl FontStore {
         Some(s.trim().to_string()).filter(|s| !s.is_empty())
     }
 
-    /// This machine's size offsets (~/.config/host/fonts.json); bar falls
-    /// back to the ui offset, like font-switch.sh.
+    /// This machine's size offsets (~/.config/host/fonts.json, either key
+    /// names); Icons falls back to the Proportional offset, like
+    /// font-switch.sh.
     pub fn offsets() -> [i32; 3] {
-        let v: Value = std::fs::read_to_string(home().join(".config/host/fonts.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or(Value::Null);
-        let get = |k: &str| v.get(k).and_then(Value::as_i64).map(|n| n as i32);
-        let ui = get("ui").unwrap_or(0);
-        [get("mono").unwrap_or(0), ui, get("bar").unwrap_or(ui)]
+        let obj: Map<String, Value> =
+            std::fs::read_to_string(home().join(".config/host/fonts.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default();
+        let get = |r: usize| {
+            role_entry(&obj, r)
+                .and_then(Value::as_i64)
+                .map(|n| n as i32)
+        };
+        let ui = get(1).unwrap_or(0);
+        [get(0).unwrap_or(0), ui, get(2).unwrap_or(ui)]
     }
 }
 
@@ -277,6 +341,9 @@ pub struct Filters {
     pub show_bitmap: bool,
     /// CJK / emoji / math fonts are hidden unless this is on.
     pub show_special: bool,
+    /// Picking for this role: only fonts that meet its requirement, and the
+    /// spacing and Nerd Font chips are locked (fonts_pick.rs).
+    pub need: Option<usize>,
 }
 
 /// Chip key and label, in display order.
@@ -305,7 +372,17 @@ impl Filters {
             NerdKind::NerdPropo => f.family.ends_with("Nerd Font Propo"),
             NerdKind::NotNerd => !f.nerd,
         };
-        spacing && nerd && (self.show_bitmap || !f.bitmap) && (self.show_special || !f.special)
+        let need = self.need.is_none_or(|r| crate::fonts_pick::fits(r, f));
+        need && spacing
+            && nerd
+            && (self.show_bitmap || !f.bitmap)
+            && (self.show_special || !f.special)
+    }
+
+    /// The chips that can be used now: while picking for a role, the
+    /// spacing and Nerd Font chips are locked (the requirement decides).
+    pub fn chip_free(&self, chip: char) -> bool {
+        self.need.is_none() || matches!(chip, 'b' | 'c')
     }
 
     pub fn is_on(&self, chip: char) -> bool {
@@ -325,6 +402,9 @@ impl Filters {
     /// Turns a chip on or off. Chips in the same row of choices (mono/propo,
     /// the Nerd Font kinds) replace each other.
     pub fn toggle(&mut self, chip: char) -> bool {
+        if !self.chip_free(chip) {
+            return false;
+        }
         let flip_spacing =
             |cur: Spacing, want: Spacing| if cur == want { Spacing::Any } else { want };
         let flip_nerd =
@@ -721,8 +801,6 @@ pub struct FontsTab {
     pub saved_filters: Option<Filters>,
     /// A font was just picked (the app saves and applies it).
     pub picked: bool,
-    /// Each role's filter when picking (settings).
-    pub role_filters: [String; 3],
 }
 
 impl FontsTab {
@@ -766,7 +844,6 @@ impl FontsTab {
             picking: None,
             saved_filters: None,
             picked: false,
-            role_filters: crate::fonts_pick::ROLE_FILTER_DEFAULTS.map(String::from),
         }
     }
 
@@ -818,6 +895,16 @@ impl FontsTab {
                             .filter(|&i| t.filters.allows(&t.installed[i]))
                             .count();
                         if count == 0 {
+                            continue;
+                        }
+                        // one font left by the filters: the font, not a group
+                        if count == 1
+                            && let Some(i) = n
+                                .leaves()
+                                .into_iter()
+                                .find(|&i| t.filters.allows(&t.installed[i]))
+                        {
+                            out.push(Row::Font { depth, index: i });
                             continue;
                         }
                         let path = if parent.is_empty() {
@@ -971,6 +1058,12 @@ impl FontsTab {
         self.focus = FontFocus::List;
     }
 
+    /// The role.s font doesn.t meet its requirement (or isn.t installed):
+    /// `r` can swap in a fitting face from its family.
+    pub fn misfit(&self, role: usize) -> bool {
+        !self.warnings(role).is_empty()
+    }
+
     /// Problems with a role's font, for the slot and the status line.
     pub fn warnings(&self, role: usize) -> Vec<String> {
         let family = &self.preset.fonts[role].family;
@@ -984,14 +1077,11 @@ impl FontsTab {
             }
             return vec![format!("\"{family}\" is not installed")];
         };
-        let mut w = Vec::new();
-        if role == 0 && !f.mono {
-            w.push("not monospaced: terminal text won't line up".to_string());
+        if crate::fonts_pick::fits(role, f) {
+            Vec::new()
+        } else {
+            vec![format!("not {}", ROLE_NEEDS[role])]
         }
-        if role != 1 && !f.nerd {
-            w.push("no Nerd Font icons (another Nerd Font fills in)".to_string());
-        }
-        w
     }
 
     /// Selects the list row of the selected role's current family.
@@ -1138,7 +1228,7 @@ mod tests {
     use crate::store::to_jq_string;
 
     #[test]
-    fn presets_round_trip_and_bar_falls_back_to_ui() {
+    fn presets_round_trip_with_new_keys_and_icons_falls_back() {
         let obj: Map<String, Value> = serde_json::from_str(
             r#"{"mono": {"family": "A", "size": 14}, "ui": {"family": "B", "size": 9}, "note": 1}"#,
         )
@@ -1154,7 +1244,7 @@ mod tests {
         let out = p.to_json();
         assert_eq!(
             out.keys().collect::<Vec<_>>(),
-            ["mono", "ui", "bar", "note"]
+            ["monospace", "proportional", "icons", "note"]
         );
         assert_eq!(Preset::from_json(&out).unwrap(), p);
     }
@@ -1166,21 +1256,67 @@ mod tests {
             eprintln!("skipped: no fonts.json");
             return;
         };
-        // either layout: rebuilding every preset gives back the same file
+        // any version: rebuilding every preset gives what the migration
+        // writes (the file itself, once it's version 3)
         let v: Value = serde_json::from_str(&text).unwrap();
-        let versioned = v.get("version").is_some();
+        let current = v["version"] == crate::store::FONTS_VERSION;
         let all = crate::store::data_map(v, "presets").unwrap();
         let mut rebuilt = Map::new();
+        let mut migrated = Map::new();
         for (name, v) in &all {
-            let p = Preset::from_json(v.as_object().unwrap()).unwrap();
+            let o = v.as_object().unwrap();
+            let p = Preset::from_json(o).unwrap();
             rebuilt.insert(name.clone(), Value::Object(p.to_json()));
+            migrated.insert(name.clone(), Value::Object(rename_roles(o.clone())));
         }
-        let file = if versioned {
-            crate::store::data_file("presets", rebuilt)
-        } else {
-            Value::Object(rebuilt)
-        };
-        assert_eq!(to_jq_string(&file), text);
+        let rebuilt = to_jq_string(&crate::store::data_file("presets", rebuilt));
+        assert_eq!(
+            rebuilt,
+            to_jq_string(&crate::store::data_file("presets", migrated))
+        );
+        if current {
+            assert_eq!(rebuilt, text);
+        }
+    }
+
+    #[test]
+    fn version_2_migrates_presets_and_host_offsets_once() {
+        let dir =
+            std::env::temp_dir().join(format!("theme-studio-fonts-v3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("hosts/laptop")).unwrap();
+        std::fs::write(
+            dir.join("fonts.json"),
+            r#"{"version": 2, "presets": {"A": {"mono": {"family": "M", "size": 14}, "ui": {"family": "U", "size": 10}, "bar": {"family": "B", "size": 9}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("hosts/laptop/fonts.json"),
+            r#"{"mono": 0, "ui": 3, "bar": 3}"#,
+        )
+        .unwrap();
+        let store = FontStore { dir: dir.clone() };
+        let before = store.load("A").unwrap();
+        assert_eq!(store.migrate().unwrap(), Some(3));
+        assert_eq!(store.migrate().unwrap(), None, "only once");
+        assert_eq!(store.load("A").unwrap(), before);
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("fonts.json")).unwrap())
+                .unwrap();
+        assert_eq!(v["version"], 3);
+        assert_eq!(
+            v["presets"]["A"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            ["monospace", "proportional", "icons"]
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("hosts/laptop/fonts.json")).unwrap(),
+            "{\n  \"monospace\": 0,\n  \"proportional\": 3,\n  \"icons\": 3\n}\n"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1345,7 +1481,8 @@ mod tests {
         assert_eq!(labels(&t), ["▸DejaVu 2", "▸JetBrains Mono 3"]);
         // filters: NF Mono only, then show the hidden kinds
         press(&mut t, key('M'));
-        assert_eq!(labels(&t), ["▸JetBrains Mono 1"]);
+        // a group left with one font shows the font itself
+        assert_eq!(labels(&t), ["JetBrainsMono Nerd Font Mono"]);
         press(&mut t, key('M'));
         press(&mut t, key('b'));
         press(&mut t, key('c'));
@@ -1353,7 +1490,11 @@ mod tests {
         // (only Noto Sans CJK fonts here, so that is the shared name)
         assert_eq!(
             labels(&t),
-            ["▸DejaVu 1", "▸JetBrains Mono 1", "▸Noto Sans CJK 2"]
+            [
+                "DejaVu Sans",
+                "JetBrainsMono Nerd Font Propo",
+                "▸Noto Sans CJK 2"
+            ]
         );
         press(&mut t, key('p'));
         assert!(labels(&t).contains(&"Fixed".to_string()));
@@ -1381,19 +1522,66 @@ mod tests {
     }
 
     #[test]
+    fn roles_need_their_kind_of_font_and_r_swaps_in_a_fitting_face() {
+        use crate::fonts_pick::fits;
+        let nf = font("GeistMono Nerd Font", true, true);
+        let nf_mono = font("GeistMono Nerd Font Mono", true, true);
+        let nf_propo = font("GeistMono Nerd Font Propo", false, true);
+        let plain = font("Inter", false, false);
+        assert_eq!(
+            [fits(0, &nf), fits(0, &nf_mono), fits(0, &plain)],
+            [false, true, false]
+        );
+        assert_eq!(
+            [fits(1, &nf), fits(1, &nf_propo), fits(1, &plain)],
+            [false, true, true]
+        );
+        assert_eq!(
+            [fits(2, &nf), fits(2, &nf_propo), fits(2, &plain)],
+            [false, true, false]
+        );
+        let mut t = tab_with(vec![nf, nf_mono, nf_propo, plain]);
+        t.preset.fonts = [0, 1, 2].map(|_| Font {
+            family: "GeistMono Nerd Font".into(),
+            size: 10,
+        });
+        assert!((0..3).all(|r| t.misfit(r)));
+        // r on each role: the same family.s face that fits it
+        for (role, want) in [
+            (0, "GeistMono Nerd Font Mono"),
+            (1, "GeistMono Nerd Font Propo"),
+            (2, "GeistMono Nerd Font Propo"),
+        ] {
+            t.slot = role;
+            let fill = t.fix_role().unwrap();
+            assert!(fill.changed && fill.missing.is_empty(), "{fill:?}");
+            assert_eq!(t.preset.fonts[role].family, want);
+            assert!(!t.misfit(role));
+            assert!(t.fix_role().is_err(), "fits already");
+        }
+        // no fitting face: kept, and said why
+        t.preset.fonts[0].family = "Inter".into();
+        t.slot = 0;
+        let fill = t.fix_role().unwrap();
+        assert_eq!((fill.changed, fill.missing.clone()), (false, vec![0]));
+        assert_eq!(
+            fill.msg,
+            "Inter has no Nerd Font Mono face (Monospace kept)"
+        );
+    }
+
+    #[test]
     fn warnings_for_role_fonts() {
         let mut t = tab_with(vec![
             font("Beta Sans", false, false),
             font("Gamma Mono NF", true, true),
         ]);
         t.preset.fonts[0].family = "Beta Sans".into();
-        assert_eq!(
-            t.warnings(0).len(),
-            2,
-            "mono role: not monospaced, no icons"
-        );
+        assert_eq!(t.warnings(0), ["not a Nerd Font Mono"]);
+        t.preset.fonts[1].family = "Beta Sans".into();
+        assert!(t.warnings(1).is_empty(), "proportional");
         t.preset.fonts[2].family = "Gamma Mono NF".into();
-        assert!(t.warnings(2).is_empty());
+        assert_eq!(t.warnings(2), ["not a Nerd Font Propo"]);
         t.preset.fonts[2].family = "Nope".into();
         assert!(t.warnings(2)[0].contains("not installed"));
     }

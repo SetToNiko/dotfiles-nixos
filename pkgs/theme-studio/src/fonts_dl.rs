@@ -75,6 +75,9 @@ pub struct DlPage {
     pub(crate) listed: Option<serde_json::Map<String, Value>>,
     /// The preview pane (made on first use).
     pub preview: Option<crate::fonts_preview::FontPreview>,
+    /// After this download (id), fill these roles from the family (a
+    /// Nerd Font fetched for roles that had no fitting face).
+    pub fill_after: Option<(String, String, Vec<usize>)>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
@@ -96,6 +99,7 @@ impl Default for DlPage {
             jobs: HashMap::new(),
             listed: None,
             preview: None,
+            fill_after: None,
             tx,
             rx,
         }
@@ -266,9 +270,19 @@ impl App {
                 }
                 Msg::Installed { id, result } => {
                     changed = true;
+                    let fill = match &self.dl.fill_after {
+                        Some((after, ..)) if *after == id => self.dl.fill_after.take(),
+                        _ => None,
+                    };
                     let family = self.dl.jobs.remove(&id).map_or(id, |j| j.0);
                     match result {
-                        Ok((name, entry)) => self.record_install(&name, entry),
+                        Ok((name, entry)) => {
+                            self.record_install(&name, entry);
+                            if let Some((_, group, roles)) = fill {
+                                let fill = self.fonts.fill_roles(&group, &roles);
+                                self.apply_fill(fill);
+                            }
+                        }
                         Err(e) => self.error(format!("Downloading {family} failed: {e}")),
                     }
                 }
@@ -296,6 +310,80 @@ impl App {
             Err(e) => self.error(format!("Installed {name}, but {}: {e:#}", path.display())),
         }
         self.fonts.refresh_installed();
+    }
+
+    /// After filling roles from a family (`F`, `r` on a role, a tournament
+    /// result's 1 / 2 / 3): applies what changed, and offers the family's
+    /// Nerd Font when it has no fitting face for a role.
+    pub fn after_fill(&mut self, fill: crate::fonts_pick::Fill) {
+        let offer = if fill.missing.is_empty() {
+            None
+        } else {
+            self.nerd_entry_for(&fill.group)
+        };
+        let (group, missing) = (fill.group.clone(), fill.missing.clone());
+        self.apply_fill(fill);
+        if let Some(e) = offer {
+            let size = match &e.source {
+                Source::Nerd { size, .. } => format!(" ({})", crate::prefetch::size(*size)),
+                _ => String::new(),
+            };
+            self.overlay = crate::app::Overlay::Ask {
+                question: format!(
+                    "{group} has no {} installed. Download {}{size}?",
+                    crate::fonts_pick::faces(&missing),
+                    e.family
+                ),
+                then: crate::settings::Deferred::NerdForRoles {
+                    id: e.id,
+                    group,
+                    roles: missing,
+                },
+            };
+        }
+    }
+
+    /// Saves and applies a fill if a role changed; otherwise says why not.
+    fn apply_fill(&mut self, fill: crate::fonts_pick::Fill) {
+        if fill.changed {
+            self.apply_picked_fonts(fill.msg);
+        } else {
+            self.info(fill.msg);
+        }
+    }
+
+    /// The Nerd Fonts release's archive for a family ("JetBrains Mono" →
+    /// JetBrainsMono.tar.xz). Starts loading the catalogue if it isn't yet
+    /// (asking again later finds it).
+    fn nerd_entry_for(&mut self, group: &str) -> Option<Entry> {
+        if self.dl.catalogue.is_none() && !self.dl.loading {
+            self.dl.loading = true;
+            download::load_catalogue(self.dl.tx.clone());
+        }
+        let key = norm(crate::fonts_pick::base_family(group));
+        self.dl
+            .catalogue
+            .as_ref()?
+            .nerd
+            .iter()
+            .find(|e| match &e.source {
+                Source::Nerd { asset, .. } => norm(asset) == key,
+                _ => false,
+            })
+            .cloned()
+    }
+
+    /// Yes to the offer: downloads the Nerd Font, then fills the roles.
+    pub fn install_nerd_for_roles(&mut self, id: String, group: String, roles: Vec<usize>) {
+        let entry = self
+            .dl
+            .catalogue
+            .as_ref()
+            .and_then(|c| c.nerd.iter().find(|e| e.id == id).cloned());
+        if let Some(e) = entry {
+            self.dl.fill_after = Some((id, group, roles));
+            self.dl_install_entry(e);
+        }
     }
 
     pub fn dl_install(&mut self) {

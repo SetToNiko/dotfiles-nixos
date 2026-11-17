@@ -143,7 +143,6 @@ impl App {
         {
             errors.push(format!("settings.json: {e:#}"));
         }
-        self.fonts.role_filters = self.settings.fonts.role_filters();
         // new default pane sizes apply now too
         if self.settings.layout.sizes != old_sizes {
             self.sizes = self.settings.layout.sizes.clone();

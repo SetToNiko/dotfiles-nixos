@@ -249,6 +249,9 @@ pub struct App {
     pub open_original: Option<Palette>,
     /// Where the Palette pane was last drawn (the palette list hangs from it).
     pub palette_pane: Option<Rect>,
+    /// A note for the status line about what the mouse is over (set while
+    /// drawing, e.g. a font role.s requirement).
+    pub hover_note: Option<String>,
     /// The theme: a name for the palette plus the font preset.
     pub themes: ThemeStore,
     pub theme: String,
@@ -350,6 +353,7 @@ impl App {
             open_palettes: Vec::new(),
             open_original: None,
             palette_pane: None,
+            hover_note: None,
             themes: ThemeStore {
                 dir: store.dir.clone(),
             },
@@ -399,7 +403,6 @@ impl App {
         app.load_picker();
         app.fonts.filters = app.settings.font_list.filters();
         app.fonts.unfold_current = app.settings.fonts.list_opens_to_current_font;
-        app.fonts.role_filters = app.settings.fonts.role_filters();
         app.fonts.refresh_installed();
         // palettes.json / fonts.json: version 1 files become version 2 (once;
         // the old file goes to the history)
@@ -408,10 +411,10 @@ impl App {
             ("fonts.json", app.fonts.store.migrate()),
         ] {
             match result {
-                Ok(true) => app.info(format!(
-                    "{what} updated to file format version 2 (the old file is in the history)"
+                Ok(Some(v)) => app.info(format!(
+                    "{what} updated to file format version {v} (the old file is in the history)"
                 )),
-                Ok(false) => {}
+                Ok(None) => {}
                 Err(e) => app.error(format!("{what}: {e:#}")),
             }
         }
@@ -1584,9 +1587,34 @@ impl App {
             }
             Action::FillFamily if fonts && self.fonts.focus == FontFocus::List => {
                 match self.fonts.fill_from_family() {
-                    Ok(what) => self.apply_picked_fonts(what),
+                    Ok(fill) => self.after_fill(fill),
                     Err(e) => self.info(e),
                 }
+            }
+            Action::FixRoleFont if fonts && self.fonts.focus == FontFocus::Slots => {
+                match self.fonts.fix_role() {
+                    Ok(fill) => self.after_fill(fill),
+                    Err(e) => self.info(e),
+                }
+            }
+            // picking, and no installed font fits the role: the Fonts page,
+            // where one can be had
+            Action::Confirm
+                if fonts
+                    && self.fonts.focus == FontFocus::List
+                    && self.fonts.search.is_empty()
+                    && self.fonts.rows().is_empty()
+                    && let Some(r) = self.fonts.picking =>
+            {
+                self.fonts.end_pick();
+                self.fonts.focus = FontFocus::Slots;
+                self.dl.tab = if r == 1 {
+                    crate::fonts_dl::DlTab::Google
+                } else {
+                    crate::fonts_dl::DlTab::Nerd
+                };
+                self.dl.sel = 0;
+                self.page = Page::Downloads;
             }
             // the top of the roles, the bottom of the font list (without the
             // sample under it): on to the page tabs, when they're that way
@@ -1607,7 +1635,7 @@ impl App {
                 if self.fonts.picked {
                     let what = format!(
                         "{}: {}",
-                        crate::fonts::ROLES[role],
+                        crate::fonts::ROLE_NAMES[role],
                         self.fonts.preset.fonts[role].family
                     );
                     self.apply_picked_fonts(what);
@@ -2245,7 +2273,7 @@ impl App {
                 if self.fonts.picked {
                     let what = format!(
                         "{}: {}",
-                        crate::fonts::ROLES[role],
+                        crate::fonts::ROLE_NAMES[role],
                         self.fonts.preset.fonts[role].family
                     );
                     self.apply_picked_fonts(what);
@@ -2757,20 +2785,40 @@ mod tests {
                 bitmap: false,
                 special: false,
             },
+            crate::fonts::Installed {
+                family: "C Nerd Font Propo".into(),
+                mono: false,
+                nerd: true,
+                bitmap: false,
+                special: false,
+            },
         ]);
-        // bar (third role): pick C Mono from the list, two sizes bigger
-        // Enter on bar opens the list with bar's filter (Nerd Font): only A
+        // A is no Nerd Font Mono: the role says so, with the fix key
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("⚠ not a Nerd Font Mono · r fixes"),
+            "{screen}"
+        );
+        // Icons (third role): Enter lists only the Nerd Font Propo fonts
         press(&mut app, "jj\n");
         assert_eq!(app.fonts.picking, Some(2));
         assert_eq!(app.fonts.rows().len(), 1);
-        // n turns the filter off; G Enter picks C Mono (saved and applied:
-        // font-switch.sh isn't in the temp folder, so applying reports it)
-        press(&mut app, "nG\n");
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Nerd Font Propo]") && screen.contains("picking Icons"),
+            "{screen}"
+        );
+        // the chips that would widen it are locked (and hidden)
+        press(&mut app, "n");
+        assert_eq!(app.fonts.rows().len(), 1, "n is locked while picking");
+        // Enter picks it (saved and applied: font-switch.sh isn't in the
+        // temp folder, so applying reports it), two sizes bigger
+        press(&mut app, "\n");
         assert_eq!(app.fonts.picking, None);
-        assert!(!app.fonts.filters.is_on('n'), "the user's filters are back");
+        assert_eq!(app.fonts.filters.need, None, "the user's filters are back");
         assert!(!app.fonts.dirty(), "saved straight away");
         press(&mut app, "ll");
-        assert_eq!(app.fonts.preset.fonts[2].family, "C Mono");
+        assert_eq!(app.fonts.preset.fonts[2].family, "C Nerd Font Propo");
         assert_eq!(app.fonts.preset.fonts[2].size, 11);
         // number keys: 2 opens the list, 1 goes back
         press(&mut app, " 2");
@@ -2788,8 +2836,8 @@ mod tests {
         assert!(!app.fonts.dirty());
         let text = std::fs::read_to_string(dir.join("fonts.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(v["version"], 2, "saved as version 2");
-        assert_eq!(v["presets"]["Base"]["bar"]["family"], "C Mono");
+        assert_eq!(v["version"], 3, "saved as version 3");
+        assert_eq!(v["presets"]["Base"]["icons"]["family"], "C Nerd Font Propo");
         assert_eq!(text, to_jq_string(&v));
         // the palette tab didn't change, and its keys still work after F1
         assert!(!app.dirty());
@@ -2798,7 +2846,13 @@ mod tests {
         assert!(app.picker_visible);
         // the Fonts tab draws at every size (no image support in tests)
         let screen = render(&mut app, 160, 45);
-        for t in ["¹Fonts", "²Installed fonts", "F2 Fonts", "Sample", "C Mono"] {
+        for t in [
+            "¹Fonts",
+            "²Installed fonts",
+            "F2 Fonts",
+            "Sample",
+            "C Nerd Font Propo",
+        ] {
             assert!(screen.contains(t), "missing {t}");
         }
         for w in (1..=200).step_by(7) {
@@ -4096,7 +4150,7 @@ mod tests {
             [
                 "JetBrainsMono Nerd Font Mono",
                 "JetBrainsMono Nerd Font Propo",
-                "JetBrainsMono Nerd Font"
+                "JetBrainsMono Nerd Font Propo"
             ]
         );
         assert!(!app.fonts.dirty(), "saved straight away");
@@ -4130,15 +4184,90 @@ mod tests {
             .iter()
             .map(|f| f.family.as_str())
             .collect();
-        // mono keeps its font: Inter has no monospaced face
-        assert_eq!(fams, ["JetBrainsMono Nerd Font Mono", "Inter", "Inter"]);
+        // Monospace and Icons keep theirs: Inter has no Nerd Font faces (the
+        // test catalogue has no Nerd Font of it either, so nothing is offered)
+        assert_eq!(
+            fams,
+            [
+                "JetBrainsMono Nerd Font Mono",
+                "Inter",
+                "JetBrainsMono Nerd Font Propo"
+            ]
+        );
+        assert!(!matches!(app.overlay, Overlay::Ask { .. }));
         assert!(
             app.message
                 .as_ref()
-                .is_some_and(|(m, _)| m.contains("mono kept")),
+                .is_some_and(|(m, _)| m.contains("Monospace, Icons kept")),
             "{:?}",
             app.message
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_family_without_fitting_faces_offers_its_nerd_font() {
+        use crate::download::{Catalogue, Entry, Source};
+        use crate::fonts::{Installed, Row};
+        let store = temp_store("offer");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.fonts.store.dir = dir.clone();
+        app.fonts.set_installed(vec![Installed {
+            family: "Fira Code".into(),
+            mono: true,
+            nerd: false,
+            bitmap: false,
+            special: false,
+        }]);
+        app.dl.catalogue = Some(Catalogue {
+            nerd: vec![Entry {
+                id: "nerd-firacode".into(),
+                family: "FiraCode Nerd Font".into(),
+                category: "nerd font".into(),
+                license: String::new(),
+                weights: Vec::new(),
+                italic: false,
+                variable: false,
+                source: Source::Nerd {
+                    asset: "FiraCode".into(),
+                    url: "https://x/FiraCode.tar.xz".into(),
+                    size: 12_000_000,
+                },
+                subset: String::new(),
+            }],
+            ..Default::default()
+        });
+        press(&mut app, " 2");
+        app.fonts.list_sel = app
+            .fonts
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Font { .. }))
+            .unwrap();
+        let before = app.fonts.preset.fonts.clone();
+        press(&mut app, "F");
+        assert_eq!(
+            app.fonts.preset.fonts, before,
+            "nothing fits: every role kept"
+        );
+        match &app.overlay {
+            Overlay::Ask { question, then } => {
+                assert_eq!(
+                    question,
+                    "Fira Code has no Nerd Font Mono, proportional or Nerd Font Propo face installed. Download FiraCode Nerd Font (12.0 MB)?"
+                );
+                assert_eq!(
+                    *then,
+                    crate::settings::Deferred::NerdForRoles {
+                        id: "nerd-firacode".into(),
+                        group: "Fira Code".into(),
+                        roles: vec![0, 1, 2],
+                    }
+                );
+            }
+            _ => panic!("no offer"),
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -107,8 +107,8 @@ fn main() -> Result<()> {
                 ("fonts.json", fonts.migrate()),
             ] {
                 match r {
-                    Ok(true) => println!("{what}: updated to version 2"),
-                    Ok(false) => {}
+                    Ok(Some(v)) => println!("{what}: updated to version {v}"),
+                    Ok(None) => {}
                     Err(e) => eprintln!("warning: {what}: {e:#}"),
                 }
             }

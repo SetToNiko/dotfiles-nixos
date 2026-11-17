@@ -637,10 +637,8 @@ impl App {
         let Some(family) = self.tour_installed(who) else {
             return self.info("Install it first (Enter)");
         };
-        match self.fonts.fill_roles(&family, roles) {
-            Ok(what) => self.apply_picked_fonts(what),
-            Err(e) => self.info(e),
-        }
+        let fill = self.fonts.fill_roles(&family, roles);
+        self.after_fill(fill);
     }
 
     /// A click on a pane while playing: picks that font.

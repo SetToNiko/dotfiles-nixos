@@ -277,11 +277,14 @@ pub enum Action {
     PreviewNext,
     PreviewPrev,
     FillFamily,
+    /// A role.s font that doesn.t fit: the same family.s face that does.
+    FixRoleFont,
     /// Tournament: show the fonts' names, the bracket, take a pick back.
     TourNames,
     TourBracket,
     TourUndo,
-    /// Tournament results: use the font for mono (0), ui (1) or bar (2).
+    /// Tournament results: use the font for Monospace (0), Proportional (1)
+    /// or Icons (2).
     UseFor(u8),
     OpenPalette,
     OpenFonts,
@@ -366,6 +369,7 @@ pub fn all_actions() -> Vec<Action> {
         A::PreviewNext,
         A::PreviewPrev,
         A::FillFamily,
+        A::FixRoleFont,
         A::TourNames,
         A::TourBracket,
         A::TourUndo,
@@ -470,6 +474,7 @@ impl Action {
             A::PreviewNext => "preview-next-page",
             A::PreviewPrev => "preview-previous-page",
             A::FillFamily => "fill-roles-from-family",
+            A::FixRoleFont => "fix-role-font",
             A::TourNames => "tournament-names",
             A::TourBracket => "tournament-bracket",
             A::TourUndo => "tournament-undo",
@@ -574,11 +579,15 @@ impl Action {
             Action::PreviewNext => "preview: next page".into(),
             Action::PreviewPrev => "preview: previous page".into(),
             Action::FillFamily => "every role from this font family".into(),
+            Action::FixRoleFont => "a fitting face from the same family".into(),
             Action::TourNames => "tournament: show / hide the fonts' names".into(),
             Action::TourBracket => "tournament: show the bracket".into(),
             Action::TourUndo => "tournament: take the last pick back".into(),
             Action::UseFor(r) => {
-                format!("use the font for {}", crate::fonts::ROLES[r as usize % 3])
+                format!(
+                    "use the font for {}",
+                    crate::fonts::ROLE_NAMES[r as usize % 3]
+                )
             }
             Action::OpenPalette => "another palette for this theme".into(),
             Action::OpenFonts => "another font preset for this theme".into(),
@@ -1310,6 +1319,7 @@ impl Keymap {
             (C::FontRoles, A::SizeUp, &["+", "="]),
             (C::FontRoles, A::SizeDown, &["-"]),
             (C::FontRoles, A::PickFont, &["<CR>", "f"]),
+            (C::FontRoles, A::FixRoleFont, &["r"]),
             (C::FontList, A::Up, &["k", "<Up>"]),
             (C::FontList, A::Down, &["j", "<Down>"]),
             (C::FontList, A::Left, &["h", "<Left>"]),

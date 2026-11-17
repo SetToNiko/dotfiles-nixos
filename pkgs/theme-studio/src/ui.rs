@@ -266,6 +266,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.redraw_at = None;
     // set again if the Palette pane is drawn (the palette list hangs from it)
     app.palette_pane = None;
+    app.hover_note = None;
     crate::hit::set_looks(app.looks(&app.settings));
     let full = f.area();
     // tabs on top: their own row; at the bottom they share the status line
@@ -1288,6 +1289,15 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 },
             )
         })
+        // otherwise, a note about what the mouse is over
+        .or_else(|| {
+            app.hover_note.as_ref().map(|n| {
+                Span::styled(
+                    truncate(&format!(" {n} "), area.width as usize),
+                    Style::new().dark_gray(),
+                )
+            })
+        })
         // otherwise, previews being fetched ahead of time
         .or_else(|| {
             let p = &app.prefetch;
@@ -1310,8 +1320,10 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
             let keys: Vec<String> = keys.iter().map(|k| friendly(k)).collect();
             (!keys.is_empty()).then(|| format!("{} {label}", keys.join("/")))
         };
+        // picking for a role: only the chips that aren.t locked
         let chips: Vec<Action> = crate::fonts::CHIPS
             .iter()
+            .filter(|(c, _)| app.fonts.filters.chip_free(*c))
             .map(|(c, _)| A::Filter(*c))
             .collect();
         let context: Vec<String> = if app.resize_mode {
@@ -1378,7 +1390,10 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 Stage::Results => vec![
                     (&[A::Down, A::Up], "move"),
                     (&[A::Confirm], "install"),
-                    (&[A::UseFor(0), A::UseFor(1), A::UseFor(2)], "mono/ui/bar"),
+                    (
+                        &[A::UseFor(0), A::UseFor(1), A::UseFor(2)],
+                        "use for a role",
+                    ),
                     (&[A::FillFamily], "every role"),
                     (&[A::TourBracket], "bracket"),
                     (&[A::Back], "leave"),
@@ -1471,11 +1486,16 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                         (&[A::FocusNext], "next pane"),
                     ],
                     crate::fonts::FontFocus::Slots => {
-                        vec![
+                        let mut v: Vec<(&[Action], &str)> = vec![
                             (&[A::Down, A::Up], "role"),
                             (&[A::Left, A::Right], "size"),
                             (&[A::PickFont], "pick font"),
-                        ]
+                        ];
+                        // the role.s font doesn.t fit it
+                        if app.fonts.misfit(app.fonts.slot) {
+                            v.push((&[A::FixRoleFont], "fitting face"));
+                        }
+                        v
                     }
                     _ => vec![
                         (&[A::Down, A::Up], "browse"),
@@ -1735,6 +1755,18 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                         Span::styled(format!("   {:<20}", keys.join(" ")), Style::new().yellow()),
                         Span::raw(a.describe()),
                     ]));
+                }
+                // what each role's font has to be (the list shows only those)
+                if ctx == Context::FontRoles {
+                    for (name, need) in crate::fonts::ROLE_NAMES
+                        .iter()
+                        .zip(crate::fonts::ROLE_NEEDS)
+                    {
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("   {name:<20}"), Style::new().dark_gray()),
+                            Span::raw(format!("needs {need}")),
+                        ]));
+                    }
                 }
             }
             lines.push(Line::styled(

@@ -66,6 +66,7 @@ impl FontListSettings {
             },
             show_bitmap: !self.hide_bitmap,
             show_special: !self.hide_cjk_emoji_math,
+            need: None,
         }
     }
 }
@@ -116,21 +117,8 @@ pub struct FontSettings {
     /// The list of downloaded fonts that home/fonts.nix reads ("": next to
     /// settings.json; "~/" works).
     pub installed_list: String,
-    /// The font list's filter when picking for mono, ui and bar ("any",
-    /// "mono", "propo", "nerd-font", "nerd-font-mono", "nerd-font-propo").
-    pub mono_filter: String,
-    pub ui_filter: String,
-    pub bar_filter: String,
-}
-
-impl FontSettings {
-    pub fn role_filters(&self) -> [String; 3] {
-        [
-            self.mono_filter.clone(),
-            self.ui_filter.clone(),
-            self.bar_filter.clone(),
-        ]
-    }
+    // (the per-role filters, mono-filter / ui-filter / bar-filter, went: each
+    // role now has a fixed requirement, fonts_pick.rs)
 }
 
 impl Default for FontSettings {
@@ -139,9 +127,6 @@ impl Default for FontSettings {
             sample_at_start: "shown".into(),
             list_opens_to_current_font: true,
             installed_list: String::new(),
-            mono_filter: "mono".into(),
-            ui_filter: "propo".into(),
-            bar_filter: "nerd-font".into(),
         }
     }
 }
@@ -447,8 +432,10 @@ fn default_keymaps() -> Value {
     Value::Object(m)
 }
 
-/// keymaps.json's format version. 2: panes are `<leader>1`…`<leader>7`.
-pub const KEYMAPS_VERSION: u64 = 2;
+/// keymaps.json.s format version. 2: panes are `<leader>1`…`<leader>7`.
+/// 3: `use-for-mono` / `-ui` / `-bar` are `use-for-monospace` /
+/// `-proportional` / `-icons`, after the font roles.
+pub const KEYMAPS_VERSION: u64 = 3;
 
 /// Updates an older keymaps.json. Version 1 (no "version") had panes on the
 /// plain digits; bindings still exactly like that move to the leader, so
@@ -470,6 +457,30 @@ fn migrate(mut v: Value) -> Value {
                 if global.get(&id) == Some(&serde_json::json!([n.to_string()])) {
                     global.insert(id, serde_json::json!([format!("<leader>{n}")]));
                 }
+            }
+        }
+    }
+    if version < 3
+        && let Some(presets) = v.get_mut("presets").and_then(Value::as_object_mut)
+    {
+        for preset in presets.values_mut() {
+            let Some(contexts) = preset.get_mut("bindings").and_then(Value::as_object_mut) else {
+                continue;
+            };
+            for ctx in contexts.values_mut().filter_map(Value::as_object_mut) {
+                let old = std::mem::take(ctx);
+                *ctx = old
+                    .into_iter()
+                    .map(|(k, keys)| {
+                        let role = k
+                            .strip_prefix("use-for-")
+                            .and_then(|r| crate::fonts::OLD_ROLES.iter().position(|o| *o == r));
+                        match role {
+                            Some(r) => (format!("use-for-{}", crate::fonts::ROLES[r]), keys),
+                            None => (k, keys),
+                        }
+                    })
+                    .collect();
             }
         }
     }
@@ -760,7 +771,7 @@ mod migrate_tests {
         let mut w = Vec::new();
         let (km, _, full) = load_keymaps(&old, &mut w);
         assert!(w.is_empty(), "{w:?}");
-        assert_eq!(full["version"], 2);
+        assert_eq!(full["version"], KEYMAPS_VERSION);
         let g = &full["presets"]["Vim"]["bindings"]["global"];
         assert_eq!(
             g["panel-1"],
@@ -786,5 +797,31 @@ mod migrate_tests {
         let (_, _, again) = load_keymaps(&full, &mut w);
         assert_eq!(again, full);
         let _ = km;
+    }
+
+    #[test]
+    fn version_2_use_for_keys_follow_the_role_names() {
+        let old = serde_json::json!({"version": 2, "active": "Vim", "presets": {"Vim": {"leader": "<Space>", "bindings": {"downloads": {
+            "use-for-mono": ["7"], "use-for-ui": ["2"], "use-for-bar": ["3"]
+        }}}}});
+        let mut w = Vec::new();
+        let (km, _, full) = load_keymaps(&old, &mut w);
+        assert!(w.is_empty(), "{w:?}");
+        let d = &full["presets"]["Vim"]["bindings"]["downloads"];
+        assert_eq!(
+            d["use-for-monospace"],
+            serde_json::json!(["7"]),
+            "rebinds kept"
+        );
+        assert_eq!(d["use-for-icons"], serde_json::json!(["3"]));
+        assert!(d.get("use-for-mono").is_none());
+        assert_eq!(
+            km.key_for(
+                &[crate::keymap::Context::Downloads],
+                crate::keymap::Action::UseFor(0)
+            )
+            .as_deref(),
+            Some("7")
+        );
     }
 }

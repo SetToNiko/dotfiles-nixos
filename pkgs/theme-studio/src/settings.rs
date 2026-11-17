@@ -89,6 +89,13 @@ pub enum Deferred {
     ClearPreviews,
     /// Starts a tournament of a pool (Fonts page, Tournament tab).
     StartTournament(usize),
+    /// Downloads a family.s Nerd Font (catalogue id), then fills these
+    /// roles from it.
+    NerdForRoles {
+        id: String,
+        group: String,
+        roles: Vec<usize>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -949,6 +956,9 @@ impl App {
             Deferred::DeletePreset(name) => self.delete_preset(&name),
             Deferred::ResetPreset(name) => self.reset_preset(&name),
             Deferred::StartTournament(pool) => self.tour_start(pool),
+            Deferred::NerdForRoles { id, group, roles } => {
+                self.install_nerd_for_roles(id, group, roles)
+            }
             Deferred::ClearPreviews => match crate::download::clear_previews() {
                 Ok(()) => {
                     let pv = self.pv();
