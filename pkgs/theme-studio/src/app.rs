@@ -710,9 +710,7 @@ impl App {
                 match n {
                     1 => self.fonts.focus = FontFocus::Slots,
                     2 => self.fonts.open_list(),
-                    _ if !self.wide => self.info(
-                        "The font sample is left out at this window width (too small to read)",
-                    ),
+                    _ if !self.wide => {} // not drawn at this width
                     _ => {
                         self.sample_visible = true;
                         self.fonts.focus = FontFocus::Sample;
@@ -723,7 +721,7 @@ impl App {
                 self.preview.focus = None;
                 self.side = Side::Colours;
                 if self.focus != Focus::List {
-                    self.leave_picker(false);
+                    self.leave_picker(true); // only Enter keeps a change
                 }
             }
             5 => {
@@ -965,10 +963,14 @@ impl App {
         self.end_session_outside_picker();
     }
 
-    /// Leaving the picker other than with Esc keeps the change.
+    /// Only Enter keeps a picker change: leaving the picker any other way
+    /// (Esc, another pane or column, a preview window, a click elsewhere,
+    /// hiding it) puts the colours back.
     fn end_session_outside_picker(&mut self) {
-        if self.focus == Focus::List {
-            self.edit_session = None;
+        let left =
+            self.focus == Focus::List || self.side != Side::Colours || self.preview.focus.is_some();
+        if left && self.edit_session.is_some() {
+            self.leave_picker(true);
         }
     }
 
@@ -2072,14 +2074,17 @@ mod tests {
         press(&mut app, "\nJ#abcdef");
         press(&mut app, "\x1b");
         assert_eq!(app.palette, kept);
-        // leaving another way (to the list with <leader>4) keeps the change
-        press(&mut app, "\nJ 4");
-        assert_ne!(app.palette, kept);
-        press(&mut app, "\x1b");
-        assert_ne!(
-            app.palette, kept,
-            "Esc in the list doesn't undo a kept change"
-        );
+        // only Enter keeps: every other way out of the picker discards
+        for leave in [" 4", " 1", " cp"] {
+            press(&mut app, "\nJ");
+            assert_ne!(app.palette, kept);
+            press(&mut app, leave);
+            assert_eq!(app.palette, kept, "left with {leave:?}");
+            press(&mut app, " 4");
+        }
+        // the hex box: Tab past the last control (back to the list) discards too
+        press(&mut app, "\n#abcdef\t");
+        assert_eq!(app.palette, kept);
     }
 
     #[test]
@@ -2093,12 +2098,7 @@ mod tests {
             "no sample under the narrow layout"
         );
         press(&mut app, " 3");
-        assert_ne!(app.current_pane(), 3);
-        assert!(
-            app.message
-                .as_ref()
-                .is_some_and(|(m, _)| m.contains("font sample"))
-        );
+        assert_ne!(app.current_pane(), 3, "the hidden sample can't be focused");
         // while nvim has the keyboard, the preview frame is magenta
         press(&mut app, " 6");
         let mut t = Terminal::new(TestBackend::new(200, 50)).unwrap();

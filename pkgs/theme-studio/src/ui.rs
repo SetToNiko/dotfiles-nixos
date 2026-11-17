@@ -891,27 +891,11 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         )
     };
     let fonts = app.side == Side::Fonts;
-    let (name, dirty, active) = if fonts {
-        (&app.fonts.name, app.fonts.dirty(), &app.fonts.active)
-    } else {
-        (&app.name, app.dirty(), &app.active)
-    };
     let mut spans = vec![
         page("Main", Action::PageMain, app.page == Page::Main),
         page("Fonts", Action::PageDownloads, app.page == Page::Downloads),
         page("Settings", Action::PageSettings, app.page == Page::Settings),
-        " ".into(),
-        Span::styled(
-            format!(" {name}{} ", if dirty { " ●" } else { "" }),
-            Style::new().reversed(),
-        ),
     ];
-    if let Some(active) = active {
-        spans.push(Span::styled(
-            format!(" active: {active} "),
-            Style::new().dark_gray(),
-        ));
-    }
     if let Some((msg, err)) = &app.message {
         spans.push(Span::styled(
             format!(" {msg} "),
