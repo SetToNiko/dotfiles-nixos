@@ -1167,7 +1167,9 @@ Each step is committed separately and keeps the studio working.
 3. ✅ The palette dropdown row (2) and moving up to the tabs (3). The row
    also shows the palette's base colours. Esc on the row goes back to the
    colours too.
-4. Installed fonts' preview (1).
+4. ✅ Installed fonts' preview (1). The default text comes from the
+   catalogue's category when it's loaded (else icons for Nerd Fonts, code
+   for the rest), not from fc-scan's spacing.
 5. Faster previews (4), measured after each change.
 6. Prefetching off the main thread (7).
 7. Then the tournament (Phase 7 step 4).

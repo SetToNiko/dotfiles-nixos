@@ -662,6 +662,20 @@ pub fn fetch_preview(e: Entry, tx: Sender<Msg>) {
     });
 }
 
+/// An installed font's family name, read from its files in the background
+/// (the Installed tab's preview: nothing to fetch).
+pub fn scan_installed(id: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let dir = fonts_dir().join(&id);
+        let result = preview_file(&dir)
+            .ok_or_else(|| format!("no font files in {}", dir.display()))
+            .and_then(|f| {
+                family_of(&f).ok_or_else(|| format!("no family name in {}", f.display()))
+            });
+        let _ = tx.send(Msg::Preview { id, result });
+    });
+}
+
 /// Removes a downloaded font's files and refreshes fontconfig's cache.
 pub fn remove_files(root: &Path, id: &str) -> Result<()> {
     let dir = root.join(id);

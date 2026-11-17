@@ -88,15 +88,60 @@ impl App {
         self.dl.preview.as_mut().unwrap()
     }
 
+    /// The font the preview shows: the highlighted catalogue font, or on the
+    /// Installed tab the highlighted installed one (drawn from its files).
+    pub fn preview_entry(&mut self) -> Option<Entry> {
+        if let Some(e) = self.dl_selected() {
+            return Some(e);
+        }
+        let Some(crate::fonts_dl::DlRow::Listed(name)) = self.dl_rows().get(self.dl.sel).cloned()
+        else {
+            return None;
+        };
+        let listed = self.dl_listed();
+        let v = listed.get(&name)?;
+        let id = v.get("id")?.as_str()?.to_string();
+        let nerd = v.get("source").and_then(|s| s.as_str()) == Some("nerd");
+        // the catalogue knows its category (for the default text); without
+        // it, Nerd Fonts get icons and the rest code
+        let category = self
+            .dl
+            .catalogue
+            .as_ref()
+            .and_then(|c| c.google.iter().chain(c.nerd.iter()).find(|e| e.id == id))
+            .map(|e| e.category.clone())
+            .unwrap_or_else(|| if nerd { "nerd font" } else { "monospace" }.into());
+        Some(Entry {
+            id,
+            family: name.clone(),
+            category,
+            license: String::new(),
+            weights: vec![400],
+            italic: false,
+            variable: false,
+            source: if nerd {
+                Source::Nerd {
+                    asset: name,
+                    url: String::new(),
+                    size: 0,
+                }
+            } else {
+                Source::Fontsource
+            },
+            subset: "latin".into(),
+        })
+    }
+
     /// Each loop: fetch the highlighted font after a pause, render it, pick
     /// up a finished image. True when something changed.
     pub fn poll_preview(&mut self) -> bool {
         if self.page != crate::app::Page::Downloads || !self.fonts_preview_visible {
             return false;
         }
-        let Some(e) = self.dl_selected() else {
+        let Some(e) = self.preview_entry() else {
             return false;
         };
+        let installed = self.dl.tab == crate::fonts_dl::DlTab::Installed;
         let pv = self.pv();
         if pv.last.as_deref() != Some(e.id.as_str()) {
             pv.last = Some(e.id.clone());
@@ -105,8 +150,14 @@ impl App {
             pv.image = None;
             pv.error = None;
         }
+        // installed: its family from its own files, nothing to fetch
+        if installed && !pv.families.contains_key(&e.id) && pv.fetching.insert(e.id.clone()) {
+            download::scan_installed(e.id.clone(), self.dl_sender());
+        }
+        let pv = self.pv();
         let nerd = matches!(e.source, Source::Nerd { .. });
         if !nerd
+            && !installed
             && pv.since.elapsed() >= PAUSE
             && !pv.families.contains_key(&e.id)
             && !pv.fetching.contains(&e.id)
@@ -192,7 +243,7 @@ impl App {
 
     /// Keys for the preview (on the Fonts page). True if handled.
     pub fn preview_action(&mut self, a: Action) -> bool {
-        let sel = self.dl_selected();
+        let sel = self.preview_entry();
         let pv = self.pv();
         match a {
             Action::PreviewText => {
@@ -241,7 +292,7 @@ impl App {
     /// The wheel over the preview: code moves three lines, prose a page.
     pub fn preview_scroll(&mut self, d: i32) {
         let code = self
-            .dl_selected()
+            .preview_entry()
             .is_some_and(|e| self.pv().kind_for(&e) == Kind::Code);
         if !code {
             self.preview_action(if d > 0 {
@@ -276,7 +327,7 @@ impl App {
 
     /// What the preview pane says when there's no image.
     pub fn preview_note(&mut self) -> String {
-        let Some(e) = self.dl_selected() else {
+        let Some(e) = self.preview_entry() else {
             return String::new();
         };
         let pv = self.pv();
@@ -324,7 +375,7 @@ pub fn kind_label(l: &str) -> &'static str {
 impl App {
     /// Opens a title dropdown under `at`, on the current choice.
     pub fn open_menu(&mut self, menu: u8, at: ratatui::layout::Rect) {
-        let sel = self.dl_selected();
+        let sel = self.preview_entry();
         let pv = self.pv();
         let sel = if menu == 0 {
             let cur = sel.map_or(Kind::Code, |e| pv.kind_for(&e));

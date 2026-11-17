@@ -98,7 +98,7 @@ pub fn draw_downloads(f: &mut Frame, app: &mut App, area: Rect) {
 /// The highlighted font drawn with a sample text (fonts_preview.rs).
 fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
     use crate::samples::{KINDS, Kind, LANGS};
-    let selected = app.dl_selected();
+    let selected = app.preview_entry();
     // " Preview  Code ▾  Rust ▾  12pt ": the kind and the language are
     // dropdowns
     let mut title: Vec<Span> = vec![" Preview ".into()];
@@ -147,12 +147,6 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
     // the wheel scrolls the text
     app.hits.add(inner, Target::DlPreview);
     if selected.is_none() {
-        let text = if app.dl.tab == DlTab::Installed {
-            " Installed: the main page's sample shows it."
-        } else {
-            ""
-        };
-        f.render_widget(Paragraph::new(text).dark_gray(), inner);
         return;
     }
     // while resizing, the preview keeps the size it had (and isn't

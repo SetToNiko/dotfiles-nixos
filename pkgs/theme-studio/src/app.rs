@@ -4467,4 +4467,62 @@ mod tests {
         assert!(!app.page_tabs_focused);
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn installed_fonts_preview_from_their_files() {
+        // a real font file to stand in (skipped without one, e.g. in the
+        // Nix build's sandbox)
+        let Some(file) = std::process::Command::new("fc-match")
+            .args(["-f", "%{file}", "monospace"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .filter(|f| f.ends_with(".ttf") || f.ends_with(".otf"))
+        else {
+            eprintln!("skipped: no font file");
+            return;
+        };
+        let store = temp_store("installed-preview");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        let fonts = crate::download::fonts_dir().join("test-mono");
+        std::fs::create_dir_all(&fonts).unwrap();
+        let ext = if file.ends_with(".otf") { "otf" } else { "ttf" };
+        std::fs::copy(&file, fonts.join(format!("TestMono-Regular.{ext}"))).unwrap();
+        let list = app.installed_list_path();
+        std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+        std::fs::write(
+            &list,
+            r#"{"version": 1, "fonts": {"Test Mono": {"source": "fontsource", "id": "test-mono"}}}"#,
+        )
+        .unwrap();
+        app.page = Page::Downloads;
+        app.dl.tab = crate::fonts_dl::DlTab::Installed;
+        app.dl.listed = None;
+        app.dl.sel = 0;
+        // the highlighted installed font is the preview's, with code by default
+        let e = app.preview_entry().unwrap();
+        assert_eq!(
+            (e.id.as_str(), e.category.as_str()),
+            ("test-mono", "monospace")
+        );
+        // its family comes from its files, without fetching anything
+        let start = std::time::Instant::now();
+        loop {
+            app.poll_downloads();
+            if let Some(r) = app
+                .dl
+                .preview
+                .as_ref()
+                .and_then(|p| p.families.get("test-mono"))
+            {
+                assert!(r.as_ref().is_ok_and(|f| !f.is_empty()), "{r:?}");
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(10), "no family name");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::fs::remove_dir_all(fonts).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

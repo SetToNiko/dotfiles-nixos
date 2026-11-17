@@ -70,7 +70,7 @@ pub struct DlPage {
     /// Running installs: id → (family, done, total).
     pub jobs: HashMap<String, (String, u64, u64)>,
     /// The installed-fonts list as last read (None: read it again).
-    listed: Option<serde_json::Map<String, Value>>,
+    pub(crate) listed: Option<serde_json::Map<String, Value>>,
     /// The preview pane (made on first use).
     pub preview: Option<crate::fonts_preview::FontPreview>,
     tx: Sender<Msg>,
