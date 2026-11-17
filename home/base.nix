@@ -22,6 +22,7 @@ let
     yazi = "yazi";
     rofi = "rofi";
     pywalfox = "pywalfox";
+    theme-studio = "theme-studio"; # keymaps.json, settings.json
     # per-host fragments (e.g. ~/.config/host/i3.conf, included by i3/config)
     host = "hosts/${host}";
   };
