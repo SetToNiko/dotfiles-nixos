@@ -1,0 +1,28 @@
+{
+  "background": "bg0",
+  "foreground": "fg0",
+  "palette": [
+    "bg1",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "purple",
+    "aqua",
+    "fg0",
+    "grey0",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "purple",
+    "aqua",
+    "fg1"
+  ],
+  "without_theme": {
+    "cursor-color": "fg0",
+    "cursor-text": "bg0",
+    "selection-background": "bg3",
+    "selection-foreground": "fg0"
+  }
+}

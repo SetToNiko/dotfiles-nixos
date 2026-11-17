@@ -249,6 +249,31 @@ history is under the old names (`git log -- palettes.json`).
   commands by name (`theme-switch Gruvbox Dark`); the studio applies a
   theme (now through the command); `theme-switch.sh` from a shell.
 
+**Step 4 as built ✅:**
+
+- `scripts/` holds the three scripts and `lib/` (`rofi-picker.sh`,
+  `paths.sh`); `share/` holds `palette-derive.jq`, `terminal-colors.json`
+  and `pywalfox-colors.jq`. `configs/` keeps relative links at all eight old
+  paths (`configs/pywalfox/colors.jq` too, since home-manager links that
+  folder to `~/.config/pywalfox`).
+- The package is two parts: the Rust build (`passthru.bin`; its source
+  didn't change, so it's the same store path as before) and a wrapper
+  derivation. `$out/share/theme-studio/` mirrors the project (`scripts/`,
+  `share/`, `docs/theme-studio.md`); `$out/bin/theme-switch`,
+  `themes-switch` and `font-switch` run `bash` on
+  `${THEME_STUDIO_SCRIPTS:-$out/share/theme-studio/scripts}/<name>.sh`
+  (step 5's live mode sets `THEME_STUDIO_SCRIPTS` to the checkout), with
+  `THEME_STUDIO_SHARE` defaulting to the package's `share/`. Their PATH gets
+  coreutils, sed, awk, grep, procps, jq and fontconfig first, and rofi,
+  ghostty and i3 last (the desktop's own win).
+- The studio is wrapped with the same `THEME_STUDIO_SHARE` and the package's
+  `bin/` on PATH, so it calls the commands. Its README tab now reads the
+  package's copy of the guide; edits show again with live mode (step 5).
+- Checked before `nrs`: the scripts through the old links, from the project,
+  and the built commands (with a bare PATH, and with
+  `THEME_STUDIO_SCRIPTS` pointing at the checkout) all give byte-for-byte
+  the same output, the login font copy included.
+
 ### 5. The Nix modules (main repo)
 
 - `packaging/nix/home-module.nix`, options under `programs.theme-studio`:
