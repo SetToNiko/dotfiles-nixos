@@ -1,5 +1,5 @@
 //! The Settings page's Behaviour tab: settings.json's values, in groups
-//! (Keys, Layout, Hover, Palette pane, Derived colours, Fonts pane).
+//! (Keys, Layout, Messages, Hover, Palette pane, Derived colours, Fonts pane).
 
 use ratatui::style::{Color, Modifier};
 
@@ -31,6 +31,10 @@ pub enum BhRow {
     Leader,
     Tabs,
     InnerTabs,
+    /// How long messages stay in the status line.
+    MessageSeconds,
+    /// Save confirmations: status line or a box.
+    SavedAs,
     SaveSizes,
     ResetSizes,
     Highlight(LookId),
@@ -100,6 +104,7 @@ pub fn behaviour_rows() -> Vec<BhRow> {
         R::SaveSizes,
         R::ResetSizes,
     ]);
+    v.extend([R::Header("Messages"), R::MessageSeconds, R::SavedAs]);
     v.push(R::Header("Hover (everything clickable)"));
     v.extend(look_rows(LookId::Hover));
     v.extend([R::PaneBorder, R::PreviewBorder, R::Sample(LookId::Hover)]);
@@ -297,6 +302,11 @@ impl App {
             BhRow::Tabs => s.layout.tabs.clone(),
             BhRow::InnerTabs => s.layout.inner_tabs.clone(),
             BhRow::SaveSizes | BhRow::ResetSizes => "Enter".into(),
+            BhRow::MessageSeconds => match s.messages.seconds {
+                0 => "until a key".into(),
+                n => format!("{n} s"),
+            },
+            BhRow::SavedAs => s.messages.saved.clone(),
             BhRow::Highlight(id) => yes(look(id).highlight),
             BhRow::HighlightColour(id) => look(id).highlight_colour.clone(),
             BhRow::Underline(id) => look(id).underline.clone(),
@@ -333,6 +343,8 @@ impl App {
             BhRow::InnerTabs => "Tabs inside a page (Keymaps, Behaviour, History)".into(),
             BhRow::SaveSizes => "Save the current pane sizes as the default".into(),
             BhRow::ResetSizes => "Pane sizes back to the shipped defaults".into(),
+            BhRow::MessageSeconds => "Messages stay for (errors: until a key)".into(),
+            BhRow::SavedAs => "\"Saved\" shows in (bar: the status line; popup: a box)".into(),
             BhRow::Highlight(_) => "Highlight the background".into(),
             BhRow::HighlightColour(_) => "Highlight colour".into(),
             BhRow::Underline(_) => "Underline".into(),
@@ -441,6 +453,17 @@ impl App {
                 let s = &mut self.settings;
                 match row {
                     BhRow::Tabs => s.layout.tabs = cycle(&s.layout.tabs, &["bottom", "top"]),
+                    BhRow::MessageSeconds => {
+                        let opts = crate::config::MessageSettings::SECONDS;
+                        let i = opts
+                            .iter()
+                            .position(|n| *n == s.messages.seconds)
+                            .unwrap_or(2);
+                        s.messages.seconds = opts[wrap(i, d, opts.len())];
+                    }
+                    BhRow::SavedAs => {
+                        s.messages.saved = cycle(&s.messages.saved, &["bar", "popup"])
+                    }
                     BhRow::InnerTabs => {
                         s.layout.inner_tabs = cycle(&s.layout.inner_tabs, &["top", "bottom"])
                     }

@@ -270,7 +270,7 @@ impl App {
         if then_apply {
             self.theme_apply_saved();
         } else {
-            self.info(format!("Saved the theme \"{name}\""));
+            self.notify_saved(format!("Saved \"{name}\""));
         }
     }
 
@@ -296,7 +296,7 @@ impl App {
         self.active = Some(t.palette.clone());
         self.system_palette = Some(self.palette.clone());
         let _ = ThemeStore::set_active(&self.theme);
-        self.info(format!("Saved and applied the theme \"{}\"", self.theme));
+        self.notify_saved(format!("Saved and applied \"{}\"", self.theme));
     }
 
     /// Open (o): the list of themes, with their palettes' colours.

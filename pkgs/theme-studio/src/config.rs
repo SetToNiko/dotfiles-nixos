@@ -225,6 +225,37 @@ pub struct Settings {
     pub fonts: FontSettings,
     pub font_list: FontListSettings,
     pub hover: HoverSettings,
+    pub messages: MessageSettings,
+}
+
+/// How messages show.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct MessageSettings {
+    /// Seconds a message stays in the status line; 0 = until the next key.
+    /// (Errors always stay until the next key.)
+    pub seconds: u32,
+    /// Save confirmations: "bar" (the status line) or "popup" (a box that
+    /// stays until a key or a click closes it).
+    pub saved: String,
+}
+
+impl Default for MessageSettings {
+    fn default() -> Self {
+        MessageSettings {
+            seconds: 3,
+            saved: "bar".into(),
+        }
+    }
+}
+
+impl MessageSettings {
+    /// The choices for `seconds`.
+    pub const SECONDS: [u32; 6] = [1, 2, 3, 5, 10, 0];
+
+    pub fn saved_in_popup(&self) -> bool {
+        self.saved == "popup"
+    }
 }
 
 /// A highlight look: any mix of a background, an underline and a text
@@ -309,6 +340,9 @@ impl Settings {
         if !["top", "bottom"].contains(&self.layout.inner_tabs.as_str()) {
             self.layout.inner_tabs = "top".into();
         }
+        if !["bar", "popup"].contains(&self.messages.saved.as_str()) {
+            self.messages.saved = "bar".into();
+        }
     }
 }
 
@@ -324,6 +358,7 @@ impl Default for Settings {
             fonts: FontSettings::default(),
             font_list: FontListSettings::default(),
             hover: HoverSettings::default(),
+            messages: MessageSettings::default(),
         }
     }
 }

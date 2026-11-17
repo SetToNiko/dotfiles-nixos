@@ -149,7 +149,7 @@ impl App {
             self.sizes = self.settings.layout.sizes.clone();
         }
         if errors.is_empty() {
-            self.info("Saved the settings");
+            self.notify_saved("Saved");
         } else {
             self.error(format!("Saving: {}", errors.join("; ")));
         }

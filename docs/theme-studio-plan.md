@@ -915,6 +915,17 @@ Settled at the start of the session after Phase 7 step 3 (2026-11-17).
 Built before the tournament (Phase 7 step 4), which reuses item 4's
 download work.
 
+### 0. Messages ✅ (asked for before starting 7b)
+
+- **Info messages** leave the status line after a set time (Behaviour tab,
+  Messages group: 1, 2, 3 (default), 5 or 10 seconds, or until a key).
+  Errors still stay until a key.
+- **Save confirmations** are short ("Saved" for the settings; `Saved
+  "Work"`, `Saved and applied "Work"` for themes, palettes and font
+  presets) and show either in the status line (default) or in a box that a
+  key or a click closes. Smaller notes ("Nothing to undo") stay in the bar.
+- settings.json: `"messages": {"seconds": 3, "saved": "bar" | "popup"}`.
+
 ### 1. Palette dropdown in the Palette pane
 
 - **What:** ✅ the pane title is the dropdown:

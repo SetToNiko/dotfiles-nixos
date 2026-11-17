@@ -312,6 +312,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     draw_overlay(f, app, full);
     draw_pending(f, app, full);
+    draw_notice(f, app, full);
+}
+
+/// A save confirmation in a box (settings.messages.saved = "popup").
+fn draw_notice(f: &mut Frame, app: &App, area: Rect) {
+    let Some(text) = &app.notice else {
+        return;
+    };
+    let hint = "any key or a click closes this";
+    let w = text.chars().count().max(hint.len()) as u16 + 4;
+    let lines = vec![
+        Line::styled(format!(" {text}"), Style::new().green().bold()),
+        Line::raw(""),
+        Line::styled(format!(" {hint}"), Style::new().dark_gray()),
+    ];
+    let r = centered(area, w, 5);
+    f.render_widget(Clear, r);
+    let block = Block::bordered().border_style(Style::new().green());
+    f.render_widget(Paragraph::new(lines).block(block), r);
 }
 
 /// The page tabs (F1 Main, F2 Fonts, F3 Settings), clickable; returns the

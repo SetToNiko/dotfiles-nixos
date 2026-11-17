@@ -887,7 +887,7 @@ impl App {
                     .and_then(|t| serde_json::from_str(&t).ok());
                 match (self.history(), now) {
                     (Some(h), Some(content)) => match h.save_named(file, &text, &content) {
-                        Ok(_) => self.info(format!("Saved {file} as \"{text}\"")),
+                        Ok(_) => self.notify_saved(format!("Saved {file} as \"{text}\"")),
                         Err(e) => self.error(format!("{e:#}")),
                     },
                     _ => self.error(format!("Can't read {file}")),

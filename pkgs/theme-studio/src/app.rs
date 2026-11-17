@@ -1,7 +1,7 @@
 //! Editor state and input handling.
 
 use std::io::Write;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 /// The terminal the studio draws on.
@@ -162,6 +162,11 @@ pub struct App {
     pub terminal: Option<TerminalMap>,
     /// Status-line message and whether it's an error.
     pub message: Option<(String, bool)>,
+    /// When an info message was shown (it goes after settings.messages.seconds).
+    pub message_at: Option<Instant>,
+    /// A save confirmation in a box (settings.messages.saved = "popup");
+    /// stays until a key or a click.
+    pub notice: Option<String>,
     pub overlay: Overlay,
     /// What's clickable where (from the last draw), and where the mouse is.
     pub hits: crate::hit::HitMap,
@@ -334,6 +339,8 @@ impl App {
             system_palette,
             terminal,
             message: None,
+            message_at: None,
+            notice: None,
             overlay: Overlay::None,
             hits: Default::default(),
             pointer_hand: false,
@@ -385,6 +392,9 @@ impl App {
             }
             // downloads: the catalogue, progress, finished installs
             if self.poll_downloads() {
+                redraw = true;
+            }
+            if self.expire_message() {
                 redraw = true;
             }
             if self.preview.take_dirty() || redraw {
@@ -473,11 +483,11 @@ impl App {
             Ok(()) if then_apply => match self.fonts.store.apply(name) {
                 Ok(()) => {
                     self.fonts.active = Some(name.to_string());
-                    self.info(format!("Saved and applied font preset \"{name}\""));
+                    self.notify_saved(format!("Saved and applied \"{name}\""));
                 }
                 Err(e) => self.error(format!("Apply failed: {e:#}")),
             },
-            Ok(()) => self.info(format!("Saved font preset \"{name}\" to fonts.json")),
+            Ok(()) => self.notify_saved(format!("Saved \"{name}\"")),
             Err(e) => self.error(format!("Save failed: {e:#}")),
         }
     }
@@ -504,10 +514,37 @@ impl App {
 
     pub fn info(&mut self, s: impl Into<String>) {
         self.message = Some((s.into(), false));
+        self.message_at = Some(Instant::now());
     }
 
     pub fn error(&mut self, s: impl Into<String>) {
         self.message = Some((s.into(), true));
+        self.message_at = None;
+    }
+
+    /// A save confirmation: in the status line like any message, or in a
+    /// box (settings.messages.saved).
+    pub fn notify_saved(&mut self, s: impl Into<String>) {
+        if self.settings.messages.saved_in_popup() {
+            self.message = None;
+            self.notice = Some(s.into());
+        } else {
+            self.info(s);
+        }
+    }
+
+    /// Takes an info message away once it has been shown long enough.
+    /// Returns whether it went.
+    fn expire_message(&mut self) -> bool {
+        let secs = self.settings.messages.seconds;
+        match self.message_at {
+            Some(at) if secs > 0 && at.elapsed() >= Duration::from_secs(secs.into()) => {
+                self.message = None;
+                self.message_at = None;
+                true
+            }
+            _ => false,
+        }
     }
 
     // ----- editing ---------------------------------------------------------
@@ -671,7 +708,7 @@ impl App {
                 if then_apply {
                     self.apply_saved();
                 } else {
-                    self.info(format!("Saved \"{name}\" to palettes.json"));
+                    self.notify_saved(format!("Saved \"{name}\""));
                 }
             }
             Err(e) => self.error(format!("Save failed: {e:#}")),
@@ -693,7 +730,7 @@ impl App {
             Ok(()) => {
                 self.active = Some(name.clone());
                 self.system_palette = Some(self.palette.clone());
-                self.info(format!("Saved and applied \"{name}\""));
+                self.notify_saved(format!("Saved and applied \"{name}\""));
             }
             Err(e) => self.error(format!("Apply failed: {e:#}")),
         }
@@ -1204,6 +1241,13 @@ impl App {
     fn handle_key(&mut self, k: KeyEvent) {
         use crate::fonts::FontFocus;
         let key = Key::from_event(k);
+        // A save confirmation box: any key closes it (Ctrl+C still goes on
+        // to quit).
+        if self.notice.take().is_some()
+            && key != Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        {
+            return;
+        }
         // A preview window has the keyboard: everything but the key bound to
         // "type into the preview / next window / back" goes to it.
         if let Some(id) = self.preview.focus
@@ -1813,6 +1857,13 @@ impl App {
         use crate::hit::Target as T;
         let (x, y) = (m.column, m.row);
         self.hits.mouse = Some((x, y));
+        // a save confirmation box: a click anywhere closes it
+        if self.notice.is_some() {
+            if matches!(m.kind, MouseEventKind::Down(_)) {
+                self.notice = None;
+            }
+            return;
+        }
         let target = self.hits.at(x, y);
         // With a pop-up open (other than "copy from"), only the pop-up responds.
         let popup = !matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. });
@@ -3801,6 +3852,53 @@ mod tests {
             "{:?}",
             app.message
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn messages_time_out_and_saves_can_pop_up() {
+        let store = temp_store("messages");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        let ago = |s: u64| Some(Instant::now() - Duration::from_secs(s));
+        // info messages go after settings.messages.seconds (3 by default)
+        app.info("hello");
+        assert!(!app.expire_message());
+        app.message_at = ago(3);
+        assert!(app.expire_message());
+        assert_eq!(app.message, None);
+        // errors stay until a key
+        app.error("bad");
+        assert!(!app.expire_message());
+        assert!(app.message.is_some());
+        // 0: until a key
+        app.settings.messages.seconds = 0;
+        app.info("stays");
+        app.message_at = ago(100);
+        assert!(!app.expire_message());
+        app.settings.messages.seconds = 3;
+        // saving the settings says "Saved"; switched to popup, that save
+        // already shows in a box
+        app.with_draft(|a| a.settings.messages.saved = "popup".into());
+        app.settings_save();
+        assert_eq!(app.notice.as_deref(), Some("Saved"));
+        assert_eq!(app.message, None);
+        assert!(render(&mut app, 160, 45).contains("any key or a click closes this"));
+        // a key closes it and does nothing else
+        let sel = app.sel;
+        press(&mut app, "j");
+        assert_eq!(app.notice, None);
+        assert_eq!(app.sel, sel);
+        // so does a click
+        app.notify_saved("Saved \"One\"");
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 1, 1);
+        assert_eq!(app.notice, None);
+        // bar: the status line, like any message
+        app.settings.messages.saved = "bar".into();
+        app.notify_saved("Saved");
+        assert_eq!(app.message, Some(("Saved".into(), false)));
+        assert_eq!(app.notice, None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
