@@ -50,6 +50,8 @@ pub enum Target {
     SettingsButton(char),
     /// Keymaps tab: a preset in the preset list.
     PresetRow(usize),
+    /// The theme's name in the tab row (opens the theme list).
+    ThemeName,
     /// Download fonts page: a tab, a list row, a category chip, the search
     /// box, Install ('i') / Remove ('r').
     DlTab(u8),

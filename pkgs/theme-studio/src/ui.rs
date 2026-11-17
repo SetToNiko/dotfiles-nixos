@@ -353,6 +353,29 @@ fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) -> u16 {
         f.render_widget(Paragraph::new(Span::styled(text, style)), r);
         x += w;
     }
+    // the theme: its name and unsaved dot (a click opens the theme list)
+    let dot = if app.theme_dirty() { " ●" } else { "" };
+    let label = format!("  Theme: {}{dot} ", app.theme);
+    let w = (label.chars().count() as u16).min((area.x + area.width).saturating_sub(x));
+    if w > 0 {
+        let r = Rect {
+            x,
+            y: area.y,
+            width: w,
+            height: 1,
+        };
+        let mut line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!("Theme: {}", app.theme), Style::new().bold()),
+            Span::styled(dot, Style::new().yellow()),
+            Span::raw(" "),
+        ]);
+        if app.hits.add(r, Target::ThemeName) {
+            line = crate::hit::hover_line(line, 1);
+        }
+        f.render_widget(Paragraph::new(line), r);
+        x += w;
+    }
     x - area.x
 }
 
@@ -455,8 +478,8 @@ fn swatch(c: Rgb, width: usize) -> Span<'static> {
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let title = Line::from(vec![
         panel_number(4),
-        "Palette: ".into(),
-        Span::styled(app.name.clone(), Style::new().bold()),
+        // the palette's name is part of the theme now (in the tab row)
+        "Palette".into(),
         if app.dirty() {
             Span::styled(" ●", Style::new().yellow())
         } else {
@@ -1582,6 +1605,17 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             if (quit || fonts) && app.fonts.dirty() {
                 what.push(format!("font preset \"{}\"", app.fonts.name));
             }
+            if (quit
+                || matches!(
+                    p,
+                    crate::app::Pending::NewTheme | crate::app::Pending::OpenTheme(_)
+                ))
+                && app.theme_dirty()
+                && what.is_empty()
+            {
+                // only the parts swapped (another palette or preset)
+                what.push(format!("theme \"{}\"", app.theme));
+            }
             if quit && app.settings_page.draft.is_some() {
                 what.push("settings".to_string());
             }
@@ -1623,10 +1657,10 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             input, overwrite, ..
         } => {
             let mut lines = vec![
-                Line::raw(if app.overlay_fonts {
-                    " Name in fonts.json:"
-                } else {
-                    " Name in palettes.json:"
+                Line::raw(match app.overlay_for {
+                    crate::app::For::Fonts => " Name in fonts.json:",
+                    crate::app::For::Palette => " Name in palettes.json:",
+                    crate::app::For::Theme => " Theme name (new parts get it too):",
                 }),
                 Line::from(vec![
                     Span::raw(" "),
@@ -1821,10 +1855,10 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             popup(
                 f,
                 r,
-                if app.overlay_fonts {
-                    "Open font preset"
-                } else {
-                    "Open palette"
+                match app.overlay_for {
+                    crate::app::For::Fonts => "Open a font preset for this theme",
+                    crate::app::For::Palette => "Open a palette for this theme",
+                    crate::app::For::Theme => "Open theme",
                 },
                 lines,
             );

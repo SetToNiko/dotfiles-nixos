@@ -22,6 +22,7 @@ mod preview;
 mod settings;
 mod settings_ui;
 mod store;
+mod theme;
 mod ui;
 
 use std::io::stdout;
@@ -72,6 +73,27 @@ fn main() -> Result<()> {
             let fonts = fonts::FontStore {
                 dir: store.dir.clone(),
             };
+            // themes.json: the first theme, from the active palette and fonts
+            let themes = theme::ThemeStore {
+                dir: store.dir.clone(),
+            };
+            if !themes.exists()
+                && let (Some(p), Some(f)) = (store.active_name(), fonts.active_name())
+            {
+                match themes.save(
+                    &p,
+                    &theme::Theme {
+                        palette: p.clone(),
+                        fonts: f,
+                    },
+                ) {
+                    Ok(()) => {
+                        let _ = theme::ThemeStore::set_active(&p);
+                        println!("themes.json: made the theme \"{p}\"");
+                    }
+                    Err(e) => eprintln!("warning: themes.json: {e:#}"),
+                }
+            }
             for (what, r) in [
                 ("palettes.json", store.migrate()),
                 ("fonts.json", fonts.migrate()),

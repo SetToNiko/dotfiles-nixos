@@ -29,8 +29,8 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
     // titles first (they're clickable too)
     let title1 = Line::from(vec![
         panel_number(1),
-        "Fonts: ".into(),
-        Span::styled(app.fonts.name.clone(), Style::new().bold()),
+        // the preset's name is part of the theme now (in the tab row)
+        "Fonts".into(),
         if app.fonts.dirty() {
             Span::styled(" ●", Style::new().yellow())
         } else {

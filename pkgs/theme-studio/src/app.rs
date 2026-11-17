@@ -18,6 +18,7 @@ use crate::keymap::{Action, Context, Key, Keymap, Lookup};
 use crate::palette::{self, GROUPS, Palette};
 use crate::preview::{Mode as PreviewMode, PaneId, Preview};
 use crate::store::{Store, TerminalMap};
+use crate::theme::ThemeStore;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -51,6 +52,16 @@ pub enum Pending {
     Open(String),
     NewFonts,
     OpenFonts(String),
+    NewTheme,
+    OpenTheme(String),
+}
+
+/// What the Open / Save as pop-up is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum For {
+    Palette,
+    Fonts,
+    Theme,
 }
 
 impl Pending {
@@ -197,8 +208,15 @@ pub struct App {
     pub settings_page: crate::settings::SettingsPage,
     /// Keys of a sequence typed so far (e.g. the leader), waiting for the rest.
     pub pending_keys: Vec<Key>,
-    /// The Open / Save as pop-up is for font presets, not palettes.
-    pub overlay_fonts: bool,
+    /// What the Open / Save as pop-up is for.
+    pub overlay_for: For,
+    /// The theme: a name for the palette plus the font preset.
+    pub themes: ThemeStore,
+    pub theme: String,
+    /// Not in themes.json yet.
+    pub theme_new: bool,
+    /// The theme's parts as saved (None: never saved).
+    pub theme_saved: Option<crate::theme::Theme>,
     quit: bool,
 }
 
@@ -222,11 +240,30 @@ impl App {
     pub fn with_config(store: Store, start: Start, config: crate::config::Loaded) -> Result<App> {
         let active = store.active_name();
         let system_palette = active.as_ref().and_then(|n| store.load(n).ok());
+        // a name on the command line: a theme, or a palette
+        let named = match &start {
+            Start::Named(n) => Some(n.clone()),
+            _ => None,
+        };
+        let start_new = matches!(start, Start::New);
         let (name, palette, is_new) = match start {
-            Start::Named(n) => {
-                let p = store.load(&n)?;
-                (n, p, false)
-            }
+            Start::Named(n) => match store.load(&n) {
+                Ok(p) => (n, p, false),
+                Err(e)
+                    if !ThemeStore {
+                        dir: store.dir.clone(),
+                    }
+                    .load_all()
+                    .iter()
+                    .any(|(t, _)| *t == n) =>
+                {
+                    return Err(e);
+                }
+                Err(_) => match active.as_deref().map(|n| (n, store.load(n))) {
+                    Some((n, Ok(p))) => (n.to_string(), p, false),
+                    _ => ("untitled".to_string(), Palette::blank(), true),
+                },
+            },
             Start::Active => match active.as_deref().map(|n| (n, store.load(n))) {
                 Some((n, Ok(p))) => (n.to_string(), p, false),
                 _ => ("untitled".to_string(), Palette::blank(), true),
@@ -262,7 +299,13 @@ impl App {
             picker: None,
             sample_image: None,
             sample_error: None,
-            overlay_fonts: false,
+            overlay_for: For::Palette,
+            themes: ThemeStore {
+                dir: store.dir.clone(),
+            },
+            theme: String::new(),
+            theme_new: true,
+            theme_saved: None,
             keymap: config.keymap,
             presets: config.presets,
             config_dir: config.dir.clone(),
@@ -317,6 +360,12 @@ impl App {
                 Ok(false) => {}
                 Err(e) => app.error(format!("{what}: {e:#}")),
             }
+        }
+        if start_new {
+            app.new_theme();
+            app.message = None;
+        } else {
+            app.init_theme(named.as_deref());
         }
         app.sync_row();
         if !config.warnings.is_empty() {
@@ -406,7 +455,7 @@ impl App {
 
     fn fonts_save(&mut self, then_apply: bool) {
         if self.fonts.is_new {
-            self.overlay_fonts = true;
+            self.overlay_for = For::Fonts;
             self.overlay = Overlay::SaveAs {
                 input: String::new(),
                 overwrite: false,
@@ -441,7 +490,7 @@ impl App {
                     .iter()
                     .position(|(n, _)| *n == self.fonts.name)
                     .unwrap_or(0);
-                self.overlay_fonts = true;
+                self.overlay_for = For::Fonts;
                 self.overlay = Overlay::Open {
                     filter: String::new(),
                     sel,
@@ -599,7 +648,7 @@ impl App {
     // ----- files -----------------------------------------------------------
 
     fn save(&mut self, then_apply: bool) {
-        self.overlay_fonts = false;
+        self.overlay_for = For::Palette;
         if self.is_new {
             self.overlay = Overlay::SaveAs {
                 input: String::new(),
@@ -612,7 +661,7 @@ impl App {
         self.save_as(&name, then_apply);
     }
 
-    fn save_as(&mut self, name: &str, then_apply: bool) {
+    pub(crate) fn save_as(&mut self, name: &str, then_apply: bool) {
         match self.store.save(name, &self.palette) {
             Ok(()) => {
                 self.name = name.to_string();
@@ -672,7 +721,7 @@ impl App {
         self.info("New palette: edit the 8 base colours first, the rest follow");
     }
 
-    fn reset_history(&mut self) {
+    pub(crate) fn reset_history(&mut self) {
         self.undo.clear();
         self.redo.clear();
         self.last_edit = None;
@@ -685,9 +734,8 @@ impl App {
     /// Runs `p` now, or asks first when there are unsaved changes.
     fn guard(&mut self, p: Pending) {
         let dirty = match p {
-            Pending::Quit => {
-                self.dirty() || self.fonts.dirty() || self.settings_page.draft.is_some()
-            }
+            Pending::NewTheme | Pending::OpenTheme(_) => self.theme_dirty(),
+            Pending::Quit => self.theme_dirty() || self.settings_page.draft.is_some(),
             _ if p.is_fonts() => self.fonts.dirty(),
             _ => self.dirty(),
         };
@@ -704,6 +752,8 @@ impl App {
             Pending::Quit => self.quit = true,
             Pending::New => self.new_palette(),
             Pending::Open(n) => self.open(&n),
+            Pending::NewTheme => self.new_theme(),
+            Pending::OpenTheme(n) => self.open_theme(&n),
             Pending::NewFonts => {
                 self.fonts.new_preset();
                 self.info("New font preset (a copy of the current fonts); s asks for a name");
@@ -718,6 +768,17 @@ impl App {
     /// "Save first" from the unsaved-changes prompt: saves whatever `p`
     /// would throw away (both for quit), if it already has a name.
     fn save_before(&mut self, p: &Pending) {
+        // themes (and quitting): the whole theme, parts included
+        if matches!(p, Pending::Quit | Pending::NewTheme | Pending::OpenTheme(_)) && !self.theme_new
+        {
+            if self.theme_dirty() {
+                self.theme_save(false);
+            }
+            if matches!(p, Pending::Quit) && self.settings_page.draft.is_some() {
+                self.settings_save();
+            }
+            return;
+        }
         let palette = matches!(p, Pending::Quit) || !p.is_fonts();
         let fonts = matches!(p, Pending::Quit) || p.is_fonts();
         if palette && self.dirty() && !self.is_new {
@@ -734,7 +795,7 @@ impl App {
     }
 
     fn open_overlay(&mut self) {
-        self.overlay_fonts = false;
+        self.overlay_for = For::Palette;
         match self.store.load_all() {
             Ok(all) => {
                 let entries = all
@@ -1260,27 +1321,24 @@ impl App {
             Action::SaveFonts => self.fonts_save(false),
             Action::ApplyPalette => self.apply(),
             Action::ApplyFonts => self.fonts_apply(),
-            Action::Save if fonts => self.fonts_save(false),
-            Action::Save => self.save(false),
+            // s / S / a / o / n act on the theme (palette and fonts together)
+            Action::Save => self.theme_save(false),
             Action::SaveAs => {
-                self.overlay_fonts = fonts;
-                let input = if fonts {
-                    self.fonts.name.clone()
-                } else {
-                    self.name.clone()
-                };
+                self.overlay_for = For::Theme;
                 self.overlay = Overlay::SaveAs {
-                    input,
+                    input: self.theme.clone(),
                     overwrite: false,
                     then_apply: false,
                 };
             }
-            Action::Apply if fonts => self.fonts_apply(),
-            Action::Apply => self.apply(),
-            Action::Open if fonts => self.fonts_open_overlay(),
-            Action::Open => self.open_overlay(),
-            Action::New if fonts => self.guard(Pending::NewFonts),
-            Action::New => self.guard(Pending::New),
+            Action::Apply => self.theme_apply(),
+            Action::Open => self.theme_open_overlay(),
+            Action::New => self.guard(Pending::NewTheme),
+            // a part of the theme: another palette or font preset, or a new one
+            Action::OpenPalette => self.open_overlay(),
+            Action::OpenFonts => self.fonts_open_overlay(),
+            Action::NewPalette => self.guard(Pending::New),
+            Action::NewFonts => self.guard(Pending::NewFonts),
             Action::Panel(n) => self.focus_pane(n),
             // Tab in the fonts column: roles → list → sample → roles
             Action::FocusNext | Action::FocusPrev if fonts => {
@@ -1544,7 +1602,29 @@ impl App {
                 KeyCode::Esc => Overlay::None,
                 KeyCode::Enter => {
                     let name = input.trim().to_string();
-                    let (exists, current) = if self.overlay_fonts {
+                    if self.overlay_for == For::Theme {
+                        let exists = self.themes.get(&name).is_some();
+                        return self.overlay = if name.is_empty() {
+                            Overlay::SaveAs {
+                                input,
+                                overwrite,
+                                then_apply,
+                            }
+                        } else if exists && name != self.theme && !overwrite {
+                            self.error(format!(
+                                "The theme \"{name}\" exists. Enter again to overwrite it"
+                            ));
+                            Overlay::SaveAs {
+                                input,
+                                overwrite: true,
+                                then_apply,
+                            }
+                        } else {
+                            self.theme_save_as(&name, then_apply);
+                            std::mem::replace(&mut self.overlay, Overlay::None)
+                        };
+                    }
+                    let (exists, current) = if self.overlay_for == For::Fonts {
                         let all = self.fonts.store.load_all();
                         (
                             all.map(|a| a.contains_key(&name)).unwrap_or(false),
@@ -1563,7 +1643,9 @@ impl App {
                             overwrite,
                             then_apply,
                         }
-                    } else if self.overlay_fonts && (!exists || name == current || overwrite) {
+                    } else if self.overlay_for == For::Fonts
+                        && (!exists || name == current || overwrite)
+                    {
                         self.fonts_save_as(&name, then_apply);
                         Overlay::None
                     } else if exists && name != current && !overwrite {
@@ -1611,10 +1693,10 @@ impl App {
                     KeyCode::Enter => match open_matches(&entries, &filter).get(sel) {
                         Some(&i) => {
                             let name = entries[i].0.clone();
-                            self.guard(if self.overlay_fonts {
-                                Pending::OpenFonts(name)
-                            } else {
-                                Pending::Open(name)
+                            self.guard(match self.overlay_for {
+                                For::Fonts => Pending::OpenFonts(name),
+                                For::Palette => Pending::Open(name),
+                                For::Theme => Pending::OpenTheme(name),
                             });
                             // guard() may have opened a confirmation instead
                             std::mem::replace(&mut self.overlay, Overlay::None)
@@ -1878,6 +1960,7 @@ impl App {
             | T::HistFile(_)
             | T::SettingsDiff
             | T::PresetRow(_) => self.settings_click(t),
+            T::ThemeName => self.theme_open_overlay(),
             T::DlTab(_) | T::DlRow(_) | T::DlChip(_) | T::DlSearch | T::DlButton(_) => {
                 self.dl_click(t)
             }
@@ -2103,43 +2186,93 @@ mod tests {
     }
 
     #[test]
-    fn save_open_and_save_as() {
+    fn themes_save_open_and_fork() {
         let store = temp_store("save");
         let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
         let mut app = test_app(store, Start::Named("One".into()));
+        let themes = || {
+            ThemeStore { dir: dir.clone() }
+                .load_all()
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect::<Vec<_>>()
+        };
+        // s on a theme that was never saved asks for its name
         press(&mut app, "#abcdef\n");
-        press(&mut app, "s");
-        assert!(!app.dirty());
+        assert!(app.theme_dirty());
+        if app.theme_new {
+            press(&mut app, "s");
+            assert!(matches!(app.overlay, Overlay::SaveAs { .. }));
+            press(&mut app, "Work\n");
+        } else {
+            // (made at start from the active parts) save as Work
+            press(&mut app, "S");
+            for _ in 0..app.theme.len() {
+                app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+            }
+            press(&mut app, "Work\n");
+        }
+        assert_eq!(app.theme, "Work");
+        assert!(!app.theme_dirty() && !app.dirty());
+        assert!(themes().contains(&"Work".to_string()));
         assert_eq!(
-            Store { dir: dir.clone() }.load("One").unwrap().get("bg0"),
+            Store { dir: dir.clone() }
+                .load(&app.name)
+                .unwrap()
+                .get("bg0"),
             Rgb(0xab, 0xcd, 0xef)
         );
-        // open "Two" through the search box
-        press(&mut app, "oTwo\n");
+        // <leader>op swaps another palette into the theme: unsaved
+        press(&mut app, " opTwo\n");
         assert_eq!(app.name, "Two");
         assert_eq!(app.palette.get("red"), Rgb(200, 0, 0));
-        // unsaved changes ask before opening another palette
+        assert!(app.theme_dirty() && !app.dirty());
+        assert!(render(&mut app, 160, 45).contains("Theme: Work ●"));
+        // an edited palette asks before another is opened
         press(&mut app, "#111111\n");
-        press(&mut app, "oOne\n");
+        press(&mut app, " opOne\n");
         assert!(matches!(app.overlay, Overlay::Confirm(Pending::Open(_))));
         press(&mut app, "\x1b");
         assert_eq!(app.name, "Two");
-        // save as a new name; it lands at the end of the file
+        // save as a new name forks the edited palette under that name
         press(&mut app, "S");
-        for _ in 0..3 {
+        for _ in 0.."Work".len() {
             app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         }
-        press(&mut app, "Three\n");
-        let names: Vec<String> = Store { dir }.load_all().unwrap().keys().cloned().collect();
-        assert_eq!(names, ["One", "Two", "Three"]);
-        assert_eq!(app.name, "Three");
+        press(&mut app, "Play\n");
+        assert_eq!((app.theme.as_str(), app.name.as_str()), ("Play", "Play"));
+        let names: Vec<String> = Store { dir: dir.clone() }
+            .load_all()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        assert!(
+            names.ends_with(&["Two".to_string(), "Play".to_string()]),
+            "{names:?}"
+        );
+        assert_eq!(
+            Store { dir: dir.clone() }.load("Two").unwrap().get("bg0"),
+            Palette::blank().get("bg0"),
+            "Two kept"
+        );
+        assert!(themes().ends_with(&["Work".to_string(), "Play".to_string()]));
+        // o opens a theme: Work's palette comes back
+        press(&mut app, "oWork\n");
+        assert_eq!(app.theme, "Work");
+        assert_ne!(app.name, "Play");
+        // n: a new theme, a copy of this one
+        press(&mut app, "n");
+        assert!(app.theme_new && app.theme == "untitled");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn renders_at_full_size_and_warns_when_small() {
         let mut app = test_app(temp_store("draw"), Start::Named("One".into()));
         let screen = render(&mut app, 160, 45);
-        assert!(screen.contains("Palette: One"));
+        assert!(screen.contains("Theme: "), "{screen}");
         // only Base is open; the other groups are rows that open
         assert!(
             screen.contains("▾ Base") && screen.contains("▸ Backgrounds"),
@@ -2294,23 +2427,19 @@ mod tests {
         assert_eq!(app.fonts.focus, crate::fonts::FontFocus::List);
         press(&mut app, " 1");
         // unsaved: opening another preset asks first
-        press(&mut app, "oBase\n");
+        press(&mut app, " ofBase\n");
         assert!(matches!(
             app.overlay,
             Overlay::Confirm(Pending::OpenFonts(_))
         ));
         press(&mut app, "\x1b");
-        // save as a new preset, which lands in fonts.json in jq's format
-        press(&mut app, "S");
-        for _ in 0..4 {
-            app.on_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        }
-        press(&mut app, "Wide bar\n");
+        // <leader>sf saves the preset in place, in jq's format
+        press(&mut app, " sf");
         assert!(!app.fonts.dirty());
         let text = std::fs::read_to_string(dir.join("fonts.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(v["version"], 2, "saved as version 2");
-        assert_eq!(v["presets"]["Wide bar"]["bar"]["family"], "C Mono");
+        assert_eq!(v["presets"]["Base"]["bar"]["family"], "C Mono");
         assert_eq!(text, to_jq_string(&v));
         // the palette tab didn't change, and its keys still work after F1
         assert!(!app.dirty());
@@ -2319,13 +2448,7 @@ mod tests {
         assert!(app.picker_visible);
         // the Fonts tab draws at every size (no image support in tests)
         let screen = render(&mut app, 160, 45);
-        for t in [
-            "¹Fonts: Wide bar",
-            "²Installed fonts",
-            "F2 Fonts",
-            "Sample",
-            "C Mono",
-        ] {
+        for t in ["¹Fonts", "²Installed fonts", "F2 Fonts", "Sample", "C Mono"] {
             assert!(screen.contains(t), "missing {t}");
         }
         for w in (1..=200).step_by(7) {
@@ -2933,6 +3056,11 @@ mod tests {
         app.page = Page::Settings;
         render(&mut app, 160, 45);
         click_on(&mut app, crate::hit::Target::SettingsTab(2));
+        // palettes.json in the file list
+        app.settings_page.hist_file = crate::settings::FILES
+            .iter()
+            .position(|f| *f == "palettes.json")
+            .unwrap();
         assert_eq!(app.settings_page.tab, crate::settings::Tab::History);
         let versions = app.versions();
         assert_eq!(versions.len(), 1);

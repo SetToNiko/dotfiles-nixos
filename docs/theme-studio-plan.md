@@ -852,6 +852,8 @@ move to Phase 8.)
 - **The pool:** you pick a category, and every font in it takes part:
   Google's monospace, sans-serif, serif, display or handwriting, Nerd
   Fonts, or installed fonts (monospaced or proportional).
+- **Optional pool size:** all of them (the default), or 16, 32 or 64
+  picked at random from the category.
 - **Before it starts:** a warning with what it takes. The number of fonts,
   the picks it will need (one fewer than the fonts), and the preview
   download (estimated for Google fonts at ~100 KB each; the real sizes for

@@ -37,7 +37,8 @@ pub enum KmRow {
 }
 
 /// The files with a history, as the History tab lists them.
-pub const FILES: [&str; 4] = [
+pub const FILES: [&str; 5] = [
+    "themes.json",
     "palettes.json",
     "fonts.json",
     "keymaps.json",
@@ -335,7 +336,7 @@ impl App {
     /// Where a file with a history lives.
     pub fn file_path(&self, file: &str) -> PathBuf {
         match file {
-            "palettes.json" | "fonts.json" => self.store.dir.join(file),
+            "themes.json" | "palettes.json" | "fonts.json" => self.store.dir.join(file),
             _ => self.config_dir.join(file),
         }
     }

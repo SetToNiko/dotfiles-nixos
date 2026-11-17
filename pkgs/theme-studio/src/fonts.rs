@@ -143,7 +143,21 @@ impl FontStore {
 
     /// Runs font-switch.sh to make a saved preset the system fonts.
     pub fn apply(&self, name: &str) -> Result<()> {
-        let out = Command::new("bash")
+        self.run_switch(name, false)
+    }
+
+    /// Applies without restarting Ghostty and i3 (a theme's palette, applied
+    /// next, restarts them once for both).
+    pub fn apply_quietly(&self, name: &str) -> Result<()> {
+        self.run_switch(name, true)
+    }
+
+    fn run_switch(&self, name: &str, quiet: bool) -> Result<()> {
+        let mut cmd = Command::new("bash");
+        if quiet {
+            cmd.env("NO_RESTART", "1");
+        }
+        let out = cmd
             .arg(self.dir.join("font-switch.sh"))
             .arg(name)
             .stdin(Stdio::null())
