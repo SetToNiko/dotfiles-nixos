@@ -898,7 +898,8 @@ move to Phase 8.)
   the keymaps / settings commits after it). Your first theme, "CRT
   Amber", was made from the active palette and fonts; `$mod+t` opens
   themes, `$mod+p` palettes.
-- ⏳ Step 4, the tournament, is next.
+- ⏳ Step 4, the tournament, comes after Phase 7b (it reuses 7b's
+  download work).
 
 ### 6. Order of work
 
@@ -906,26 +907,27 @@ move to Phase 8.)
    scripts and rofi.
 2. ✅ Role picking with filters and applying at once; filling from a family.
 3. ✅ Preview fetching and rendering, the texts, the preview pane.
-4. The tournament.
+4. The tournament (after Phase 7b).
 
-## Phase 7b: next session (asked for after Phase 7 step 3)
+## Phase 7b: changes asked for after Phase 7 step 3
 
-To plan and settle at the start of the next session. ❓ marks what to
-decide then.
+Settled at the start of the session after Phase 7 step 3 (2026-11-17).
+Built before the tournament (Phase 7 step 4), which reuses item 4's
+download work.
 
 ### 1. Palette dropdown in the Palette pane
 
-- **What:** the Palette pane gets a dropdown at its top, showing the
-  palette in use (`Palette: CRT Amber ▾`). Enter or a click opens it:
-  every palette in palettes.json, with swatches and type-to-search, in a
-  list hanging from the pane (not a centred pop-up).
+- **What:** ✅ the pane title is the dropdown:
+  `⁴Palette: CRT Amber ▾` (the name comes back into the title, removed in
+  Phase 7 step 1). Enter on the title or a click opens it: every palette
+  in palettes.json, with swatches and type-to-search, in a list hanging
+  from the pane (not a centred pop-up). No extra row is taken from the
+  colour list.
+- **Live preview:** ✅ moving through the list repaints the preview windows
+  and the colour list with that palette, the way hover colours already
+  preview. Enter keeps it; Esc goes back to the palette you had.
 - **Choosing** swaps that palette into the theme, as `<leader>op` does
   (asks first if the current palette has unsaved edits).
-- ❓ Whether moving through the list previews each palette live (preview
-  windows and colour list) before Enter, the way the colour list previews
-  hover colours.
-- ❓ Whether the name goes back into the pane title (removed in Phase 7
-  step 1) or only in the dropdown row.
 
 ### 2. Draw resized windows after resizing stops
 
@@ -933,12 +935,11 @@ decide then.
   sample and preview images (ImageMagick renders), so dragging a border
   or resizing the terminal stutters.
 - **Becomes:** while the size is changing (terminal resize events, border
-  drags, resize mode keys) the frame and text redraw, but images and the
-  embedded terminals (nvim, shell) are resized only once the size has
-  stayed the same for a short time (~150 ms); meanwhile the old image is
-  shown cropped, or a placeholder.
-- ❓ The delay, and whether the embedded terminals follow at once or also
-  wait.
+  drags, resize mode keys) the frame and text redraw, but images are
+  re-rendered only once the size has stayed the same for ✅ **150 ms**;
+  meanwhile the old image is shown cropped, or a placeholder.
+- **Embedded terminals** (nvim, shell/yazi): ✅ resize at once. A PTY
+  resize is cheap and nvim redraws on its own, so they don't wait.
 
 ### 3. Fuller code previews, and dropdowns
 
@@ -947,36 +948,54 @@ decide then.
   numbers, error handling), so a font is seen on real code.
 - **Scrolling:** `<` / `>` (or the wheel over the preview) page through
   code as they do through prose.
-- **Language dropdown:** the preview's title row gets a language
-  dropdown (`Rust ▾`); Enter or a click lists the languages. ❓ Whether
-  the text kind (code / icons / prose / README) becomes a dropdown too.
-- ❓ More languages (e.g. Nix, Java, Kotlin, Ruby, Haskell, SQL, HTML/CSS).
+- **Dropdowns:** ✅ the preview's title row gets two: the text kind and the
+  language (`Code ▾  Rust ▾`); Enter or a click lists the choices. `t`
+  and `L` still cycle them from the keyboard. The language dropdown shows
+  only for code.
+- **More languages:** ✅ Java, Kotlin, Ruby, Haskell, SQL and HTML/CSS, on
+  top of Rust, Python, TypeScript, Go, C, Lua and shell. (Nix wasn't
+  picked.)
 
 ### 4. Prefetching previews
 
 - **A setting** (Behaviour tab, Fonts page group): prefetch previews on or
   off, and which categories (monospace, sans-serif, serif, display,
-  handwriting, Nerd Fonts), each shown with its count and estimated size
-  (e.g. monospace 72 fonts ≈ 7 MB; Nerd Fonts 72 archives ≈ 1.5 GB).
+  handwriting, Nerd Fonts), each shown with its count, the download size
+  and the space kept (e.g. monospace 72 fonts ≈ 7 MB; Nerd Fonts 72
+  archives ≈ 1.5 GB to download, a few hundred MB kept).
 - **How:** in the background, a few downloads at a time, with progress in
   the status line; already-fetched fonts are skipped; it resumes after a
   restart.
-- **Kept on the system:** fetched preview fonts already persist between
-  runs in `~/.cache/theme-studio/preview/`. ❓ Whether to move them to
-  `~/.local/share/theme-studio/previews/` (caches can be cleared by
-  cleanup tools), and whether to offer a "clear previews" button with the
+- **Where:** ✅ moved from `~/.cache/theme-studio/preview/` to
+  `~/.local/share/theme-studio/previews/`, so cache cleaners don't undo a
+  prefetch or a tournament's downloads. Files already in the old folder
+  are moved on first start.
+- **Clear previews:** ✅ a button in the same Behaviour group, showing the
   space used.
-- ❓ Whether Nerd Font previews keep the whole archive or only the one
-  Regular file (much smaller once unpacked).
+- **Nerd Fonts:** ✅ only the Regular file is kept once the archive is
+  unpacked; the archive is deleted. Installing the font later downloads
+  the archive again.
 - **Ties in with the tournament,** whose pool needs the same files.
 
-### 5. Key hints at the other end of the tab bar
+### 5. Key hints at the other end of the bar
 
 - **Now:** the status line runs page tabs, theme name, then the hints.
 - **Becomes:** tabs and theme name at the left, the key hints
   right-aligned at the right end; messages take the middle.
-- ❓ When the tab bar is on top: whether the hints move up with it, or
-  stay in the bottom line.
+- **Tab bar on top:** ✅ the hints stay in the bottom line. Top row: tabs
+  and theme name. Bottom row: messages at the left, hints at the right.
+
+### 6. Order of work
+
+Each step is committed separately and keeps the studio working.
+
+1. Key hints at the right end of the bar.
+2. Images re-rendered after resizing stops.
+3. The palette dropdown in the pane title, with live preview.
+4. Fuller code samples, the new languages, scrolling, the two dropdowns.
+5. Previews moved to `~/.local/share`, Nerd Fonts kept as Regular only,
+   the clear button, then prefetching.
+6. Then the tournament (Phase 7 step 4).
 
 ## Phase 8: polish
 
@@ -1012,7 +1031,7 @@ curl are already installed. `bat` is assumed for the demo script.
 2. Phases 2–3: palette editing with a simple colour-swatch preview.
 3. Phase 4: the full live preview.
 4. Phases 5–6: fonts in the studio.
-5. Phase 7.
+5. Phase 7 steps 1–3, Phase 7b, then Phase 7 step 4 (the tournament).
 
 Each step is committed separately in the repo it belongs to (`configs/` or
 the outer repo).
