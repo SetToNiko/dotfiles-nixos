@@ -194,6 +194,11 @@ mod tests {
     #[test]
     fn a_checkout_build_finds_the_projects_files() {
         let share = share_dir();
+        // the Nix build has only studio/, not the project around it
+        if !share.is_dir() {
+            eprintln!("skipped: not in a checkout ({} isn't there)", share.display());
+            return;
+        }
         assert!(
             share_file(&share, "terminal-colors.json").is_file(),
             "{}",
