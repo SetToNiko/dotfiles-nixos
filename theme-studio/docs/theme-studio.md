@@ -103,7 +103,7 @@ Three pages, on `F1`–`F3`:
 | `configs/theme-studio/themes.json`      | themes                                                 |
 | `configs/theme-studio/palettes.json`    | palettes                                               |
 | `configs/theme-studio/fonts.json`       | font presets                                           |
-| `configs/terminal-colors.json`          | which palette key is each terminal colour              |
+| `theme-studio/share/terminal-colors.json` | which palette key is each terminal colour            |
 | `configs/theme-studio/`                 | the studio's `keymaps.json` and `settings.json`, linked to `~/.config/theme-studio` |
 | `home/fonts-installed.json`             | fonts the studio downloaded, installed by the home-manager module on the next rebuild |
 | `~/.local/share/fonts/theme-studio/`    | downloaded fonts until that rebuild                    |

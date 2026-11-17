@@ -20,7 +20,7 @@ pub struct Store {
     pub desktop: PathBuf,
 }
 
-/// Which palette key becomes each terminal colour (configs/terminal-colors.json).
+/// Which palette key becomes each terminal colour (share/terminal-colors.json).
 pub struct TerminalMap {
     pub background: String,
     pub foreground: String,

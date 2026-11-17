@@ -1,5 +1,5 @@
 //! A palette: the 34 keys of palettes.json, which of them follow the 8 base
-//! colours, and the derive rules (a port of configs/palette-derive.jq).
+//! colours, and the derive rules (a port of share/palette-derive.jq).
 
 use std::collections::{HashMap, HashSet};
 
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn derive_matches_palette_derive_jq() {
         let Some(dir) = configs() else {
-            eprintln!("skipped: no configs/palettes.json");
+            eprintln!("skipped: no palettes.json in the data folder");
             return;
         };
         let all = all_palettes(&dir);
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn every_palette_round_trips() {
         let Some(dir) = configs() else {
-            eprintln!("skipped: no configs/palettes.json");
+            eprintln!("skipped: no palettes.json in the data folder");
             return;
         };
         let mut pinned_somewhere = 0;

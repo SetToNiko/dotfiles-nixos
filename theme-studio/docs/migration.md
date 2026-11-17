@@ -362,6 +362,14 @@ they change.
 - **Check:** the three keys; `grep` finds no caller of the old paths left
   except the links themselves.
 
+**Step 6 as built ✅:** i3's `$mod+t`, `$mod+p` and `$mod+Shift+t` run
+`themes-switch`, `theme-switch` and `font-switch` (checked first that i3's
+own PATH finds them, and the config with `i3 -C`; loaded with
+`i3-msg reload`). Comments in `i3/config`, `lock/lock-screen.sh`,
+`nvim/lua/theme.lua` and the studio's sources name the commands and the
+project's files. A search of both repos finds no caller of the old paths
+left: only the links themselves, the studio's fallbacks, and this plan.
+
 ### 7. The links and fallbacks go (both repos)
 
 - After a few days of normal use: remove the old-path links in `configs/`,

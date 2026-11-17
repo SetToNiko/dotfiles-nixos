@@ -1,5 +1,5 @@
-//! The fonts column of the Main page: font presets (configs/fonts.json,
-//! applied by font-switch.sh) with their Monospace, Proportional and Icons
+//! The fonts column of the Main page: font presets (fonts.json, the data folder;
+//! applied by font-switch) with their Monospace, Proportional and Icons
 //! roles, the installed fonts (fontconfig), and the sample image
 //! (ImageMagick + Pango, shown with the kitty graphics protocol).
 
