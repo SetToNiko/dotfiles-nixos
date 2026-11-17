@@ -4844,3 +4844,36 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+/// End to end against the real data and commands: re-picks the active
+/// preset's current fonts through the studio, which saves (unchanged) and
+/// applies them. Run with NO_RESTART=1 so i3 and Ghostty aren't restarted:
+/// `NO_RESTART=1 cargo test studio_applies_fonts -- --ignored --nocapture`.
+#[cfg(test)]
+#[test]
+#[ignore]
+fn studio_applies_fonts_like_font_switch() {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let store = Store::locate();
+    eprintln!("data {} share {}", store.dir.display(), store.share.display());
+    let config = crate::config::load(&crate::config::dir(), false);
+    let mut app = App::with_config(store, Start::Active, config).unwrap();
+    app.preview.set_headless();
+    app.fonts.refresh_installed();
+    let key = |app: &mut App, c: KeyCode| app.on_key(KeyEvent::new(c, KeyModifiers::NONE));
+    for role in 0..3 {
+        app.focus_pane(1);
+        app.fonts.focus = crate::fonts::FontFocus::Slots;
+        app.fonts.slot = role;
+        let before = app.fonts.preset.fonts[role].clone();
+        key(&mut app, KeyCode::Enter); // the list, at the current font
+        eprintln!(
+            "role {role}: {} {}  highlighted {:?}",
+            before.family,
+            before.size,
+            app.fonts.highlighted().map(|i| app.fonts.installed[i].family.clone())
+        );
+        key(&mut app, KeyCode::Enter); // use it
+        eprintln!("  -> {:?}  message {:?}", app.fonts.preset.fonts[role], app.message);
+    }
+}

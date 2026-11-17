@@ -20,6 +20,6 @@
         default = theme-studio;
       };
       # cargo, rustc and the crate's dependencies, for working in studio/
-      devShells.${system}.default = pkgs.mkShell { inputsFrom = [ theme-studio ]; };
+      devShells.${system}.default = pkgs.mkShell { inputsFrom = [ theme-studio.bin ]; };
     };
 }
