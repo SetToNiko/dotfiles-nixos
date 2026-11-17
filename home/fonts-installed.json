@@ -1,4 +1,10 @@
 {
   "version": 1,
-  "fonts": {}
+  "fonts": {
+    "0xProto": {
+      "source": "nerd",
+      "id": "nerd-0xproto",
+      "asset": "0xProto"
+    }
+  }
 }
