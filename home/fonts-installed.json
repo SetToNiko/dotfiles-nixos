@@ -5,6 +5,82 @@
       "source": "nerd",
       "id": "nerd-0xproto",
       "asset": "0xProto"
+    },
+    "Monaspace Neon": {
+      "source": "fontsource",
+      "id": "monaspace-neon",
+      "files": [
+        {
+          "name": "monaspace-neon-latin-200-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-200-normal.ttf",
+          "hash": "sha256-QV8accICdccJJa22sJKfrJed2vIDlBdIPbpSolAirCE="
+        },
+        {
+          "name": "monaspace-neon-latin-200-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-200-italic.ttf",
+          "hash": "sha256-kLaXD7oGNWqTZ4LcMerFx5A5WFG3dHJk5MpkQbzof4c="
+        },
+        {
+          "name": "monaspace-neon-latin-300-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-300-normal.ttf",
+          "hash": "sha256-xBoGExB7sVGdV7JvHWoh8sDnyEJEEmF6CLwwrbL+WRw="
+        },
+        {
+          "name": "monaspace-neon-latin-300-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-300-italic.ttf",
+          "hash": "sha256-tdf1gPzeIapTxnI2s12qwkDzwwjbCg4JVM7XBiA9WnM="
+        },
+        {
+          "name": "monaspace-neon-latin-400-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-400-normal.ttf",
+          "hash": "sha256-E+oE2Wj8AdElS4lzJk0QjlA4ePR4U9auJUVcI2GKqtg="
+        },
+        {
+          "name": "monaspace-neon-latin-400-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-400-italic.ttf",
+          "hash": "sha256-nmrGN+e6yEjaGPi8K89Jorpk3SCwZ+mcmfAmkk7NItg="
+        },
+        {
+          "name": "monaspace-neon-latin-500-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-500-normal.ttf",
+          "hash": "sha256-1mSq0hIE8JlQIvNmK+sxBoVNKA0uYAHryr/ZDctUZm4="
+        },
+        {
+          "name": "monaspace-neon-latin-500-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-500-italic.ttf",
+          "hash": "sha256-5eKto2nreAaB6l/XmJDGkgQaUDsndvMwJDGZdrykR8Q="
+        },
+        {
+          "name": "monaspace-neon-latin-600-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-600-normal.ttf",
+          "hash": "sha256-C3fXMnUcwshRmA0zhB3QPf8PhnP9vigdATzf1KC7VWs="
+        },
+        {
+          "name": "monaspace-neon-latin-600-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-600-italic.ttf",
+          "hash": "sha256-MByskmLzcjC0A1M/elIcC/KqHswJ1+uAHTjrBi9BDGc="
+        },
+        {
+          "name": "monaspace-neon-latin-700-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-700-normal.ttf",
+          "hash": "sha256-epuVUizUEIky9ZSjGya8XNFXFHzCEtNF96CXP9n4dbU="
+        },
+        {
+          "name": "monaspace-neon-latin-700-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-700-italic.ttf",
+          "hash": "sha256-uqnRx5Rary7686tRj0D8i6I+ugrGqS62LjT8+X/DENU="
+        },
+        {
+          "name": "monaspace-neon-latin-800-normal.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-800-normal.ttf",
+          "hash": "sha256-CV1eNW/SI8ycxCpygaZPYfZZArrHqueTo/QpPZrb044="
+        },
+        {
+          "name": "monaspace-neon-latin-800-italic.ttf",
+          "url": "https://cdn.jsdelivr.net/fontsource/fonts/monaspace-neon@5.3.0/latin-800-italic.ttf",
+          "hash": "sha256-vSkfGm+tSIr2G7KGK57GjS4OC7Lmx4xTXNXDxyQgST0="
+        }
+      ]
     }
   }
 }
