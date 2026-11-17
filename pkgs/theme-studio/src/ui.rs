@@ -11,7 +11,8 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::{App, ColourRow, Focus, Overlay, Page, Side, open_matches};
 use crate::color::{self, Rgb};
-use crate::hit::{Target, hover};
+use crate::config::Sizes;
+use crate::hit::{Border, BorderId, Target, hover};
 use crate::keymap::{Action, Context};
 use crate::palette::{self, GROUPS, TEXT_KEYS};
 use crate::preview::Mode as PreviewMode;
@@ -46,6 +47,8 @@ pub struct MainLayout {
     pub preview: Rect,
     pub status: Rect,
     pub wide: bool,
+    /// The borders that can be dragged to resize panes.
+    pub borders: Vec<Border>,
 }
 
 /// Where everything goes for a window size. Like btop, the layout follows
@@ -65,7 +68,44 @@ pub enum Arrangement {
     },
 }
 
-pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangement {
+/// Where a vertical border (the first pane's right edge) can be grabbed.
+fn v_border(id: BorderId, first: Rect, start: u16, total: u16) -> Border {
+    let hit = Rect {
+        x: first.x + first.width.saturating_sub(1),
+        y: first.y,
+        width: 1,
+        height: first.height,
+    };
+    Border {
+        id,
+        hit,
+        vertical: true,
+        start,
+        total,
+        from_end: false,
+    }
+}
+
+/// A horizontal border (the first pane's bottom edge); `from_end`: the share
+/// is of what comes after it.
+fn h_border(id: BorderId, first: Rect, start: u16, total: u16, from_end: bool) -> Border {
+    let hit = Rect {
+        x: first.x,
+        y: first.y + first.height.saturating_sub(1),
+        width: first.width,
+        height: 1,
+    };
+    Border {
+        id,
+        hit,
+        vertical: false,
+        start,
+        total,
+        from_end,
+    }
+}
+
+pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes) -> Arrangement {
     if page != Page::Main {
         if area.width < 40 || area.height < 10 {
             return Arrangement::TooSmall {
@@ -92,10 +132,14 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangemen
         return Arrangement::TooSmall { need_w, need_h };
     }
     let [main, status] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
-    let share = |n: u16, f: f64| (n as f64 * f) as u16;
+    // rounded, so a border put at a cell stays exactly there
+    let share = |n: u16, f: f64| (n as f64 * f.clamp(0.0, 1.0)).round() as u16;
+    let mut borders = Vec::new();
     let (fonts_col, colours_col, preview) = if wide {
-        let fw = share(main.width, 0.28).max(FONTS_W);
-        let cw = share(main.width, 0.32)
+        let fw = share(main.width, sizes.fonts_width)
+            .max(FONTS_W)
+            .min(main.width - COLOURS_W - PREVIEW_MIN_W);
+        let cw = share(main.width, sizes.colours_width)
             .max(COLOURS_W)
             .min(main.width - fw - PREVIEW_MIN_W);
         let [f, c, p] = Layout::horizontal([
@@ -104,20 +148,32 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangemen
             Constraint::Min(0),
         ])
         .areas(main);
+        borders.push(v_border(BorderId::FontsColours, f, main.x, main.width));
+        borders.push(v_border(BorderId::ColoursPreview, c, c.x, main.width));
         (f, c, p)
     } else {
-        let preview_h = share(main.height, 0.42).clamp(PREVIEW_ROW_MIN, main.height - columns_need);
+        let preview_h = share(main.height, sizes.narrow_preview_height)
+            .clamp(PREVIEW_ROW_MIN, main.height - columns_need);
         let [top, p] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(preview_h)]).areas(main);
-        let fw = share(top.width, 0.45)
+        let fw = share(top.width, sizes.narrow_fonts_width)
             .max(FONTS_W)
             .min(top.width - COLOURS_W);
         let [f, c] = Layout::horizontal([Constraint::Length(fw), Constraint::Min(0)]).areas(top);
+        borders.push(h_border(
+            BorderId::TopPreview,
+            top,
+            main.y + main.height,
+            main.height,
+            true,
+        ));
+        borders.push(v_border(BorderId::NarrowFontsColours, f, top.x, top.width));
         (f, c, p)
     };
     // fonts column: roles, list, sample
     let sample_h = if sample {
-        share(fonts_col.height, 0.3).clamp(SAMPLE_MIN, fonts_col.height - ROLES_H - FONT_LIST_MIN)
+        share(fonts_col.height, sizes.sample_height)
+            .clamp(SAMPLE_MIN, fonts_col.height - ROLES_H - FONT_LIST_MIN)
     } else {
         0
     };
@@ -127,18 +183,47 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangemen
         Constraint::Length(sample_h),
     ])
     .areas(fonts_col);
-    // colour column: list, picker
-    let picker_h = if picker {
+    if sample {
+        borders.push(h_border(
+            BorderId::ListSample,
+            font_list,
+            fonts_col.y + fonts_col.height,
+            fonts_col.height,
+            true,
+        ));
+    }
+    // colour column: list, picker (automatic size unless resized)
+    let picker_h = if !picker {
+        0
+    } else if sizes.picker_height > 0.0 {
+        share(colours_col.height, sizes.picker_height)
+            .clamp(PICKER_MIN, colours_col.height - LIST_MIN)
+    } else {
         colours_col
             .height
             .saturating_sub(LIST_FULL)
             .clamp(PICKER_MIN, PICKER_MAX)
             .min(colours_col.height - LIST_MIN)
-    } else {
-        0
     };
     let [colour_list, picker_area] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(picker_h)]).areas(colours_col);
+    if picker {
+        borders.push(h_border(
+            BorderId::ListPicker,
+            colour_list,
+            colours_col.y + colours_col.height,
+            colours_col.height,
+            true,
+        ));
+    }
+    // between nvim and the shell (inside the preview's frame, above the bar)
+    let desk = crate::preview::desk_area(preview);
+    let ((a, _), stacked) = crate::preview::split_windows(desk, wide, sizes.preview_split);
+    borders.push(if stacked {
+        h_border(BorderId::PreviewSplit, a, desk.y, desk.height, false)
+    } else {
+        v_border(BorderId::PreviewSplit, a, desk.x, desk.width)
+    });
     Arrangement::Main(MainLayout {
         roles,
         font_list,
@@ -148,6 +233,7 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangemen
         preview,
         status,
         wide,
+        borders,
     })
 }
 
@@ -162,7 +248,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         (None, full)
     };
-    let arrangement = arrange(area, app.page, app.picker_visible, app.sample_visible);
+    let arrangement = arrange(
+        area,
+        app.page,
+        app.picker_visible,
+        app.sample_visible,
+        &app.sizes,
+    );
     if let Arrangement::TooSmall { need_w, need_h } = arrangement {
         return draw_too_small(f, full, need_w, need_h + top as u16);
     }
@@ -186,6 +278,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 draw_picker(f, app, p);
             }
             draw_preview(f, app, l.preview, l.wide);
+            // draggable borders: highlighted under the mouse and while dragged
+            for b in &l.borders {
+                if app.preview.mode == PreviewMode::Swatches && b.id == BorderId::PreviewSplit {
+                    continue;
+                }
+                let hovered = app.hits.add(b.hit, Target::Border(b.id));
+                if hovered || app.dragging == Some(b.id) {
+                    let buf = f.buffer_mut();
+                    for x in b.hit.x..b.hit.x + b.hit.width {
+                        for y in b.hit.y..b.hit.y + b.hit.height {
+                            if let Some(c) = buf.cell_mut((x, y)) {
+                                c.set_fg(Color::Yellow)
+                                    .set_style(Style::new().add_modifier(Modifier::BOLD));
+                            }
+                        }
+                    }
+                }
+            }
+            app.borders = l.borders.clone();
             draw_status(f, app, l.status);
         }
     }
@@ -743,7 +854,10 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
         &app.palette,
         app.terminal.as_ref(),
         &app.name,
-        stack,
+        crate::preview::Windows {
+            stack,
+            split: app.sizes.preview_split,
+        },
     );
     // nvim and the shell are clickable (a click hands them the keyboard);
     // hovering one lights its frame in the capture colour
@@ -1037,7 +1151,22 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
             .iter()
             .map(|(c, _)| A::Filter(*c))
             .collect();
-        let context: Vec<String> = if fonts && app.fonts.focus == crate::fonts::FontFocus::Search {
+        let context: Vec<String> = if app.resize_mode {
+            let k = |a| {
+                app.keymap
+                    .key_for(&[Context::Resize], a)
+                    .map(|s| friendly(&s))
+                    .unwrap_or_default()
+            };
+            vec![
+                "RESIZE".into(),
+                format!("{}/{} side edge", k(A::Left), k(A::Right)),
+                format!("{}/{} lower edge", k(A::Down), k(A::Up)),
+                "capitals by 5".into(),
+                format!("{} reset", k(A::ResetSizes)),
+                format!("{} done", k(A::Back)),
+            ]
+        } else if fonts && app.fonts.focus == crate::fonts::FontFocus::Search {
             vec!["type to search".into(), "Enter/Esc done".into()]
         } else if app.preview.focus.is_some() {
             let out = app

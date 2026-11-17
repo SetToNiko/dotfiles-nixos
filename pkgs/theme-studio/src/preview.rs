@@ -544,8 +544,7 @@ impl Preview {
         p: &Palette,
         map: Option<&TerminalMap>,
         name: &str,
-        // nvim above the shell (a preview column) instead of side by side
-        stack: bool,
+        windows: Windows,
     ) {
         let colors = TermColors::new(p, map);
         let roles = self.roles.clone();
@@ -573,27 +572,7 @@ impl Preview {
         } else {
             PaneId::Shell
         };
-        let (a, b) = if !stack && desk.width >= 2 * 30 {
-            let w = desk.width / 2;
-            (
-                Rect { width: w, ..desk },
-                Rect {
-                    x: desk.x + w,
-                    width: desk.width - w,
-                    ..desk
-                },
-            )
-        } else {
-            let h = desk.height / 2;
-            (
-                Rect { height: h, ..desk },
-                Rect {
-                    y: desk.y + h,
-                    height: desk.height - h,
-                    ..desk
-                },
-            )
-        };
+        let (a, b) = split_windows(desk, windows.stack, windows.split).0;
         self.rects.clear();
         // The window with the keyboard looks focused; otherwise nvim does.
         let focused = self.focus.unwrap_or(PaneId::Nvim);
@@ -988,5 +967,63 @@ fn remove_stale_drafts(base: &Path) {
         if !running && e.path().join("colors.sh").exists() {
             let _ = std::fs::remove_dir_all(e.path());
         }
+    }
+}
+
+/// How nvim and the shell share the preview.
+#[derive(Clone, Copy, Debug)]
+pub struct Windows {
+    /// One above the other (a preview column) rather than side by side.
+    pub stack: bool,
+    /// nvim's share of the space.
+    pub split: f64,
+}
+
+/// The preview's desktop inside its frame (above the bar), for a preview
+/// pane at `area`.
+pub fn desk_area(area: Rect) -> Rect {
+    Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(3),
+    }
+}
+
+/// nvim's and the shell's windows: one above the other when `stack` (or
+/// when they wouldn't fit side by side), `share` of the space for nvim.
+/// Returns the two rects and whether they're stacked.
+pub fn split_windows(desk: Rect, stack: bool, share: f64) -> ((Rect, Rect), bool) {
+    let share = share.clamp(0.0, 1.0);
+    if !stack && desk.width >= 2 * 30 {
+        let w = ((desk.width as f64 * share) as u16).clamp(10, desk.width - 10);
+        (
+            (
+                Rect { width: w, ..desk },
+                Rect {
+                    x: desk.x + w,
+                    width: desk.width - w,
+                    ..desk
+                },
+            ),
+            false,
+        )
+    } else {
+        let h = if desk.height >= 6 {
+            ((desk.height as f64 * share) as u16).clamp(3, desk.height - 3)
+        } else {
+            desk.height / 2
+        };
+        (
+            (
+                Rect { height: h, ..desk },
+                Rect {
+                    y: desk.y + h,
+                    height: desk.height - h,
+                    ..desk
+                },
+            ),
+            true,
+        )
     }
 }

@@ -122,18 +122,57 @@ impl Default for FontSettings {
     }
 }
 
+/// Pane sizes, as shares of the space they divide (minimum sizes still
+/// apply). Resizing changes them while the studio runs; these are where it
+/// starts and what `=` in resize mode goes back to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct Sizes {
+    /// Three columns: the fonts column's share of the width.
+    pub fonts_width: f64,
+    /// Three columns: the colour column's share of the width.
+    pub colours_width: f64,
+    /// The font sample's share of the fonts column.
+    pub sample_height: f64,
+    /// The picker's share of the colour column; 0 = automatic (it grows when
+    /// the whole colour list fits).
+    pub picker_height: f64,
+    /// nvim's share of the preview (the shell gets the rest).
+    pub preview_split: f64,
+    /// Narrow layout: the preview row's share of the height.
+    pub narrow_preview_height: f64,
+    /// Narrow layout: the fonts column's share of the top row.
+    pub narrow_fonts_width: f64,
+}
+
+impl Default for Sizes {
+    fn default() -> Self {
+        Sizes {
+            fonts_width: 0.28,
+            colours_width: 0.32,
+            sample_height: 0.3,
+            picker_height: 0.0,
+            preview_split: 0.5,
+            narrow_preview_height: 0.42,
+            narrow_fonts_width: 0.45,
+        }
+    }
+}
+
 /// Where things go on screen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct LayoutSettings {
     /// The page tabs: "bottom" (in the status line) or "top" (their own row).
     pub tabs: String,
+    pub sizes: Sizes,
 }
 
 impl Default for LayoutSettings {
     fn default() -> Self {
         LayoutSettings {
             tabs: "bottom".into(),
+            sizes: Sizes::default(),
         }
     }
 }

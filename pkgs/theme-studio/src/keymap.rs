@@ -178,6 +178,8 @@ pub enum Context {
     Colours,
     ColourList,
     Picker,
+    /// Resize mode (`<leader>r`): keys move the focused pane's edges.
+    Resize,
     /// The fonts column (roles and list)
     Fonts,
     FontRoles,
@@ -185,7 +187,7 @@ pub enum Context {
 }
 
 impl Context {
-    pub const ALL: [Context; 7] = [
+    pub const ALL: [Context; 8] = [
         Context::Global,
         Context::Colours,
         Context::ColourList,
@@ -193,6 +195,7 @@ impl Context {
         Context::Fonts,
         Context::FontRoles,
         Context::FontList,
+        Context::Resize,
     ];
 
     /// The context's name in keymaps.json.
@@ -205,6 +208,7 @@ impl Context {
             Context::Fonts => "fonts",
             Context::FontRoles => "font-roles",
             Context::FontList => "font-list",
+            Context::Resize => "resize",
         }
     }
 
@@ -221,6 +225,7 @@ impl Context {
             Context::Fonts => "Fonts",
             Context::FontRoles => "Font roles",
             Context::FontList => "Font list",
+            Context::Resize => "Resize mode",
         }
     }
 }
@@ -241,6 +246,8 @@ pub enum Action {
     PaneRight,
     PaneUp,
     PaneDown,
+    ResizeMode,
+    ResetSizes,
     PreviewCycle,
     SavePalette,
     SaveFonts,
@@ -299,6 +306,8 @@ pub fn all_actions() -> Vec<Action> {
         A::PaneRight,
         A::PaneUp,
         A::PaneDown,
+        A::ResizeMode,
+        A::ResetSizes,
         A::PreviewCycle,
         A::SavePalette,
         A::SaveFonts,
@@ -374,6 +383,8 @@ impl Action {
             A::PaneRight => "pane-right",
             A::PaneUp => "pane-up",
             A::PaneDown => "pane-down",
+            A::ResizeMode => "resize-mode",
+            A::ResetSizes => "reset-sizes",
             A::PreviewCycle => "preview-cycle",
             A::SavePalette => "save-palette",
             A::SaveFonts => "save-fonts",
@@ -449,6 +460,8 @@ impl Action {
             Action::PaneRight => "pane to the right".into(),
             Action::PaneUp => "pane above".into(),
             Action::PaneDown => "pane below".into(),
+            Action::ResizeMode => "resize panes (h/j/k/l move the edges)".into(),
+            Action::ResetSizes => "pane sizes back to the defaults".into(),
             Action::PreviewCycle => "type into the preview / next window / back".into(),
             Action::SavePalette => "save palette".into(),
             Action::SaveFonts => "save font preset".into(),
@@ -740,6 +753,17 @@ impl Keymap {
             (C::Global, A::Panel(5), &["<leader>5"]),
             (C::Global, A::Panel(6), &["<leader>6"]),
             (C::Global, A::Panel(7), &["<leader>7"]),
+            (C::Global, A::ResizeMode, &["<leader>r"]),
+            (C::Resize, A::Left, &["h", "<Left>"]),
+            (C::Resize, A::Right, &["l", "<Right>"]),
+            (C::Resize, A::Up, &["k", "<Up>"]),
+            (C::Resize, A::Down, &["j", "<Down>"]),
+            (C::Resize, A::LeftBig, &["H", "<S-Left>"]),
+            (C::Resize, A::RightBig, &["L", "<S-Right>"]),
+            (C::Resize, A::UpBig, &["K", "<S-Up>"]),
+            (C::Resize, A::DownBig, &["J", "<S-Down>"]),
+            (C::Resize, A::ResetSizes, &["="]),
+            (C::Resize, A::Back, &["<Esc>", "<CR>"]),
             (C::Colours, A::TogglePicker, &["<leader>cp"]),
             (C::Fonts, A::ToggleSample, &["<leader>fs"]),
             (C::Global, A::PreviewCycle, &["<F12>"]),
@@ -907,7 +931,10 @@ mod tests {
             .into_iter()
             .map(|(k, _)| k)
             .collect();
-        assert_eq!(next, ["1", "2", "3", "4", "5", "6", "7", "a", "f", "s"]);
+        assert_eq!(
+            next,
+            ["1", "2", "3", "4", "5", "6", "7", "a", "f", "r", "s"]
+        );
         assert_eq!(
             km.key_for(&roles, Action::SaveFonts).as_deref(),
             Some("<leader>sf")

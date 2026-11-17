@@ -33,6 +33,8 @@ pub enum Target {
     Preview(PaneId),
     /// A row of the Open pop-up's list (index into the matches).
     OverlayRow(usize),
+    /// A border between panes that can be dragged to resize them.
+    Border(BorderId),
     /// A choice in the unsaved-changes pop-up ('y', 's', or Esc as 'n').
     ConfirmChoice(char),
 }
@@ -41,6 +43,63 @@ impl Target {
     /// Gets a hover highlight (and the hand pointer).
     pub fn shows_hover(self) -> bool {
         !matches!(self, Target::PaneBody(_))
+    }
+}
+
+/// The borders that can be dragged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BorderId {
+    /// Three columns: between fonts and colours.
+    FontsColours,
+    /// Three columns: between colours and the preview.
+    ColoursPreview,
+    /// Between the font list and the sample.
+    ListSample,
+    /// Between the colour list and the picker.
+    ListPicker,
+    /// Between nvim and the shell.
+    PreviewSplit,
+    /// Narrow layout: between the columns and the preview row.
+    TopPreview,
+    /// Narrow layout: between fonts and colours.
+    NarrowFontsColours,
+}
+
+/// A draggable border: where it can be grabbed (`hit`, the border line of
+/// the first pane), and how a position on it becomes the size share it
+/// controls.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Border {
+    pub id: BorderId,
+    pub hit: Rect,
+    /// Dragged left/right (else up/down).
+    pub vertical: bool,
+    /// Where the measured pane starts (or, with `from_end`, where it ends).
+    pub start: u16,
+    /// The length the share is of.
+    pub total: u16,
+    /// The share is of the pane after the border (sample, picker, preview row).
+    pub from_end: bool,
+}
+
+impl Border {
+    /// The border's position (x for vertical borders, y otherwise).
+    pub fn pos(&self) -> u16 {
+        if self.vertical {
+            self.hit.x
+        } else {
+            self.hit.y
+        }
+    }
+
+    /// The share the border at `pos` gives its pane.
+    pub fn share_at(&self, pos: u16) -> f64 {
+        let n = if self.from_end {
+            self.start as f64 - pos as f64 - 1.0
+        } else {
+            pos as f64 - self.start as f64 + 1.0
+        };
+        (n / self.total.max(1) as f64).clamp(0.0, 1.0)
     }
 }
 

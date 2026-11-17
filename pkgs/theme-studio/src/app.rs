@@ -128,6 +128,14 @@ pub struct App {
     pub overlay: Overlay,
     /// What's clickable where (from the last draw), and where the mouse is.
     pub hits: crate::hit::HitMap,
+    /// Pane sizes (shares), from settings.json; resizing changes them.
+    pub sizes: crate::config::Sizes,
+    /// The draggable borders from the last draw.
+    pub borders: Vec<crate::hit::Border>,
+    /// The border being dragged with the mouse.
+    pub dragging: Option<crate::hit::BorderId>,
+    /// Resize mode (`<leader>r`): keys move the focused pane's edges.
+    pub resize_mode: bool,
     /// The pointer is currently the hand (OSC 22).
     pointer_hand: bool,
     pub preview: Preview,
@@ -250,6 +258,10 @@ impl App {
             overlay: Overlay::None,
             hits: Default::default(),
             pointer_hand: false,
+            sizes: config.settings.layout.sizes.clone(),
+            borders: Vec::new(),
+            dragging: None,
+            resize_mode: false,
             quit: false,
         };
         app.load_picker();
@@ -835,6 +847,9 @@ impl App {
     /// The keymap contexts for the pane with the keyboard, most specific first.
     pub fn contexts(&self) -> [Context; 3] {
         use crate::fonts::FontFocus;
+        if self.resize_mode {
+            return [Context::Resize; 3];
+        }
         if self.page != Page::Main {
             return [Context::Global; 3];
         }
@@ -851,6 +866,89 @@ impl App {
             }
             Side::Colours => [Context::Picker, Context::Colours, Context::Global],
         }
+    }
+
+    // ----- resizing --------------------------------------------------------
+
+    /// Sets the size share a border controls.
+    fn set_share(&mut self, id: crate::hit::BorderId, share: f64) {
+        use crate::hit::BorderId as B;
+        let s = &mut self.sizes;
+        let field = match id {
+            B::FontsColours => &mut s.fonts_width,
+            B::ColoursPreview => &mut s.colours_width,
+            B::ListSample => &mut s.sample_height,
+            B::ListPicker => &mut s.picker_height,
+            B::PreviewSplit => &mut s.preview_split,
+            B::TopPreview => &mut s.narrow_preview_height,
+            B::NarrowFontsColours => &mut s.narrow_fonts_width,
+        };
+        // keep a little away from the ends; the layout's minimums do the rest
+        *field = share.clamp(0.02, 0.98);
+    }
+
+    /// Moves a border to `pos` (a column for vertical borders, a row otherwise).
+    fn move_border(&mut self, id: crate::hit::BorderId, pos: u16) {
+        if let Some(b) = self.borders.iter_mut().find(|b| b.id == id) {
+            let share = b.share_at(pos);
+            // remember where it went, so quick repeats add up before the next draw
+            if b.vertical {
+                b.hit.x = pos
+            } else {
+                b.hit.y = pos
+            }
+            self.set_share(id, share);
+        }
+    }
+
+    /// The border resize mode moves for the focused pane: its side edge
+    /// (`vertical`) or its lower edge.
+    fn border_for_pane(&self, vertical: bool) -> Option<crate::hit::BorderId> {
+        use crate::hit::BorderId as B;
+        let pane = self.current_pane();
+        let id = match (self.wide, vertical, pane) {
+            (true, true, 1..=3) => B::FontsColours,
+            (true, true, _) => B::ColoursPreview,
+            (true, false, 1..=3) => B::ListSample,
+            (true, false, 4 | 5) => B::ListPicker,
+            (true, false, _) => B::PreviewSplit,
+            (false, true, 6 | 7) => B::PreviewSplit,
+            (false, true, _) => B::NarrowFontsColours,
+            (false, false, 4 | 5) if self.picker_visible => B::ListPicker,
+            (false, false, _) => B::TopPreview,
+        };
+        self.borders.iter().any(|b| b.id == id).then_some(id)
+    }
+
+    /// Resize-mode keys: h/l move the focused pane's side edge, j/k its lower
+    /// edge, by one cell (capitals: five); = resets; Esc / Enter leave.
+    fn run_resize(&mut self, a: Action) {
+        let (dx, dy, n): (i32, i32, i32) = match a {
+            Action::Left => (-1, 0, 1),
+            Action::Right => (1, 0, 1),
+            Action::Up => (0, -1, 1),
+            Action::Down => (0, 1, 1),
+            Action::LeftBig => (-1, 0, 5),
+            Action::RightBig => (1, 0, 5),
+            Action::UpBig => (0, -1, 5),
+            Action::DownBig => (0, 1, 5),
+            Action::ResetSizes => {
+                self.sizes = self.settings.layout.sizes.clone();
+                return;
+            }
+            Action::Back | Action::Confirm | Action::ResizeMode => {
+                self.resize_mode = false;
+                return;
+            }
+            _ => return,
+        };
+        let vertical = dx != 0;
+        let Some(id) = self.border_for_pane(vertical) else {
+            return;
+        };
+        let b = self.borders.iter().find(|b| b.id == id).copied().unwrap();
+        let pos = (b.pos() as i32 + (dx + dy) * n).max(0) as u16;
+        self.move_border(id, pos);
     }
 
     // ----- colour list rows -----------------------------------------------
@@ -1023,6 +1121,9 @@ impl App {
     /// Does what an action means in the pane with the keyboard.
     pub fn run_action(&mut self, a: Action) {
         use crate::fonts::FontFocus;
+        if self.resize_mode {
+            return self.run_resize(a);
+        }
         if let Overlay::CopyFrom { target } = self.overlay {
             return self.run_copy_from(target, a);
         }
@@ -1063,6 +1164,7 @@ impl App {
                     self.fonts.focus = FontFocus::Slots;
                 }
             }
+            Action::ResizeMode => self.resize_mode = true,
             Action::PaneLeft => self.move_pane(-1, 0),
             Action::PaneRight => self.move_pane(1, 0),
             Action::PaneUp => self.move_pane(0, -1),
@@ -1481,6 +1583,15 @@ impl App {
                     self.click(r, t, x, y, false);
                 }
             }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging.is_some() => {
+                let id = self.dragging.unwrap();
+                let vertical = self
+                    .borders
+                    .iter()
+                    .find(|b| b.id == id)
+                    .is_some_and(|b| b.vertical);
+                self.move_border(id, if vertical { x } else { y });
+            }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // dragging works on the picker's controls only
                 if let Some((r, t @ (T::Square | T::Hue | T::SliderH | T::SliderS | T::SliderL))) =
@@ -1489,7 +1600,10 @@ impl App {
                     self.click(r, t, x, y, true);
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) => self.last_edit = None,
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.last_edit = None;
+                self.dragging = None;
+            }
             _ => {}
         }
     }
@@ -1507,6 +1621,7 @@ impl App {
         };
         match t {
             T::PageTab(p) => self.page = p,
+            T::Border(id) => self.dragging = Some(id),
             T::PaneTitle(n) => self.focus_pane(n),
             T::PaneBody(3) => self.focus_pane(3),
             T::PaneBody(_) => {}
@@ -2269,11 +2384,100 @@ mod tests {
     }
 
     #[test]
+    fn borders_drag_and_resize_mode_moves_edges() {
+        use crate::hit::{BorderId as B, Target as T};
+        let mut app = test_app(temp_store("resize"), Start::Named("One".into()));
+        render(&mut app, 200, 50);
+        // drag the border between fonts and colours 10 columns right
+        let b = app.hits.rect_of(T::Border(B::FontsColours)).unwrap();
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            b.x,
+            b.y + 5,
+        );
+        assert_eq!(app.dragging, Some(B::FontsColours));
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            b.x + 10,
+            b.y + 5,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            b.x + 10,
+            b.y + 5,
+        );
+        assert_eq!(app.dragging, None);
+        render(&mut app, 200, 50);
+        assert_eq!(
+            app.hits.rect_of(T::Border(B::FontsColours)).unwrap().x,
+            b.x + 10
+        );
+        // resize mode on the colour list: l moves its right edge, = resets, Esc leaves
+        press(&mut app, " 4 r");
+        assert!(app.resize_mode);
+        let before = app.hits.rect_of(T::Border(B::ColoursPreview)).unwrap().x;
+        press(&mut app, "lll");
+        render(&mut app, 200, 50);
+        assert_eq!(
+            app.hits.rect_of(T::Border(B::ColoursPreview)).unwrap().x,
+            before + 3
+        );
+        press(&mut app, "H");
+        render(&mut app, 200, 50);
+        assert_eq!(
+            app.hits.rect_of(T::Border(B::ColoursPreview)).unwrap().x,
+            before - 2
+        );
+        // nvim / shell split from the preview panes isn't reachable from the list; j
+        // here moves the list/picker border, which only exists with the picker shown
+        press(&mut app, "j");
+        press(&mut app, "=");
+        render(&mut app, 200, 50);
+        assert_eq!(app.sizes, crate::config::Sizes::default());
+        press(&mut app, "\x1b");
+        assert!(!app.resize_mode);
+        // keys work normally again
+        press(&mut app, "j");
+        assert_eq!(app.row_sel, 2);
+    }
+
+    #[test]
+    fn extreme_sizes_render_at_every_window_size() {
+        let mut app = test_app(temp_store("extreme"), Start::Named("One".into()));
+        app.picker_visible = true;
+        for share in [0.0, 0.02, 0.5, 0.98, 1.0] {
+            app.sizes = crate::config::Sizes {
+                fonts_width: share,
+                colours_width: share,
+                sample_height: share,
+                picker_height: share,
+                preview_split: share,
+                narrow_preview_height: share,
+                narrow_fonts_width: share,
+            };
+            for w in (90..=260).step_by(17) {
+                for h in (20..=70).step_by(9) {
+                    render(&mut app, w, h);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn layout_three_columns_then_preview_row_then_too_small() {
         use crate::ui::{Arrangement, arrange};
         let r = |w, h| Rect::new(0, 0, w, h);
         // wide: fonts | colours | preview, the picker hidden, the sample shown
-        let Arrangement::Main(l) = arrange(r(200, 50), Page::Main, false, true) else {
+        let Arrangement::Main(l) = arrange(
+            r(200, 50),
+            Page::Main,
+            false,
+            true,
+            &crate::config::Sizes::default(),
+        ) else {
             panic!()
         };
         assert!(l.wide);
@@ -2290,14 +2494,26 @@ mod tests {
             "roles, list, sample top to bottom"
         );
         // picker shown: under the list in the same column
-        let Arrangement::Main(l) = arrange(r(200, 50), Page::Main, true, true) else {
+        let Arrangement::Main(l) = arrange(
+            r(200, 50),
+            Page::Main,
+            true,
+            true,
+            &crate::config::Sizes::default(),
+        ) else {
             panic!()
         };
         let p = l.picker.unwrap();
         assert_eq!(p.x, l.colour_list.x);
         assert!(p.y > l.colour_list.y);
         // narrow (your portrait monitor): columns on top, preview row underneath
-        let Arrangement::Main(l) = arrange(r(137, 60), Page::Main, true, true) else {
+        let Arrangement::Main(l) = arrange(
+            r(137, 60),
+            Page::Main,
+            true,
+            true,
+            &crate::config::Sizes::default(),
+        ) else {
             panic!()
         };
         assert!(!l.wide);
@@ -2306,21 +2522,39 @@ mod tests {
         assert_eq!(l.roles.y, l.colour_list.y, "fonts and colours side by side");
         // too small, and what's needed (less height when things are hidden)
         assert_eq!(
-            arrange(r(90, 60), Page::Main, false, false),
+            arrange(
+                r(90, 60),
+                Page::Main,
+                false,
+                false,
+                &crate::config::Sizes::default()
+            ),
             Arrangement::TooSmall {
                 need_w: 98,
                 need_h: 30
             }
         );
         assert_eq!(
-            arrange(r(137, 20), Page::Main, true, true),
+            arrange(
+                r(137, 20),
+                Page::Main,
+                true,
+                true,
+                &crate::config::Sizes::default()
+            ),
             Arrangement::TooSmall {
                 need_w: 98,
                 need_h: 35
             }
         );
         assert_eq!(
-            arrange(r(160, 20), Page::Main, true, true),
+            arrange(
+                r(160, 20),
+                Page::Main,
+                true,
+                true,
+                &crate::config::Sizes::default()
+            ),
             Arrangement::TooSmall {
                 need_w: 148,
                 need_h: 24
@@ -2328,7 +2562,13 @@ mod tests {
         );
         // other pages need little room
         assert!(matches!(
-            arrange(r(60, 20), Page::Settings, true, true),
+            arrange(
+                r(60, 20),
+                Page::Settings,
+                true,
+                true,
+                &crate::config::Sizes::default()
+            ),
             Arrangement::Page { .. }
         ));
     }
