@@ -472,6 +472,11 @@ narrow
   Esc and leaving it hide it, `<leader>cp` toggles; `<leader>fs` toggles the
   sample. F2/F3 pages are placeholders. keymaps.json's `tab-colours` became
   `page-main`, `tab-fonts` was dropped (automatically).
+- **Follow-ups** ✅: Esc in the picker discards the edit (back to the palette
+  before its first change; those undo steps dropped), Enter keeps it, any
+  other way out keeps it. No font sample under the narrow layout. Panes on
+  `<leader>1`–`7` (keymaps.json version 2 migrates the old digit defaults).
+  The preview frame is magenta while nvim or the shell has the keyboard.
 
 ### 7. Order of work
 
