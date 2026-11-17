@@ -324,6 +324,47 @@ impl HitMap {
     }
 }
 
+/// Characters that draw a colour swatch; the cursor never covers them.
+const SWATCH: &str = "█▕▏▀▄▌▐";
+
+/// A piece of text with the keyboard cursor's `style` on the text only, not
+/// the spaces around it (`base` everywhere).
+pub fn cursor_spans(text: String, base: Style, style: Style) -> Vec<ratatui::text::Span<'static>> {
+    use ratatui::text::Span;
+    // no cursor: one span, as before (hover_line counts spans)
+    let core = text.trim();
+    if core.is_empty() || style == Style::new() {
+        return vec![Span::styled(text.clone(), base)];
+    }
+    let lead = text.len() - text.trim_start().len();
+    let end = lead + core.len();
+    let mut out = Vec::new();
+    if lead > 0 {
+        out.push(Span::styled(text[..lead].to_string(), base));
+    }
+    out.push(Span::styled(text[lead..end].to_string(), base.patch(style)));
+    if end < text.len() {
+        out.push(Span::styled(text[end..].to_string(), base));
+    }
+    out
+}
+
+/// The keyboard cursor on a row: `style` on each piece of text, but not on
+/// padding or colour swatches, which keep their look.
+pub fn cursor_line(line: ratatui::text::Line<'_>, style: Style) -> ratatui::text::Line<'static> {
+    let mut spans = Vec::new();
+    for s in line.spans {
+        let text = s.content.to_string();
+        let swatch = text.trim().chars().all(|c| SWATCH.contains(c));
+        if swatch {
+            spans.push(ratatui::text::Span::styled(text, s.style));
+        } else {
+            spans.extend(cursor_spans(text, s.style, style));
+        }
+    }
+    ratatui::text::Line::from(spans).style(line.style)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,5 +409,47 @@ mod tests {
             !m.add(Rect::new(3, 2, 1, 1), Target::PaneBody(3)),
             "bodies don't highlight"
         );
+    }
+
+    #[test]
+    fn the_cursor_covers_text_not_padding_or_swatches() {
+        use ratatui::text::{Line, Span};
+        let rev = Style::new().reversed();
+        let red = Style::new().fg(Color::Red);
+        let line = cursor_line(
+            Line::from(vec![
+                Span::raw("   Label    "),
+                Span::styled("██ ", red),
+                Span::styled("    ", Style::new().bg(Color::Blue)),
+                Span::raw("‹ yes ›   "),
+            ]),
+            rev,
+        );
+        let parts: Vec<(String, bool)> = line
+            .spans
+            .iter()
+            .map(|s| {
+                (
+                    s.content.to_string(),
+                    s.style.add_modifier.contains(Modifier::REVERSED),
+                )
+            })
+            .collect();
+        let on: Vec<&str> = parts.iter().filter(|p| p.1).map(|p| p.0.as_str()).collect();
+        assert_eq!(on, ["Label", "‹ yes ›"]);
+        // swatches untouched
+        assert!(
+            line.spans
+                .iter()
+                .any(|s| s.content == "██ " && s.style == red)
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|s| s.content == "    " && s.style.bg == Some(Color::Blue))
+        );
+        // no cursor: one span, unchanged
+        assert_eq!(cursor_spans(" ab  ".into(), red, Style::new()).len(), 1);
+        assert_eq!(cursor_spans(" ab  ".into(), red, rev).len(), 3);
     }
 }

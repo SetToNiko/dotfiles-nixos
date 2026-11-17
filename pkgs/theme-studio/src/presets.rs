@@ -252,21 +252,21 @@ pub fn draw_browse(f: &mut Frame, app: &mut App, diff: Rect, list: Rect) {
             height: 1,
         };
         let hovered = app.hits.add(r, Target::PresetRow(i)) && i != sel;
-        let line = Line::from(vec![
-            Span::styled(format!(" {:<16}", p.name), style),
-            Span::styled(
-                format!(
-                    " {}{}",
-                    if is_shipped(&p.name) {
-                        "shipped"
-                    } else {
-                        "yours"
-                    },
-                    if active { ", active" } else { "" }
-                ),
-                Style::new().dark_gray(),
+        // the cursor on the name, not the padding around it
+        let mut spans = crate::hit::cursor_spans(format!(" {:<16}", p.name), Style::new(), style);
+        spans.push(Span::styled(
+            format!(
+                " {}{}",
+                if is_shipped(&p.name) {
+                    "shipped"
+                } else {
+                    "yours"
+                },
+                if active { ", active" } else { "" }
             ),
-        ]);
+            Style::new().dark_gray(),
+        ));
+        let line = Line::from(spans);
         // only the name is underlined
         lines.push(if hovered { hover_line(line, 0) } else { line });
     }

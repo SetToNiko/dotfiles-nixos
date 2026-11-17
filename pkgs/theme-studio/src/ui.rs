@@ -633,14 +633,15 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                     } else {
                         " ".into()
                     };
-                    let mut spans = vec![
-                        "  ".into(),
-                        marker,
-                        " ".into(),
-                        Span::styled(format!("{key:<16}"), name_style),
-                        swatch(c, 4),
-                        Span::raw(format!(" {} ", c.hex())),
-                    ];
+                    let mut spans = vec!["  ".into(), marker, " ".into()];
+                    // the cursor on the name, not the padding before the swatch
+                    spans.extend(crate::hit::cursor_spans(
+                        format!("{key:<16}"),
+                        Style::new(),
+                        name_style,
+                    ));
+                    spans.push(swatch(c, 4));
+                    spans.push(Span::raw(format!(" {} ", c.hex())));
                     let info = if palette::is_base(key) || pinned {
                         String::new()
                     } else {
@@ -1844,19 +1845,16 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 };
                 let mut line = Line::from(vec![
                     Span::styled(" ██ ", Style::new().fg(app.theme_colour(key))),
-                    Span::styled(
-                        format!("{key:<20}"),
-                        if i == *sel {
-                            Style::new().reversed()
-                        } else {
-                            Style::new()
-                        },
-                    ),
+                    Span::styled(format!("{key:<20}"), Style::new()),
                     Span::styled(
                         if *key == current { " current" } else { "" },
                         Style::new().dark_gray(),
                     ),
                 ]);
+                if i == *sel {
+                    // the cursor on the text, not the swatch or padding
+                    line = crate::hit::cursor_line(line, Style::new().reversed());
+                }
                 if app.hits.add(rr, Target::OverlayRow(i)) && i != *sel {
                     line = crate::hit::hover_line(line, 1);
                 }
@@ -1923,12 +1921,10 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             let mut lines = Vec::new();
             for (i, item) in items.iter().enumerate().take(h.saturating_sub(2) as usize) {
                 let rr = Rect::new(r.x + 1, r.y + 1 + i as u16, r.width.saturating_sub(2), 1);
-                let style = if i == *sel {
-                    Style::new().reversed()
-                } else {
-                    Style::new()
-                };
-                let line = Line::styled(format!(" {item:<width$} ", width = w as usize - 4), style);
+                let mut line = Line::raw(format!(" {item:<width$} ", width = w as usize - 4));
+                if i == *sel {
+                    line = crate::hit::cursor_line(line, Style::new().reversed());
+                }
                 lines.push(if app.hits.add(rr, Target::OverlayRow(i)) {
                     crate::hit::hover_line(line, 0)
                 } else {
@@ -1989,14 +1985,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             ];
             for (row, &i) in matches.iter().enumerate().skip(start).take(list_h) {
                 let (name, sw) = &entries[i];
-                let mut spans = vec![Span::styled(
-                    format!(" {:<34}", truncate(name, 33)),
-                    if row == *sel {
-                        Style::new().reversed()
-                    } else {
-                        Style::new()
-                    },
-                )];
+                let mut spans = vec![Span::raw(format!(" {:<34}", truncate(name, 33)))];
                 for c in sw {
                     spans.push(swatch(*c, 2));
                 }
@@ -2010,7 +1999,11 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                     width: r.width.saturating_sub(2),
                     height: 1,
                 };
-                let line = Line::from(spans);
+                let mut line = Line::from(spans);
+                if row == *sel {
+                    // the cursor on the text, not the padding or swatches
+                    line = crate::hit::cursor_line(line, Style::new().reversed());
+                }
                 lines.push(if app.hits.add(rr, Target::OverlayRow(row)) {
                     crate::hit::hover_line(line, 0)
                 } else {

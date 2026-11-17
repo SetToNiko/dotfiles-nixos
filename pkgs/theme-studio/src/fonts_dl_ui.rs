@@ -344,6 +344,12 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
             style = hover_row(style);
             line = hover_line(line, 0);
         }
+        // the cursor covers the text, not padding or swatches
+        let (line, style) = if on {
+            (crate::hit::cursor_line(line, style), Style::new())
+        } else {
+            (line, style)
+        };
         f.render_widget(Paragraph::new(line).style(style), r);
     }
     if rows.is_empty() && app.dl.catalogue.is_some() {

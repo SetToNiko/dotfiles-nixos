@@ -91,10 +91,9 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
                 Line::from(vec![
                     Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
                     Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
-                    Span::styled(
-                        format!(" {}", truncate(&font.family, room.max(4))),
-                        name_style,
-                    ),
+                    // the cursor on the name only, not the space before it
+                    " ".into(),
+                    Span::styled(truncate(&font.family, room.max(4)), name_style),
                     Span::raw(format!("  {size}")),
                 ]),
                 Line::from(vec![
@@ -107,7 +106,8 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
                 Line::from(vec![
                     Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
                     Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
-                    Span::styled(format!(" {}", font.family), name_style),
+                    " ".into(),
+                    Span::styled(font.family.clone(), name_style),
                 ]),
                 Line::from(vec![
                     Span::raw(format!("         {size:<12}")),
@@ -262,11 +262,13 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
                         Style::new().yellow(),
                     ),
                     Span::raw(indent.clone()),
-                    Span::styled(
-                        format!("{:<width$}", truncate(&font.family, width)),
-                        sel_style,
-                    ),
                 ];
+                // the cursor on the name, not the padding after it
+                spans.extend(crate::hit::cursor_spans(
+                    format!("{:<width$}", truncate(&font.family, width)),
+                    Style::new(),
+                    sel_style,
+                ));
                 if font.mono {
                     spans.push(Span::styled(" mono", Style::new().dark_gray()));
                 }

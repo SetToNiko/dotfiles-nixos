@@ -4281,4 +4281,46 @@ mod tests {
         assert!(!app2.hints_visible && !app2.main_preview_visible && app2.fonts_preview_visible);
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn behaviour_cursor_keeps_the_swatch() {
+        use crate::behaviour::{BhRow, LookId, visible_behaviour_rows};
+        use ratatui::style::Modifier;
+        let store = temp_store("cursor-swatch");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.page = Page::Settings;
+        app.settings_page.tab = crate::settings::Tab::Behaviour;
+        app.settings_page.bh_closed.clear();
+        let row = BhRow::HighlightColour(LookId::Hover);
+        app.settings_page.bh_sel = visible_behaviour_rows(&app.settings_page.bh_closed)
+            .iter()
+            .position(|r| *r == row)
+            .unwrap();
+        let mut t = Terminal::new(TestBackend::new(160, 60)).unwrap();
+        t.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = t.backend().buffer().clone();
+        let label = App::behaviour_label(row);
+        let y = (0..60)
+            .find(|&y| {
+                let s: String = (0..160).map(|x| buf[(x, y)].symbol().to_string()).collect();
+                s.contains(&label) && s.contains("██")
+            })
+            .expect("the row is drawn");
+        let cells: Vec<_> = (0..160).map(|x| buf[(x, y)].clone()).collect();
+        let reversed = |c: &ratatui::buffer::Cell| c.modifier.contains(Modifier::REVERSED);
+        // the swatch keeps its colour and isn't reversed
+        let swatch = cells.iter().find(|c| c.symbol() == "█").unwrap();
+        assert!(!reversed(swatch));
+        assert_eq!(
+            swatch.fg,
+            app.theme_colour(&app.settings.hover.look.highlight_colour)
+        );
+        // the label is reversed, the padding after it isn't
+        let start = (0..160).find(|&x| buf[(x, y)].symbol() == "H").unwrap() as usize;
+        assert!(reversed(&cells[start]));
+        let end = start + label.chars().count();
+        assert!(!reversed(&cells[end + 1]), "padding after the label");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

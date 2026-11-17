@@ -1163,7 +1163,7 @@ Each step is committed separately and keeps the studio working.
 
 1. ✅ Fixes (9), the key hints setting (5), the preview toggles (6).
    `<leader>6` / `<leader>7` show a hidden Main preview again.
-2. Row highlights (8).
+2. ✅ Row highlights (8).
 3. The palette dropdown row (2) and moving up to the tabs (3).
 4. Installed fonts' preview (1).
 5. Faster previews (4), measured after each change.

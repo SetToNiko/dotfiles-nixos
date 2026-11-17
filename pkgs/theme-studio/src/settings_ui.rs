@@ -249,6 +249,12 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
                 },
             );
         }
+        // the cursor covers the text, not padding or swatches
+        let (line, style) = if on {
+            (crate::hit::cursor_line(line, style), Style::new())
+        } else {
+            (line, style)
+        };
         f.render_widget(Paragraph::new(line).style(style), r);
     }
     // what the selected row is, what can be done, and warnings
@@ -451,6 +457,12 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
                 },
             );
         }
+        // the cursor covers the text, not padding or swatches
+        let (line, style) = if on {
+            (crate::hit::cursor_line(line, style), Style::new())
+        } else {
+            (line, style)
+        };
         f.render_widget(Paragraph::new(line).style(style), r);
     }
     f.render_widget(
@@ -501,6 +513,12 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
             style = hover_row(style);
             line = hover_line(line, 0);
         }
+        // the cursor covers the text, not padding or swatches
+        let (line, style) = if on {
+            (crate::hit::cursor_line(line, style), Style::new())
+        } else {
+            (line, style)
+        };
         f.render_widget(Paragraph::new(line).style(style), r);
     }
 
@@ -559,6 +577,12 @@ fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
             style = hover_row(style);
             line = hover_line(line, 1);
         }
+        // the cursor covers the text, not padding or swatches
+        let (line, style) = if on {
+            (crate::hit::cursor_line(line, style), Style::new())
+        } else {
+            (line, style)
+        };
         f.render_widget(Paragraph::new(line).style(style), r);
     }
 
