@@ -579,6 +579,128 @@ Each step is committed separately and keeps the studio working.
 9. ✅ **More presets:** Helix, Emacs, VS Code and JetBrains, plus Ghostty's
    extended keyboard mode (kitty protocol) for keys like Ctrl+Shift+Z.
 
+## Phase 5c: fixes after trying 5b
+
+Asked for after phase 5b; the decisions are settled.
+
+### 1. Configurable hover look
+
+- **Now:** everything clickable gets a dark grey background and an
+  underline when the mouse is over it.
+- **Becomes:** a Hover section on the Behaviour tab. Any combination of:
+  - **Highlight:** on/off, and a background colour.
+  - **Underline:** off, single, double, curly, dotted or dashed (terminals
+    can't make a line thicker, so the styles stand in for weight; double
+    is the heavier line), and a colour.
+  - **Text:** on/off, a colour, and a weight: normal, bold or dim (the
+    weights terminals have).
+- **Colours:** each is a key of the active system palette (e.g.
+  `bg_visual`, `yellow`), so they follow theme switches. They're picked
+  from a list of the palette's keys with swatches.
+- **Default:** no highlight, a single underline, and the text in `yellow`
+  (underline in `yellow` too).
+- **Live sample:** a sample row on the Behaviour tab shows the look as set,
+  before it's saved.
+- **How:** ratatui only knows "underlined", so the underline style and
+  colour are added to the terminal output (SGR 4:n and 58) when a hovered
+  cell is drawn. Terminals without them show a plain underline.
+
+### 2. Pane borders light up on hover
+
+- **Now:** only the preview windows (nvim, the shell) light up their frame
+  when the mouse is over them. The other panes (¹ Fonts, ² Installed fonts,
+  ³ Sample, ⁴ Palette, ⁵ picker) only highlight their title.
+- **Becomes:** the mouse anywhere over a pane lights up its border, as the
+  preview does.
+- **Two colours**, both theme keys set on the Behaviour tab and separate
+  from the element hover colours:
+  - **Panes:** default `aqua`.
+  - **Preview windows:** default `purple` (as now).
+- **Focus:** the yellow border of the focused pane still wins.
+
+### 3. Font sample
+
+- **No extra text:** no "at 96 dpi, sizes as on this machine" or
+  "previewing the highlighted font" in the title, and no "mono ·
+  JetBrains Mono 11" label lines in the image.
+- **Content:** the mock-ups stay, each in its role's font at its
+  effective size (what it really looks like on this screen):
+  - **mono:** code
+  - **ui:** the rofi menu
+  - **bar:** the bar strip
+
+### 4. Font roles row layout
+
+- **Wide and three-column layouts:** the size sits on the font name's row,
+  to the right of the name.
+- **Narrow layout:** the size stays below the name, as now.
+- **Description:** stays on the lower row in every layout.
+
+### 5. Palette: show what a colour is derived from, and what from it
+
+- **Derived colour selected** (e.g. `bg_visual_red`): the rows it comes
+  from (`bg0`, `red`) get the hover look.
+- **Base colour selected** (e.g. `red`): the colours derived from it
+  (`bg_visual_red`, `bg_diff_red`, `bg_red`, …) get the hover look, so
+  you can see what editing it changes.
+- **Pinned colours:** a pinned (hand-set) key isn't derived, so it's left
+  out both ways.
+- **Closed groups:** a related colour in a closed group lights up the
+  group's row.
+
+### 6. Keymaps tab: browsing presets
+
+- **Preset button:** the preset row becomes a button. Enter or a click
+  opens the preset list in the right column.
+- **Browsing:** moving through the list shows, on the left, the
+  highlighted preset against the current keymap:
+  - only the actions whose keys differ, as `current → preset`, grouped by
+    context
+  - `A` toggles to the whole keymap with the differences highlighted (as
+    in History)
+  - the view scrolls
+- **Loading:** Enter (or a click on the highlighted preset) loads it, as
+  an unsaved change (see 7). Esc goes back without changing anything.
+- **In the list:** `d` deletes a preset (shipped presets can only be
+  reset), and `n` makes a new preset from the highlighted one (asks for a
+  name).
+
+### 7. Settings changes wait for Save
+
+- **Now:** every change on the Settings page is saved at once.
+- **Becomes:** a change makes a Save button appear. Nothing is written,
+  and nothing takes effect, until the button is clicked or the save key is
+  pressed. The "saved straight away" note goes.
+- **One Save for the page:** Keymaps and Behaviour changes add up, and
+  Save writes keymaps.json and settings.json together. The button shows
+  on both tabs, with a count of what's unsaved.
+- **Save key:** the preset's Save action: `s` in Vim and Helix, `C-x C-s`
+  in Emacs, Ctrl+S in VS Code and JetBrains. It can be rebound like any
+  other key.
+- **Unsaved changes:**
+  - They stay pending while you move between pages; a ● on the Settings
+    tab shows it.
+  - Quitting asks save / discard / cancel, as palettes do.
+- **Discard:** a key and button put the page back as last saved.
+- **Not affected:** the History tab's restore and naming act at once
+  (they ask first), and `<leader>u` stays immediate.
+
+### 8. Pages other than Main
+
+- No "F1: back to the main page" at the bottom of the frame: the status
+  line already shows the key next to Main.
+
+### 9. Order of work
+
+1. Small fixes: the page frames' "back" note, the sample's title and labels,
+   and the roles' size placement.
+2. Hover settings and their output (styles, colours, weights), pane border
+   hover colours, and the Behaviour tab's Hover section with its sample.
+3. Derived-colour highlights in the Palette.
+4. Settings pending changes: the Save / Discard buttons, the ● on the tab,
+   and the quit prompt.
+5. The preset browser with its difference view, delete and new-from.
+
 ## Phase 6: downloading fonts
 
 - **Google Fonts:** search through the Fontsource API, which needs no key
