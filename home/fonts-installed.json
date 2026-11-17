@@ -81,6 +81,16 @@
           "hash": "sha256-vSkfGm+tSIr2G7KGK57GjS4OC7Lmx4xTXNXDxyQgST0="
         }
       ]
+    },
+    "Aguafina Script": {
+      "source": "google",
+      "id": "aguafina-script",
+      "dir": "ofl/aguafinascript"
+    },
+    "Monofett": {
+      "source": "google",
+      "id": "monofett",
+      "dir": "ofl/monofett"
     }
   }
 }
