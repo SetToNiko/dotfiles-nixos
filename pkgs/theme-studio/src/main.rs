@@ -24,6 +24,7 @@ mod preview;
 mod samples;
 mod settings;
 mod settings_ui;
+mod settle;
 mod store;
 mod theme;
 mod ui;

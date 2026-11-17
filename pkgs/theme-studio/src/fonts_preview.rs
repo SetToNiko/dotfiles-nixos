@@ -36,8 +36,10 @@ pub struct FontPreview {
     /// The highlighted font, and since when.
     last: Option<String>,
     since: Instant,
-    /// The pane's size in cells (from the last draw).
+    /// The pane's size in cells (from the last draw, once settled).
     pub area: (u16, u16),
+    /// The pane's size while resizing (re-rendered once it holds still).
+    pub settle: crate::settle::Settle,
 }
 
 impl FontPreview {
@@ -59,6 +61,7 @@ impl FontPreview {
             last: None,
             since: Instant::now(),
             area: (60, 20),
+            settle: Default::default(),
         }
     }
 

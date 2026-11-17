@@ -239,6 +239,8 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits.clear();
+    // images still waiting for a size to settle set this again
+    app.redraw_at = None;
     crate::hit::set_looks(app.looks(&app.settings));
     let full = f.area();
     // tabs on top: their own row; at the bottom they share the status line

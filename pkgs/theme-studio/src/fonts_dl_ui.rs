@@ -128,16 +128,26 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(Paragraph::new(text).dark_gray(), inner);
         return;
     }
+    // while resizing, the preview keeps the size it had (and isn't
+    // re-rendered) until the size holds still
+    let mut place = Some(inner);
     if let Some(pv) = app.dl.preview.as_mut() {
-        pv.area = (inner.width, inner.height);
+        place = pv.settle.place(inner);
+        pv.area = pv.settle.size((inner.width, inner.height));
+        app.redraw_at = crate::settle::sooner(app.redraw_at, pv.settle.due());
     }
     let note = app.preview_note();
     match app.dl.preview.as_mut().and_then(|pv| pv.image.as_mut()) {
-        Some(img) => f.render_stateful_widget(
-            ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Crop(None)),
-            inner,
-            img,
-        ),
+        Some(img) => {
+            if let Some(r) = place {
+                f.render_stateful_widget(
+                    ratatui_image::StatefulImage::default()
+                        .resize(ratatui_image::Resize::Crop(None)),
+                    r,
+                    img,
+                )
+            }
+        }
         None => f.render_widget(Paragraph::new(format!(" {note}")).dark_gray(), inner),
     }
 }

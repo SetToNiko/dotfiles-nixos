@@ -200,6 +200,10 @@ pub struct App {
     /// Draws images in the terminal (kitty graphics); None in tests.
     pub picker: Option<Picker>,
     pub sample_image: Option<StatefulProtocol>,
+    /// The sample's size while resizing (re-encoded once it holds still).
+    pub sample_settle: crate::settle::Settle,
+    /// When an image's size settles and the screen should be drawn again.
+    pub redraw_at: Option<Instant>,
     pub sample_error: Option<String>,
     pub keymap: Keymap,
     /// Where keymaps.json and settings.json are (for saving).
@@ -303,6 +307,8 @@ impl App {
             fonts,
             picker: None,
             sample_image: None,
+            sample_settle: Default::default(),
+            redraw_at: None,
             sample_error: None,
             overlay_for: For::Palette,
             themes: ThemeStore {
@@ -395,6 +401,10 @@ impl App {
                 redraw = true;
             }
             if self.expire_message() {
+                redraw = true;
+            }
+            // an image waiting for its pane's size to settle
+            if self.redraw_at.is_some_and(|t| Instant::now() >= t) {
                 redraw = true;
             }
             if self.preview.take_dirty() || redraw {

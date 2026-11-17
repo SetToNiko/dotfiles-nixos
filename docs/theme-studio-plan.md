@@ -940,7 +940,7 @@ download work.
 - **Choosing** swaps that palette into the theme, as `<leader>op` does
   (asks first if the current palette has unsaved edits).
 
-### 2. Draw resized windows after resizing stops
+### 2. Draw resized windows after resizing stops ✅
 
 - **Now:** every resize step redraws everything, including the font
   sample and preview images (ImageMagick renders), so dragging a border
@@ -1003,7 +1003,8 @@ Each step is committed separately and keeps the studio working.
 1. ✅ Key hints at the right end of the bar. With a message showing, the
    hints that don't fit beside it are dropped (before, a message hid them
    all).
-2. Images re-rendered after resizing stops.
+2. ✅ Images re-rendered after resizing stops (`settle.rs`): while waiting,
+   an image keeps its old size where that fits, else the pane is blank.
 3. The palette dropdown in the pane title, with live preview.
 4. Fuller code samples, the new languages, scrolling, the two dropdowns.
 5. Previews moved to `~/.local/share`, Nerd Fonts kept as Regular only,

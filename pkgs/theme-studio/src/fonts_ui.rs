@@ -334,12 +334,14 @@ pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
     if let Some(e) = &app.sample_error {
         f.render_widget(Paragraph::new(format!("Sample failed: {e}")).red(), inner);
     } else if let Some(img) = app.sample_image.as_mut() {
-        // shrink to fit if needed; never stretch past real size
-        f.render_stateful_widget(
-            StatefulImage::default().resize(Resize::Fit(None)),
-            inner,
-            img,
-        );
+        // while resizing: the size it had, if that fits (else just the
+        // background) until the size holds still
+        let place = app.sample_settle.place(inner);
+        app.redraw_at = crate::settle::sooner(app.redraw_at, app.sample_settle.due());
+        if let Some(r) = place {
+            // shrink to fit if needed; never stretch past real size
+            f.render_stateful_widget(StatefulImage::default().resize(Resize::Fit(None)), r, img);
+        }
     } else {
         f.render_widget(Paragraph::new("rendering sample…").dark_gray(), inner);
     }
