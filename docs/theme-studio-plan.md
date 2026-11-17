@@ -311,7 +311,14 @@ to whatever size it gets.
 - **Unsaved changes:** the quit prompt covers both tabs; `s` there saves
   whichever has a name.
 - **`theme-studio --fonts`** starts on this tab.
-- **Not yet:** mouse in this tab (keyboard only).
+- **Grouped list** (added after Phase 5): two levels, design then variant
+  (JetBrains Mono → Nerd Font / NL Nerd Font; Noto → Sans CJK, Serif CJK…),
+  single-member groups flattened; searching shows a flat list. Filter
+  chips: `m` mono, `p` propo, `n` NF, `M` NF Mono, `P` NF Propo, `x` no NF
+  (one of each kind at a time), `b` bitmap and `c` CJK·emoji·math (hidden
+  until switched on). Families only; weights are not picked.
+- **Mouse:** click a role, a chip or a row (a second click opens a group or
+  uses the font); the wheel scrolls the list.
 
 ## Phase 6: downloading fonts
 
