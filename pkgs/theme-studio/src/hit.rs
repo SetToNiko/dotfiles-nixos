@@ -37,12 +37,21 @@ pub enum Target {
     Border(BorderId),
     /// A choice in the unsaved-changes pop-up ('y', 's', or Esc as 'n').
     ConfirmChoice(char),
+    /// Settings page: one of its tabs (index into settings::TABS).
+    SettingsTab(u8),
+    /// Settings page: a row of the tab's list (Keymaps, Behaviour, or the
+    /// History tab's versions).
+    SettingsRow(usize),
+    /// History tab: one of the files.
+    HistFile(usize),
+    /// History tab: the preview (scrolls; no hover).
+    SettingsDiff,
 }
 
 impl Target {
     /// Gets a hover highlight (and the hand pointer).
     pub fn shows_hover(self) -> bool {
-        !matches!(self, Target::PaneBody(_))
+        !matches!(self, Target::PaneBody(_) | Target::SettingsDiff)
     }
 }
 

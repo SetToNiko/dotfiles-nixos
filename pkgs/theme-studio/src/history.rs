@@ -40,6 +40,18 @@ pub fn init(dir: PathBuf) {
     let _ = DIR.set(dir);
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: this thread's own history folder.
+    static TEST_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests: gives this thread a history in `dir`.
+#[cfg(test)]
+pub fn init_for_test(dir: PathBuf) {
+    TEST_DIR.with(|d| *d.borrow_mut() = Some(dir));
+}
+
 /// One saved version of a file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -53,6 +65,28 @@ pub struct Snapshot {
     pub summary: String,
     /// The file's contents.
     pub content: Value,
+}
+
+/// A version without its contents (for listing: reading 100 copies of
+/// palettes.json in full would be slow).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct SnapshotInfo {
+    pub time: u64,
+    pub when: String,
+    pub name: Option<String>,
+    pub summary: String,
+}
+
+/// Goes up whenever a history or a config file changes, so views built from
+/// them know to rebuild.
+static GEN: AtomicU64 = AtomicU64::new(0);
+
+pub fn generation() -> u64 {
+    GEN.load(Ordering::Relaxed)
+}
+
+fn bump() {
+    GEN.fetch_add(1, Ordering::Relaxed);
 }
 
 pub struct History {
@@ -89,10 +123,14 @@ fn stamp() -> String {
 impl History {
     /// The history for this run, if `init` was called.
     pub fn current() -> Option<History> {
+        #[cfg(test)]
+        if let Some(dir) = TEST_DIR.with(|d| d.borrow().clone()) {
+            return Some(History { dir });
+        }
         DIR.get().map(|d| History { dir: d.clone() })
     }
 
-    #[allow(dead_code)] // used by the History tab (rework step 8)
+    #[cfg(test)]
     pub fn at(dir: &Path) -> History {
         History {
             dir: dir.to_path_buf(),
@@ -104,6 +142,7 @@ impl History {
     }
 
     fn write(&self, path: &Path, s: &Snapshot) -> Result<()> {
+        bump();
         std::fs::create_dir_all(path.parent().unwrap())?;
         let text = serde_json::to_string_pretty(s)?;
         std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))
@@ -128,7 +167,6 @@ impl History {
     }
 
     /// Saves `content` as a named version (never pruned).
-    #[allow(dead_code)] // used by the History tab (rework step 8)
     pub fn save_named(&self, file: &str, name: &str, content: &Value) -> Result<PathBuf> {
         let s = Snapshot {
             time: now_ms(),
@@ -142,18 +180,19 @@ impl History {
         Ok(path)
     }
 
-    /// Every version of a file: named ones first, then newest first.
-    pub fn list(&self, file: &str) -> Vec<(PathBuf, Snapshot)> {
+    /// Every version of a file, without contents: named ones first, then
+    /// newest first.
+    pub fn list_info(&self, file: &str) -> Vec<(PathBuf, SnapshotInfo)> {
         let Ok(entries) = std::fs::read_dir(self.folder(file)) else {
             return Vec::new();
         };
-        let mut out: Vec<(PathBuf, Snapshot)> = entries
+        let mut out: Vec<(PathBuf, SnapshotInfo)> = entries
             .flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|x| x == "json"))
             .filter_map(|p| {
-                let s =
-                    serde_json::from_str::<Snapshot>(&std::fs::read_to_string(&p).ok()?).ok()?;
+                let f = std::io::BufReader::new(std::fs::File::open(&p).ok()?);
+                let s = serde_json::from_reader::<_, SnapshotInfo>(f).ok()?;
                 Some((p, s))
             })
             .collect();
@@ -161,14 +200,28 @@ impl History {
         out
     }
 
-    #[allow(dead_code)] // used by the History tab (rework step 8)
+    /// One version in full.
+    pub fn load(path: &Path) -> Option<Snapshot> {
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    }
+
+    /// Every version in full (named first, then newest first).
+    #[cfg(test)]
+    pub fn list(&self, file: &str) -> Vec<(PathBuf, Snapshot)> {
+        self.list_info(file)
+            .into_iter()
+            .filter_map(|(p, _)| Some((p.clone(), Self::load(&p)?)))
+            .collect()
+    }
+
     pub fn delete(&self, path: &Path) -> Result<()> {
+        bump();
         std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))
     }
 
     fn prune(&self, file: &str) {
         let auto: Vec<PathBuf> = self
-            .list(file)
+            .list_info(file)
             .into_iter()
             .filter(|(_, s)| s.name.is_none())
             .map(|(p, _)| p)
@@ -179,9 +232,20 @@ impl History {
     }
 }
 
+thread_local! {
+    /// The file the studio wrote last in this run (for `<leader>u`).
+    static LAST: std::cell::RefCell<Option<(String, PathBuf)>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn last_write() -> Option<(String, PathBuf)> {
+    LAST.with(|l| l.borrow().clone())
+}
+
 /// Called before a file is written: keeps what it held (if this run has a
 /// history and the file exists and parses).
 pub fn record(file: &str, path: &Path, new: &Value) {
+    bump();
+    LAST.with(|l| *l.borrow_mut() = Some((file.to_string(), path.to_path_buf())));
     let Some(h) = History::current() else { return };
     let Some(before) = std::fs::read_to_string(path)
         .ok()

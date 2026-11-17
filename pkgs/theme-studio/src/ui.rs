@@ -264,7 +264,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match arrangement {
         Arrangement::TooSmall { .. } => {}
         Arrangement::Page { body, status } => {
-            draw_page(f, app, body);
+            if app.page == Page::Settings {
+                crate::settings_ui::draw_settings(f, app, body);
+            } else {
+                draw_page(f, app, body);
+            }
             draw_status(f, app, status);
         }
         Arrangement::Main(l) => {
@@ -340,7 +344,7 @@ fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) -> u16 {
     x - area.x
 }
 
-/// The Download fonts and Settings pages (filled in by later steps).
+/// The Download fonts page (filled in by phase 6).
 fn draw_page(f: &mut Frame, app: &App, area: Rect) {
     let (title, text) = match app.page {
         Page::Downloads => (
@@ -349,16 +353,7 @@ fn draw_page(f: &mut Frame, app: &App, area: Rect) {
                 "Searching and installing fonts from Google Fonts and Nerd Fonts comes here (plan phase 6).".to_string(),
             ],
         ),
-        _ => (
-            " Settings ",
-            vec![
-                "Keymaps and behaviour settings come here (plan phase 5b, step 6).".to_string(),
-                String::new(),
-                format!("Until then, edit the files in {}:", crate::config::dir().display()),
-                "  keymaps.json   keymap presets and the active one".to_string(),
-                "  settings.json  what's open and shown when the studio starts".to_string(),
-            ],
-        ),
+        _ => (" Settings ", Vec::new()),
     };
     let lines: Vec<Line> = text
         .into_iter()
@@ -1166,6 +1161,31 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("{} reset", k(A::ResetSizes)),
                 format!("{} done", k(A::Back)),
             ]
+        } else if app.page == Page::Settings {
+            use crate::settings::Tab;
+            let rows: Vec<(&[Action], &str)> = match app.settings_page.tab {
+                Tab::Keymaps => vec![
+                    (&[A::Down, A::Up], "move"),
+                    (&[A::Confirm], "rebind"),
+                    (&[A::Add], "add keys"),
+                    (&[A::Delete], "unbind"),
+                    (&[A::SaveNamed], "save preset"),
+                ],
+                Tab::Behaviour => vec![
+                    (&[A::Down, A::Up], "move"),
+                    (&[A::Left, A::Right], "change"),
+                ],
+                Tab::History => vec![
+                    (&[A::Left, A::Right], "files/versions"),
+                    (&[A::Restore], "restore"),
+                    (&[A::SaveNamed], "name"),
+                    (&[A::ToggleAll], "everything"),
+                    (&[A::Delete], "delete named"),
+                ],
+            };
+            let mut v: Vec<String> = rows.into_iter().filter_map(|(a, l)| hint(a, l)).collect();
+            v.extend(hint(&[A::TabPrev, A::TabNext], "tabs"));
+            v
         } else if fonts && app.fonts.focus == crate::fonts::FontFocus::Search {
             vec!["type to search".into(), "Enter/Esc done".into()]
         } else if app.preview.focus.is_some() {
@@ -1248,12 +1268,14 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
             }
             _ => None,
         };
+        // the main page's keys don't work on the other pages
+        let main = app.page == Page::Main;
         let general: Vec<String> = [
-            hint(&[A::FocusNext], "next"),
-            panels,
-            hint(&[A::Save], "save"),
-            hint(&[A::Apply], "apply"),
-            hint(&[A::Open], "open"),
+            hint(&[A::FocusNext], "next").filter(|_| main),
+            panels.filter(|_| main),
+            hint(&[A::Save], "save").filter(|_| main),
+            hint(&[A::Apply], "apply").filter(|_| main),
+            hint(&[A::Open], "open").filter(|_| main),
         ]
         .into_iter()
         .flatten()
@@ -1306,7 +1328,7 @@ fn fit_hints(context: &[String], general: &[String], last: &str, room: usize) ->
 
 /// Key text for hints: `<CR>` → `Enter`, `<leader>sp` → `Space s p`,
 /// `<C-r>` → `C-r`; plain characters stay as they are.
-fn friendly(seq: &str) -> String {
+pub fn friendly(seq: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut rest = seq;
     while !rest.is_empty() {
@@ -1524,6 +1546,80 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 ));
             }
             popup(f, centered(area, 50, 5), "Save as", lines);
+        }
+        Overlay::Capture { what, keys } => {
+            let typed = crate::keymap::display_seq(keys, app.keymap.leader);
+            let lines = match what {
+                crate::settings::Capture::Leader => vec![
+                    Line::raw(" Press the new leader key."),
+                    Line::styled(" Esc cancels.", Style::new().dark_gray()),
+                ],
+                crate::settings::Capture::Binding { action, add, .. } => vec![
+                    Line::raw(format!(
+                        " {} keys for \"{}\":",
+                        if *add { "Extra" } else { "New" },
+                        action.describe()
+                    )),
+                    Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(format!("{typed}▏"), Style::new().yellow().bold()),
+                    ]),
+                    Line::styled(
+                        " Press keys (a sequence is fine). Enter keeps them, Backspace takes one back, Esc cancels.",
+                        Style::new().dark_gray(),
+                    ),
+                ],
+            };
+            popup(
+                f,
+                centered(area, 64, lines.len() as u16 + 2),
+                "Record keys",
+                lines,
+            );
+        }
+        Overlay::Prompt { title, input, .. } => {
+            let lines = vec![
+                Line::raw(format!(" {title}:")),
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(format!("{input}▏"), Style::new().yellow()),
+                ]),
+                Line::styled(" Enter keeps it, Esc cancels.", Style::new().dark_gray()),
+            ];
+            popup(f, centered(area, 64, 5), "Name", lines);
+        }
+        Overlay::Ask { question, .. } => {
+            let r = centered(area, 64, 6);
+            let y = r.y + 4;
+            let mut button = |text: &'static str, x: u16, choice: char, base: Style| {
+                let w = text.chars().count() as u16;
+                let hovered = app.hits.add(
+                    Rect {
+                        x,
+                        y,
+                        width: w,
+                        height: 1,
+                    },
+                    Target::ConfirmChoice(choice),
+                );
+                (
+                    Span::styled(text, if hovered { hover(base) } else { base }),
+                    x + w,
+                )
+            };
+            let (yes, x) = button(" y  yes ", r.x + 1, 'y', Style::new().yellow());
+            let (no, _) = button(" Esc  no ", x + 2, 'n', Style::new());
+            let lines = vec![
+                Line::raw(format!(" {}", truncate(question, 60))),
+                Line::raw(if question.chars().count() > 60 {
+                    format!(" {}", question.chars().skip(60).collect::<String>())
+                } else {
+                    String::new()
+                }),
+                Line::raw(""),
+                Line::from(vec![yes, "  ".into(), no]),
+            ];
+            popup(f, r, "Sure?", lines);
         }
         Overlay::Open {
             filter,

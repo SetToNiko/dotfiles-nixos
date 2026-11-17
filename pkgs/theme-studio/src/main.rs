@@ -12,6 +12,8 @@ mod hit;
 mod keymap;
 mod palette;
 mod preview;
+mod settings;
+mod settings_ui;
 mod store;
 mod ui;
 

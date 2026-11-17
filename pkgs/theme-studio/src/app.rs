@@ -98,6 +98,22 @@ pub enum Overlay {
         target: &'static str,
     },
     Help,
+    /// Settings page: recording keys (a binding or the leader).
+    Capture {
+        what: crate::settings::Capture,
+        keys: Vec<Key>,
+    },
+    /// Settings page: typing a name or keys.
+    Prompt {
+        title: String,
+        input: String,
+        purpose: crate::settings::Naming,
+    },
+    /// Settings page: a yes / no question.
+    Ask {
+        question: String,
+        then: crate::settings::Deferred,
+    },
 }
 
 pub struct App {
@@ -160,10 +176,13 @@ pub struct App {
     pub sample_image: Option<StatefulProtocol>,
     pub sample_error: Option<String>,
     pub keymap: Keymap,
-    /// Every keymap preset (listed on the Settings page, rework step 6).
-    #[allow(dead_code)]
+    /// Where keymaps.json and settings.json are (for saving).
+    pub config_dir: std::path::PathBuf,
+    /// Every keymap preset (listed on the Settings page).
     pub presets: Vec<Keymap>,
     pub settings: crate::config::Settings,
+    /// The Settings page's tabs and selections.
+    pub settings_page: crate::settings::SettingsPage,
     /// Keys of a sequence typed so far (e.g. the leader), waiting for the rest.
     pub pending_keys: Vec<Key>,
     /// The Open / Save as pop-up is for font presets, not palettes.
@@ -233,7 +252,9 @@ impl App {
             overlay_fonts: false,
             keymap: config.keymap,
             presets: config.presets,
+            config_dir: config.dir.clone(),
             settings: config.settings.clone(),
+            settings_page: Default::default(),
             pending_keys: Vec::new(),
             store,
             name,
@@ -412,11 +433,11 @@ impl App {
         }
     }
 
-    fn info(&mut self, s: impl Into<String>) {
+    pub fn info(&mut self, s: impl Into<String>) {
         self.message = Some((s.into(), false));
     }
 
-    fn error(&mut self, s: impl Into<String>) {
+    pub fn error(&mut self, s: impl Into<String>) {
         self.message = Some((s.into(), true));
     }
 
@@ -864,8 +885,10 @@ impl App {
         if self.resize_mode {
             return [Context::Resize; 3];
         }
-        if self.page != Page::Main {
-            return [Context::Global; 3];
+        match self.page {
+            Page::Main => {}
+            Page::Settings => return [Context::Settings, Context::Global, Context::Global],
+            Page::Downloads => return [Context::Global; 3],
         }
         match self.side {
             Side::Fonts => match self.fonts.focus {
@@ -1141,6 +1164,9 @@ impl App {
         if let Overlay::CopyFrom { target } = self.overlay {
             return self.run_copy_from(target, a);
         }
+        if a == Action::UndoConfig {
+            return self.undo_config();
+        }
         let fonts = self.side == Side::Fonts;
         let page_action = matches!(
             a,
@@ -1150,6 +1176,9 @@ impl App {
                 | Action::PageDownloads
                 | Action::PageSettings
         );
+        if self.page == Page::Settings && !page_action {
+            return self.run_settings(a);
+        }
         if self.page != Page::Main && !page_action {
             return;
         }
@@ -1397,6 +1426,52 @@ impl App {
         let overlay = std::mem::replace(&mut self.overlay, Overlay::None);
         self.overlay = match overlay {
             Overlay::Help => Overlay::None,
+            Overlay::Capture { what, keys } => {
+                // capture_key sets the overlay itself
+                self.capture_key(what, keys, k);
+                return;
+            }
+            Overlay::Prompt {
+                title,
+                mut input,
+                purpose,
+            } => match k.code {
+                KeyCode::Esc => Overlay::None,
+                KeyCode::Enter => {
+                    // finish_prompt may open something else
+                    self.finish_prompt(purpose, input);
+                    return;
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    Overlay::Prompt {
+                        title,
+                        input,
+                        purpose,
+                    }
+                }
+                KeyCode::Char(c) => {
+                    input.push(c);
+                    Overlay::Prompt {
+                        title,
+                        input,
+                        purpose,
+                    }
+                }
+                _ => Overlay::Prompt {
+                    title,
+                    input,
+                    purpose,
+                },
+            },
+            Overlay::Ask { question, then } => match k.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.run_deferred(then);
+                    return;
+                }
+                KeyCode::Esc | KeyCode::Char('n') => Overlay::None,
+                _ => Overlay::Ask { question, then },
+            },
             Overlay::Confirm(p) => match k.code {
                 KeyCode::Char('y') => {
                     self.run_pending(p);
@@ -1585,6 +1660,9 @@ impl App {
                 match target {
                     Some((_, T::ColourRow(_))) => self.move_row(d),
                     Some((_, T::FontRow(_))) => self.fonts.scroll(d),
+                    Some((_, t @ (T::SettingsRow(_) | T::SettingsDiff))) => {
+                        self.settings_scroll(t, d)
+                    }
                     _ => {}
                 }
             }
@@ -1729,6 +1807,9 @@ impl App {
                     }
                 }
             }
+            T::SettingsTab(_) | T::SettingsRow(_) | T::HistFile(_) | T::SettingsDiff => {
+                self.settings_click(t)
+            }
             T::ConfirmChoice(c) => {
                 let code = if c == 'n' {
                     KeyCode::Esc
@@ -1866,6 +1947,8 @@ mod tests {
             presets: Keymap::builtin(),
             settings: crate::config::Settings::default(),
             warnings: Vec::new(),
+            // a folder inside the test's own temp store
+            dir: store.dir.join("studio-config"),
         };
         let mut app = App::with_config(store, start, config).unwrap();
         app.preview.set_headless();
@@ -2609,5 +2692,200 @@ mod tests {
                 render(&mut app, w, h);
             }
         }
+    }
+
+    #[test]
+    fn settings_keymaps_tab_rebinds_and_changes_the_leader() {
+        use crate::settings::KmRow;
+        let store = temp_store("settings-keys");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.on_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+        assert_eq!(app.page, Page::Settings);
+        assert_eq!(app.contexts()[0], Context::Settings);
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("‹ Vim ›") && screen.contains("Keymaps"),
+            "{screen}"
+        );
+        // Enter on "quit" records new keys: Q, then Enter keeps them
+        let row = app
+            .keymap_rows()
+            .iter()
+            .position(|r| *r == KmRow::Binding(Context::Global, Action::Quit))
+            .unwrap();
+        app.settings_page.km_sel = row;
+        press(&mut app, "\n");
+        assert!(matches!(app.overlay, Overlay::Capture { .. }));
+        press(&mut app, "Q");
+        assert!(render(&mut app, 160, 45).contains("Q▏"));
+        press(&mut app, "\n");
+        let q = Key::parse_seq("Q", app.keymap.leader).unwrap();
+        assert_eq!(
+            app.keymap.keys_of(Context::Global, Action::Quit),
+            vec![q.clone()]
+        );
+        let saved = crate::config::load(&dir.join("studio-config"), false);
+        assert_eq!(saved.keymap.keys_of(Context::Global, Action::Quit), vec![q]);
+        // binding pin to y (copy-hex in Colours) saves with a warning
+        let row = app
+            .keymap_rows()
+            .iter()
+            .position(|r| *r == KmRow::Binding(Context::Colours, Action::Pin))
+            .unwrap();
+        app.settings_page.km_sel = row;
+        press(&mut app, "ay\n");
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, err)| *err && m.contains("is also")),
+            "{:?}",
+            app.message
+        );
+        // d unbinds
+        press(&mut app, "d");
+        assert!(app.keymap.keys_of(Context::Colours, Action::Pin).is_empty());
+        // <leader>u undoes the last change (pin's keys come back), again redoes
+        press(&mut app, " u");
+        assert_eq!(app.keymap.keys_of(Context::Colours, Action::Pin).len(), 2);
+        press(&mut app, " u");
+        assert!(app.keymap.keys_of(Context::Colours, Action::Pin).is_empty());
+        // n saves the keymap as a new preset, which becomes active
+        press(&mut app, "nMine\n");
+        assert_eq!(app.keymap.name, "Mine");
+        assert!(app.presets.iter().any(|p| p.name == "Mine"));
+        // Behaviour tab: the leader, by pressing it
+        press(&mut app, "]");
+        app.settings_page.bh_sel = 0;
+        press(&mut app, "\n,");
+        assert_eq!(
+            app.keymap.leader,
+            Key::new(KeyCode::Char(','), KeyModifiers::NONE)
+        );
+        assert_eq!(
+            app.keymap.keys_of(Context::Global, Action::SavePalette),
+            vec![Key::parse_seq(",sp", app.keymap.leader).unwrap()]
+        );
+        // Esc goes back to the main page
+        press(&mut app, "\x1b");
+        assert_eq!(app.page, Page::Main);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn settings_behaviour_tab_saves_settings() {
+        use crate::settings::{BhRow, behaviour_rows};
+        let store = temp_store("settings-behaviour");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.page = Page::Settings;
+        render(&mut app, 160, 45);
+        click_on(&mut app, crate::hit::Target::SettingsTab(1));
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Page tabs") && screen.contains("‹ bottom ›"),
+            "{screen}"
+        );
+        let rows = behaviour_rows();
+        app.settings_page.bh_sel = rows.iter().position(|r| *r == BhRow::Tabs).unwrap();
+        press(&mut app, "l");
+        assert_eq!(app.settings.layout.tabs, "top");
+        let saved = crate::config::load(&dir.join("studio-config"), false);
+        assert_eq!(saved.settings.layout.tabs, "top");
+        // a click on the selected row changes it too
+        render(&mut app, 160, 45);
+        let i = app.settings_page.bh_sel;
+        click_on(&mut app, crate::hit::Target::SettingsRow(i));
+        assert_eq!(app.settings.layout.tabs, "bottom");
+        // the current pane sizes become the default
+        app.sizes.fonts_width = 0.4;
+        app.settings_page.bh_sel = rows.iter().position(|r| *r == BhRow::SaveSizes).unwrap();
+        press(&mut app, "\n");
+        let saved = crate::config::load(&dir.join("studio-config"), false);
+        assert_eq!(saved.settings.layout.sizes.fonts_width, 0.4);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn settings_history_tab_previews_restores_and_names_versions() {
+        use crate::settings::DiffLine;
+        let store = temp_store("settings-history");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        let before = app.palette.get("red");
+        app.palette.set("red", Rgb(1, 2, 3));
+        app.save(false);
+        app.page = Page::Settings;
+        render(&mut app, 160, 45);
+        click_on(&mut app, crate::hit::Target::SettingsTab(2));
+        assert_eq!(app.settings_page.tab, crate::settings::Tab::History);
+        let versions = app.versions();
+        assert_eq!(versions.len(), 1);
+        // red, and the colours derived from it
+        assert!(
+            versions[0].1.summary.starts_with("One: ") && versions[0].1.summary.contains(", red,")
+        );
+        // the preview: red as it is now → as it was
+        let view = app.diff_view();
+        assert!(view.lines.contains(&DiffLine::Changed {
+            depth: 2,
+            key: "red".into(),
+            now: "#010203".into(),
+            then: before.hex(),
+        }));
+        let (now, then) = view.palette.unwrap();
+        assert!(
+            now.contains(&("red".into(), Rgb(1, 2, 3))) && then.contains(&("red".into(), before))
+        );
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Restore preview") && screen.contains("One: bg_visual_red"),
+            "{screen}"
+        );
+        render(&mut app, 100, 30); // stacked
+        // A shows everything
+        press(&mut app, "A");
+        assert!(app.diff_view().lines.len() > 10);
+        // r asks, y restores (and what was there goes to the history)
+        press(&mut app, "r");
+        assert!(matches!(app.overlay, Overlay::Ask { .. }));
+        render(&mut app, 160, 45);
+        click_on(&mut app, crate::hit::Target::ConfirmChoice('y'));
+        assert_eq!(app.palette.get("red"), before);
+        assert!(!app.dirty());
+        assert_eq!(
+            Store { dir: dir.clone() }.load("One").unwrap().get("red"),
+            before
+        );
+        assert_eq!(app.versions().len(), 2);
+        // <leader>u undoes the restore
+        press(&mut app, " u");
+        assert_eq!(app.palette.get("red"), Rgb(1, 2, 3));
+        // n names the current file; named versions come first, d deletes them
+        press(&mut app, "nmy reds\n");
+        let versions = app.versions();
+        assert_eq!(versions[0].1.name.as_deref(), Some("my reds"));
+        app.settings_page.hist_sel = 1;
+        press(&mut app, "d");
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, _)| m.contains("Only named"))
+        );
+        app.settings_page.hist_sel = 0;
+        press(&mut app, "dy");
+        assert!(app.versions().iter().all(|(_, s)| s.name.is_none()));
+        // other files: the list follows
+        press(&mut app, "hj");
+        assert_eq!(
+            crate::settings::FILES[app.settings_page.hist_file],
+            "fonts.json"
+        );
+        assert!(app.versions().is_empty());
+        assert!(render(&mut app, 160, 45).contains("No earlier versions yet"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

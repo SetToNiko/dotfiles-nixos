@@ -215,6 +215,8 @@ pub struct Loaded {
     pub presets: Vec<Keymap>,
     pub settings: Settings,
     pub warnings: Vec<String>,
+    /// The folder the files are in (for saving).
+    pub dir: PathBuf,
 }
 
 fn write_json(path: &Path, v: &Value) -> Result<()> {
@@ -323,6 +325,24 @@ fn load_keymaps(v: &Value, warnings: &mut Vec<String>) -> (Keymap, Vec<Keymap>, 
     (active, presets, Value::Object(out))
 }
 
+/// Writes keymaps.json: every preset and which one is active.
+pub fn save_keymaps(dir: &Path, presets: &[Keymap], active: &str) -> Result<()> {
+    let mut obj = Map::new();
+    for p in presets {
+        obj.insert(p.name.clone(), p.to_json());
+    }
+    let mut m = Map::new();
+    m.insert("version".into(), Value::from(KEYMAPS_VERSION));
+    m.insert("active".into(), Value::String(active.to_string()));
+    m.insert("presets".into(), Value::Object(obj));
+    write_json(&dir.join("keymaps.json"), &Value::Object(m))
+}
+
+/// Writes settings.json.
+pub fn save_settings(dir: &Path, s: &Settings) -> Result<()> {
+    write_json(&dir.join("settings.json"), &serde_json::to_value(s)?)
+}
+
 /// Loads both files from `dir`, creating or topping them up when `write` is
 /// set. A file that doesn't parse is left alone and the defaults are used.
 pub fn load(dir: &Path, write: bool) -> Loaded {
@@ -379,6 +399,7 @@ pub fn load(dir: &Path, write: bool) -> Loaded {
     };
 
     Loaded {
+        dir: dir.to_path_buf(),
         keymap,
         presets,
         settings,

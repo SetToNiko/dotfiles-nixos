@@ -543,8 +543,10 @@ the pane titles.
     in place. Every entry that differs from what you have now is
     highlighted and shown as `current → selected`, so the changes are
     visible straight away. Nothing changes until you confirm.
-  - For palettes.json, 🔸 the preview column also shows the selected
-    version's colours for the palette you're editing.
+  - For palettes.json, 🔸 the preview pane also shows the selected
+    version's colours for the palette you're editing (a strip of
+    swatches, now and selected, above the differences; colour values get a
+    swatch too).
   - Restore (with the preview's confirm key), save the current state as a
     named version, delete a named version.
   - 🔸 `<leader>u` undoes the last config change from anywhere (restores the
@@ -560,16 +562,16 @@ Each step is committed separately and keeps the studio working.
 4. ✅ Collapsible colour groups, the picker's visibility, the behaviour
    settings; follow-ups (picker discard, leader panes, capture colour,
    status line).
-5. **Clickable map, hover states and tabs:** the click map, hover highlights
+5. ✅ **Clickable map, hover states and tabs:** the click map, hover highlights
    (and the pointer shape), clickable page tabs, and the tab bar position
    setting.
-6. **Resizing:** dragging borders (they get hover states too) and
+6. ✅ **Resizing:** dragging borders (they get hover states too) and
    `<leader>r` resize mode.
-7. **Versions and history (behind the scenes):**
+7. ✅ **Versions and history (behind the scenes):**
    - version fields and migrations for all four files, with the new data
      file layout and the scripts updated
    - snapshots in `~/.local/state`, pruning to 100, and named versions
-8. **Settings page:**
+8. ✅ **Settings page:**
    - **Keymaps tab:** rebinding, conflicts, and presets.
    - **Behaviour tab:** the leader, visibility defaults, tab position,
      default pane sizes.

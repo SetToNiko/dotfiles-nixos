@@ -1,0 +1,544 @@
+//! Drawing the Settings page (F3): tab strip, then the Keymaps, Behaviour or
+//! History tab. Everything clickable goes into the hit map with a hover look.
+
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Paragraph, Wrap};
+
+use crate::app::App;
+use crate::color::Rgb;
+use crate::hit::{Target, hover};
+use crate::keymap::{Context, Keymap, display_seq};
+use crate::settings::{BhRow, DiffLine, FILES, HistFocus, KmRow, TABS, Tab, behaviour_rows};
+use crate::ui::friendly;
+
+/// Keeps `sel` on screen in a list `height` rows tall.
+fn follow(scroll: &mut usize, sel: usize, height: usize) {
+    if height == 0 {
+        return;
+    }
+    if sel < *scroll {
+        *scroll = sel;
+    } else if sel >= *scroll + height {
+        *scroll = sel + 1 - height;
+    }
+}
+
+fn row_rect(area: Rect, i: usize) -> Rect {
+    Rect {
+        y: area.y + i as u16,
+        height: 1,
+        ..area
+    }
+}
+
+fn selected_style(on: bool, focused: bool) -> Style {
+    match (on, focused) {
+        (true, true) => Style::new().reversed(),
+        (true, false) => Style::new().bold().underlined(),
+        _ => Style::new(),
+    }
+}
+
+fn colour_span(c: Rgb, text: &str) -> Span<'static> {
+    Span::styled(text.to_string(), Style::new().fg(Color::Rgb(c.0, c.1, c.2)))
+}
+
+/// A value as text, with a swatch in front when it's a colour.
+fn value_spans(v: &str, style: Style) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    if v.len() == 7
+        && let Some(c) = Rgb::parse(v)
+    {
+        out.push(colour_span(c, "██ "));
+    }
+    out.push(Span::styled(v.to_string(), style));
+    out
+}
+
+pub fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
+    let back = app
+        .keymap
+        .key_for(&[Context::Global], crate::keymap::Action::PageMain)
+        .unwrap_or_default();
+    let block = Block::bordered()
+        .title(" Settings ")
+        .title_bottom(format!(
+            " {}: back to the main page   [ ]: tabs   changes are saved straight away ",
+            friendly(&back)
+        ))
+        .border_style(Style::new().yellow());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.height < 3 {
+        return;
+    }
+    let [tabs, _, body] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(inner);
+    // tab strip
+    let mut x = tabs.x + 1;
+    for (i, (tab, name)) in TABS.iter().enumerate() {
+        let text = format!(" {name} ");
+        let w = text.chars().count() as u16;
+        let r = Rect {
+            x,
+            y: tabs.y,
+            width: w.min(tabs.right().saturating_sub(x)),
+            height: 1,
+        };
+        let mut style = if *tab == app.settings_page.tab {
+            Style::new().reversed().bold()
+        } else {
+            Style::new().dark_gray()
+        };
+        if app.hits.add(r, Target::SettingsTab(i as u8)) {
+            style = hover(style);
+        }
+        f.render_widget(Paragraph::new(Span::styled(text, style)), r);
+        x += w + 1;
+    }
+    match app.settings_page.tab {
+        Tab::Keymaps => draw_keymaps(f, app, body),
+        Tab::Behaviour => draw_behaviour(f, app, body),
+        Tab::History => draw_history(f, app, body),
+    }
+}
+
+// ----- Keymaps ---------------------------------------------------------------
+
+fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
+    let side = area.width >= 100;
+    let (list, info) = if side {
+        let [l, _, i] = Layout::horizontal([
+            Constraint::Min(56),
+            Constraint::Length(1),
+            Constraint::Length(44),
+        ])
+        .areas(area);
+        (l, Some(i))
+    } else {
+        (area, None)
+    };
+    let rows = app.keymap_rows();
+    let n = rows.len();
+    app.settings_page.km_sel = app.settings_page.km_sel.min(n.saturating_sub(1));
+    let sel = app.settings_page.km_sel;
+    let mut scroll = app.settings_page.km_scroll;
+    follow(&mut scroll, sel, list.height as usize);
+    app.settings_page.km_scroll = scroll;
+    let shipped = Keymap::builtin()
+        .into_iter()
+        .find(|b| b.name == app.keymap.name);
+    let leader = app.keymap.leader;
+    let w = list.width as usize;
+    for (i, row) in rows
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list.height as usize)
+    {
+        let r = row_rect(list, i - scroll);
+        let on = i == sel;
+        let line = match *row {
+            KmRow::Preset => {
+                let pos = app
+                    .presets
+                    .iter()
+                    .position(|p| p.name == app.keymap.name)
+                    .map_or(0, |p| p + 1);
+                Line::from(vec![
+                    Span::styled(" Preset  ", Style::new().bold()),
+                    Span::styled(
+                        format!("‹ {} ›", app.keymap.name),
+                        Style::new().yellow().bold(),
+                    ),
+                    Span::styled(
+                        format!(
+                            "  {pos}/{}  {}",
+                            app.presets.len(),
+                            if shipped.is_some() {
+                                "shipped"
+                            } else {
+                                "yours"
+                            }
+                        ),
+                        Style::new().dark_gray(),
+                    ),
+                ])
+            }
+            KmRow::Header(ctx) => {
+                Line::styled(format!(" {}", ctx.title()), Style::new().bold().cyan())
+            }
+            KmRow::Binding(ctx, action) => {
+                let keys = app.keymap.keys_of(ctx, action);
+                let text: Vec<String> = keys.iter().map(|k| display_seq(k, leader)).collect();
+                let changed = shipped
+                    .as_ref()
+                    .is_some_and(|s| s.keys_of(ctx, action) != keys);
+                let clash = keys
+                    .iter()
+                    .any(|k| !app.keymap.conflicts(ctx, action, k).is_empty());
+                let label_w = w.saturating_sub(24).clamp(20, 48);
+                let mut spans = vec![
+                    Span::raw(format!(
+                        "   {:<label_w$}",
+                        truncate(&action.describe(), label_w)
+                    )),
+                    Span::styled(if changed { "• " } else { "  " }, Style::new().cyan()),
+                ];
+                if text.is_empty() {
+                    spans.push(Span::styled("no keys", Style::new().dark_gray().italic()));
+                } else {
+                    spans.push(Span::styled(text.join("  "), Style::new().yellow()));
+                }
+                if clash {
+                    spans.push(Span::styled("  ! clash", Style::new().red().bold()));
+                }
+                Line::from(spans)
+            }
+        };
+        let clickable = !matches!(row, KmRow::Header(_));
+        let mut style = selected_style(on, true);
+        if clickable && app.hits.add(r, Target::SettingsRow(i)) && !on {
+            style = hover(style);
+        }
+        f.render_widget(Paragraph::new(line).style(style), r);
+    }
+    // what the selected row is, what can be done, and warnings
+    let mut lines: Vec<Line> = Vec::new();
+    match rows.get(sel) {
+        Some(KmRow::Preset) => {
+            lines.push(Line::styled("Keymap preset", Style::new().bold()));
+            lines.push(Line::raw("←/→ or Enter switches preset."));
+            lines.push(Line::raw("n  save as a new preset"));
+            lines.push(Line::raw("R  reset a shipped preset"));
+            lines.push(Line::raw("d  delete one of yours"));
+        }
+        Some(KmRow::Binding(ctx, action)) => {
+            lines.push(Line::styled(action.describe(), Style::new().bold()));
+            lines.push(Line::styled(
+                format!("in {} · {}", ctx.title(), action.id()),
+                Style::new().dark_gray(),
+            ));
+            lines.push(Line::raw(""));
+            if let Some(s) = &shipped {
+                let k: Vec<String> = s
+                    .keys_of(*ctx, *action)
+                    .iter()
+                    .map(|k| display_seq(k, leader))
+                    .collect();
+                lines.push(Line::from(vec![
+                    Span::raw("shipped: "),
+                    Span::styled(
+                        if k.is_empty() {
+                            "no keys".into()
+                        } else {
+                            k.join("  ")
+                        },
+                        Style::new().yellow(),
+                    ),
+                ]));
+            }
+            for k in app.keymap.keys_of(*ctx, *action) {
+                for c in app.keymap.conflicts(*ctx, *action, &k) {
+                    lines.push(Line::styled(format!("! {c}"), Style::new().red()));
+                }
+            }
+            lines.push(Line::raw(""));
+            lines.push(Line::raw("Enter  press new keys (replace)"));
+            lines.push(Line::raw("a      press keys to add"));
+            lines.push(Line::raw("i      type keys (Vim notation)"));
+            lines.push(Line::raw("d      unbind"));
+            lines.push(Line::raw("n      save the keymap as a preset"));
+        }
+        _ => {}
+    }
+    let warnings = app.keymap.warnings();
+    if !warnings.is_empty() {
+        lines.push(Line::raw(""));
+        for w in warnings {
+            lines.push(Line::styled(format!("⚠ {w}"), Style::new().red()));
+        }
+    }
+    if let Some(info) = info {
+        f.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+                Block::new()
+                    .borders(ratatui::widgets::Borders::LEFT)
+                    .border_style(Style::new().dark_gray()),
+            ),
+            info,
+        );
+    }
+}
+
+// ----- Behaviour -------------------------------------------------------------
+
+fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
+    let rows = behaviour_rows();
+    let sel = app.settings_page.bh_sel.min(rows.len() - 1);
+    let [list, _, note] = Layout::vertical([
+        Constraint::Length(rows.len() as u16),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    for (i, row) in rows.iter().enumerate().take(list.height as usize) {
+        let r = row_rect(list, i);
+        let value = app.behaviour_value(*row);
+        let label = App::behaviour_label(*row);
+        let button = matches!(row, BhRow::SaveSizes | BhRow::ResetSizes);
+        let line = if button {
+            Line::from(vec![
+                Span::raw(format!(" {label:<52} ")),
+                Span::styled("[ Enter ]", Style::new().cyan()),
+            ])
+        } else {
+            Line::from(vec![
+                Span::raw(format!(" {label:<52} ")),
+                Span::styled(format!("‹ {value} ›"), Style::new().yellow()),
+            ])
+        };
+        let on = i == sel;
+        let mut style = selected_style(on, true);
+        if app.hits.add(r, Target::SettingsRow(i)) && !on {
+            style = hover(style);
+        }
+        f.render_widget(Paragraph::new(line).style(style), r);
+    }
+    let text = vec![
+        Line::styled(
+            " ←/→ or Enter changes a value; click a selected row to change it.",
+            Style::new().dark_gray(),
+        ),
+        Line::styled(
+            " The leader and tab position apply now; the rest are how the studio starts.",
+            Style::new().dark_gray(),
+        ),
+    ];
+    f.render_widget(Paragraph::new(text), note);
+}
+
+// ----- History ---------------------------------------------------------------
+
+fn draw_history(f: &mut Frame, app: &mut App, area: Rect) {
+    let narrow = area.width < 110;
+    let (files, versions, preview) = if narrow {
+        let [top, prev] =
+            Layout::vertical([Constraint::Percentage(40), Constraint::Min(4)]).areas(area);
+        let [fl, vl] = Layout::horizontal([Constraint::Length(18), Constraint::Min(0)]).areas(top);
+        (fl, vl, prev)
+    } else {
+        let [fl, vl, prev] = Layout::horizontal([
+            Constraint::Length(18),
+            Constraint::Length(52),
+            Constraint::Min(0),
+        ])
+        .areas(area);
+        (fl, vl, prev)
+    };
+    let focus = app.settings_page.hist_focus;
+
+    // files
+    let block = Block::bordered()
+        .title(" Files ")
+        .border_style(if focus == HistFocus::Files {
+            Style::new().yellow()
+        } else {
+            Style::new().dark_gray()
+        });
+    let inner = block.inner(files);
+    f.render_widget(block, files);
+    for (i, name) in FILES.iter().enumerate().take(inner.height as usize) {
+        let r = row_rect(inner, i);
+        let on = i == app.settings_page.hist_file;
+        let mut style = selected_style(on, focus == HistFocus::Files);
+        if app.hits.add(r, Target::HistFile(i)) && !(on && focus == HistFocus::Files) {
+            style = hover(style);
+        }
+        f.render_widget(Paragraph::new(format!(" {name}")).style(style), r);
+    }
+
+    // versions
+    let list = app.versions();
+    let n = list.len();
+    app.settings_page.hist_sel = app.settings_page.hist_sel.min(n.saturating_sub(1));
+    let sel = app.settings_page.hist_sel;
+    let file = FILES[app.settings_page.hist_file];
+    let block = Block::bordered()
+        .title(format!(" Versions of {file} ({n}) "))
+        .title_bottom(" n name the current file ")
+        .border_style(if focus == HistFocus::Versions {
+            Style::new().yellow()
+        } else {
+            Style::new().dark_gray()
+        });
+    let inner = block.inner(versions);
+    f.render_widget(block, versions);
+    if list.is_empty() {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::raw(" No earlier versions yet."),
+                Line::styled(
+                    " Every save keeps the file as it was.",
+                    Style::new().dark_gray(),
+                ),
+            ]),
+            inner,
+        );
+    }
+    let mut scroll = app.settings_page.hist_scroll;
+    follow(&mut scroll, sel, inner.height as usize);
+    app.settings_page.hist_scroll = scroll;
+    let w = inner.width as usize;
+    for (i, (_, s)) in list
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(inner.height as usize)
+    {
+        let r = row_rect(inner, i - scroll);
+        let when = s.when.get(5..16).unwrap_or(&s.when).to_string();
+        let (text, st) = match &s.name {
+            Some(name) => (format!("★ {name}"), Style::new().yellow().bold()),
+            None => (s.summary.clone(), Style::new()),
+        };
+        let line = Line::from(vec![
+            Span::styled(format!(" {when}  "), Style::new().dark_gray()),
+            Span::styled(truncate(&text, w.saturating_sub(15)), st),
+        ]);
+        let on = i == sel;
+        let mut style = selected_style(on, focus == HistFocus::Versions);
+        if app.hits.add(r, Target::SettingsRow(i)) && !(on && focus == HistFocus::Versions) {
+            style = hover(style);
+        }
+        f.render_widget(Paragraph::new(line).style(style), r);
+    }
+
+    // preview: the selected version in place of what's there now
+    let all = app.settings_page.show_all;
+    let title = match list.get(sel) {
+        Some((_, s)) => format!(" Restore preview: now → {} ", s.when),
+        None => " Restore preview ".into(),
+    };
+    let block = Block::bordered()
+        .title(title)
+        .title_bottom(format!(
+            " r restore   A {}   PgUp/PgDn scroll ",
+            if all {
+                "only differences"
+            } else {
+                "everything"
+            }
+        ))
+        .border_style(Style::new().dark_gray());
+    let inner = block.inner(preview);
+    f.render_widget(block, preview);
+    app.hits.add(inner, Target::SettingsDiff);
+    if list.is_empty() {
+        return;
+    }
+    let view = app.diff_view();
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some((now, then)) = &view.palette {
+        let strip = |label: &str, cs: &[(String, Rgb)]| {
+            let mut spans = vec![Span::styled(
+                format!(" {label:<9}"),
+                Style::new().dark_gray(),
+            )];
+            spans.extend(cs.iter().map(|(_, c)| colour_span(*c, "██")));
+            Line::from(spans)
+        };
+        if !then.is_empty() || !now.is_empty() {
+            lines.push(Line::styled(
+                format!(" \"{}\" ", app.name),
+                Style::new().bold(),
+            ));
+            lines.push(strip("now", now));
+            lines.push(strip("selected", then));
+            lines.push(Line::raw(""));
+        }
+    }
+    if view.lines.is_empty() {
+        lines.push(Line::styled(" Same as now.", Style::new().dark_gray()));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(" changed ", Style::new().black().on_yellow()),
+            Span::styled(" now → selected   ", Style::new().dark_gray()),
+            Span::styled("+ ", Style::new().green()),
+            Span::styled("restoring adds   ", Style::new().dark_gray()),
+            Span::styled("- ", Style::new().red()),
+            Span::styled("restoring removes", Style::new().dark_gray()),
+        ]));
+    }
+    let head = lines.len();
+    let body_h = (inner.height as usize).saturating_sub(head);
+    let max_scroll = view.lines.len().saturating_sub(body_h);
+    app.settings_page.diff_scroll = app.settings_page.diff_scroll.min(max_scroll);
+    let scroll = app.settings_page.diff_scroll;
+    for l in view.lines.iter().skip(scroll).take(body_h) {
+        let pad = |d: usize| "  ".repeat(d + 1);
+        lines.push(match l {
+            DiffLine::Head { depth, key } => {
+                Line::styled(format!("{}{key}", pad(*depth)), Style::new().bold())
+            }
+            DiffLine::Same { depth, key, value } => {
+                let mut s = vec![Span::raw(format!("{}{key}: ", pad(*depth)))];
+                s.extend(value_spans(value, Style::new()));
+                Line::from(s)
+            }
+            DiffLine::Changed {
+                depth,
+                key,
+                now,
+                then,
+            } => {
+                let mut s = vec![Span::styled(
+                    format!("{}{key}: ", pad(*depth)),
+                    Style::new().black().on_yellow(),
+                )];
+                s.extend(value_spans(
+                    now,
+                    Style::new().dark_gray().add_modifier(Modifier::CROSSED_OUT),
+                ));
+                s.push(Span::raw(" → "));
+                s.extend(value_spans(then, Style::new().yellow().bold()));
+                Line::from(s)
+            }
+            DiffLine::Added { depth, key, value } => {
+                let mut s = vec![Span::styled(
+                    format!("{}+ {key}: ", pad(*depth)),
+                    Style::new().green(),
+                )];
+                s.extend(value_spans(value, Style::new().green()));
+                Line::from(s)
+            }
+            DiffLine::Removed { depth, key, value } => {
+                let mut s = vec![Span::styled(
+                    format!("{}- {key}: ", pad(*depth)),
+                    Style::new().red(),
+                )];
+                s.extend(value_spans(
+                    value,
+                    Style::new().red().add_modifier(Modifier::CROSSED_OUT),
+                ));
+                Line::from(s)
+            }
+        });
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        s.chars().take(n.saturating_sub(1)).collect::<String>() + "…"
+    }
+}

@@ -178,6 +178,8 @@ pub enum Context {
     Colours,
     ColourList,
     Picker,
+    /// The Settings page (Keymaps, Behaviour, History tabs).
+    Settings,
     /// Resize mode (`<leader>r`): keys move the focused pane's edges.
     Resize,
     /// The fonts column (roles and list)
@@ -187,7 +189,7 @@ pub enum Context {
 }
 
 impl Context {
-    pub const ALL: [Context; 8] = [
+    pub const ALL: [Context; 9] = [
         Context::Global,
         Context::Colours,
         Context::ColourList,
@@ -195,6 +197,7 @@ impl Context {
         Context::Fonts,
         Context::FontRoles,
         Context::FontList,
+        Context::Settings,
         Context::Resize,
     ];
 
@@ -208,6 +211,7 @@ impl Context {
             Context::Fonts => "fonts",
             Context::FontRoles => "font-roles",
             Context::FontList => "font-list",
+            Context::Settings => "settings",
             Context::Resize => "resize",
         }
     }
@@ -225,6 +229,7 @@ impl Context {
             Context::Fonts => "Fonts",
             Context::FontRoles => "Font roles",
             Context::FontList => "Font list",
+            Context::Settings => "Settings page",
             Context::Resize => "Resize mode",
         }
     }
@@ -248,6 +253,16 @@ pub enum Action {
     PaneDown,
     ResizeMode,
     ResetSizes,
+    UndoConfig,
+    TabNext,
+    TabPrev,
+    Add,
+    Delete,
+    Restore,
+    SaveNamed,
+    ResetPreset,
+    ToggleAll,
+    EditText,
     PreviewCycle,
     SavePalette,
     SaveFonts,
@@ -308,6 +323,16 @@ pub fn all_actions() -> Vec<Action> {
         A::PaneDown,
         A::ResizeMode,
         A::ResetSizes,
+        A::UndoConfig,
+        A::TabNext,
+        A::TabPrev,
+        A::Add,
+        A::Delete,
+        A::Restore,
+        A::SaveNamed,
+        A::ResetPreset,
+        A::ToggleAll,
+        A::EditText,
         A::PreviewCycle,
         A::SavePalette,
         A::SaveFonts,
@@ -385,6 +410,16 @@ impl Action {
             A::PaneDown => "pane-down",
             A::ResizeMode => "resize-mode",
             A::ResetSizes => "reset-sizes",
+            A::UndoConfig => "undo-config-change",
+            A::TabNext => "tab-next",
+            A::TabPrev => "tab-previous",
+            A::Add => "add",
+            A::Delete => "delete",
+            A::Restore => "restore",
+            A::SaveNamed => "save-named",
+            A::ResetPreset => "reset-preset",
+            A::ToggleAll => "toggle-all",
+            A::EditText => "edit-as-text",
             A::PreviewCycle => "preview-cycle",
             A::SavePalette => "save-palette",
             A::SaveFonts => "save-fonts",
@@ -462,6 +497,16 @@ impl Action {
             Action::PaneDown => "pane below".into(),
             Action::ResizeMode => "resize panes (h/j/k/l move the edges)".into(),
             Action::ResetSizes => "pane sizes back to the defaults".into(),
+            Action::UndoConfig => "undo the last config change (again: redo)".into(),
+            Action::TabNext => "next tab".into(),
+            Action::TabPrev => "previous tab".into(),
+            Action::Add => "add a key to the action".into(),
+            Action::Delete => "unbind / delete".into(),
+            Action::Restore => "restore this version".into(),
+            Action::SaveNamed => "save under a name".into(),
+            Action::ResetPreset => "reset the preset to the shipped keys".into(),
+            Action::ToggleAll => "only differences / everything".into(),
+            Action::EditText => "type the keys (Vim notation)".into(),
             Action::PreviewCycle => "type into the preview / next window / back".into(),
             Action::SavePalette => "save palette".into(),
             Action::SaveFonts => "save font preset".into(),
@@ -730,6 +775,106 @@ impl Keymap {
         (km, warnings)
     }
 
+    /// An action's key sequences in a context.
+    pub fn keys_of(&self, ctx: Context, action: Action) -> Vec<Vec<Key>> {
+        self.bindings
+            .iter()
+            .filter(|b| b.context == ctx && b.action == action)
+            .map(|b| b.keys.clone())
+            .collect()
+    }
+
+    /// Replaces an action's keys in a context (none: deliberately unbound).
+    pub fn set_keys(&mut self, ctx: Context, action: Action, seqs: Vec<Vec<Key>>) {
+        self.bindings
+            .retain(|b| !(b.context == ctx && b.action == action));
+        if seqs.is_empty() {
+            self.unbound.insert((ctx, action));
+        } else {
+            self.unbound.remove(&(ctx, action));
+        }
+        for keys in seqs {
+            self.bindings.push(Binding {
+                context: ctx,
+                keys,
+                action,
+            });
+        }
+    }
+
+    /// The same keymap with another leader: sequences written with
+    /// `<leader>` follow it.
+    pub fn with_leader(&self, leader: Key) -> Keymap {
+        let mut km = self.clone();
+        km.leader = leader;
+        for b in &mut km.bindings {
+            if let Ok(keys) = Key::parse_seq(&display_seq(&b.keys, self.leader), leader) {
+                b.keys = keys;
+            }
+        }
+        km
+    }
+
+    /// Bindings that would clash with `keys` for `action` in `ctx`: the same
+    /// keys for another action in the same context, or (in contexts that are
+    /// active together) one sequence starting the other, which can't work
+    /// without a timeout.
+    pub fn conflicts(&self, ctx: Context, action: Action, keys: &[Key]) -> Vec<String> {
+        let together = |a: Context, b: Context| {
+            use Context as C;
+            a == b
+                || (a == C::Global && b != C::Resize)
+                || (b == C::Global && a != C::Resize)
+                || matches!(
+                    (a, b),
+                    (C::Colours, C::ColourList | C::Picker)
+                        | (C::ColourList | C::Picker, C::Colours)
+                        | (C::Fonts, C::FontRoles | C::FontList)
+                        | (C::FontRoles | C::FontList, C::Fonts)
+                )
+        };
+        let mut out = Vec::new();
+        for b in self
+            .bindings
+            .iter()
+            .filter(|b| !(b.context == ctx && b.action == action))
+        {
+            let same = b.context == ctx && b.keys == keys;
+            let prefix = together(b.context, ctx)
+                && b.keys != keys
+                && (b.keys.starts_with(keys) || keys.starts_with(&b.keys));
+            if same || prefix {
+                out.push(format!(
+                    "{} {} {} ({})",
+                    display_seq(&b.keys, self.leader),
+                    if same { "is also" } else { "overlaps" },
+                    b.action.describe(),
+                    b.context.title()
+                ));
+            }
+        }
+        out
+    }
+
+    /// Things to know about the whole keymap.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self
+            .keys_of(Context::Global, Action::PreviewCycle)
+            .is_empty()
+        {
+            out.push("nothing gets you out of a preview window (preview-cycle has no key)".into());
+        }
+        if self
+            .bindings
+            .iter()
+            .any(|b| b.keys.iter().any(|k| k.mods.contains(KeyModifiers::ALT)))
+        {
+            out.push("Alt is i3's $mod: i3 takes Alt+key combinations first".into());
+        }
+        out
+    }
+
     /// The presets that ship with the studio.
     pub fn builtin() -> Vec<Keymap> {
         vec![Keymap::vim()]
@@ -754,6 +899,28 @@ impl Keymap {
             (C::Global, A::Panel(6), &["<leader>6"]),
             (C::Global, A::Panel(7), &["<leader>7"]),
             (C::Global, A::ResizeMode, &["<leader>r"]),
+            (C::Global, A::UndoConfig, &["<leader>u"]),
+            (C::Settings, A::Up, &["k", "<Up>"]),
+            (C::Settings, A::Down, &["j", "<Down>"]),
+            (C::Settings, A::Left, &["h", "<Left>"]),
+            (C::Settings, A::Right, &["l", "<Right>"]),
+            (C::Settings, A::Top, &["g", "<Home>"]),
+            (C::Settings, A::Bottom, &["G", "<End>"]),
+            (C::Settings, A::PageUp, &["<PageUp>"]),
+            (C::Settings, A::PageDown, &["<PageDown>"]),
+            (C::Settings, A::Confirm, &["<CR>"]),
+            (C::Settings, A::Back, &["<Esc>"]),
+            (C::Settings, A::FocusNext, &["<Tab>"]),
+            (C::Settings, A::FocusPrev, &["<S-Tab>"]),
+            (C::Settings, A::TabNext, &["]"]),
+            (C::Settings, A::TabPrev, &["["]),
+            (C::Settings, A::Add, &["a"]),
+            (C::Settings, A::Delete, &["d", "<Del>"]),
+            (C::Settings, A::Restore, &["r"]),
+            (C::Settings, A::SaveNamed, &["n"]),
+            (C::Settings, A::ResetPreset, &["R"]),
+            (C::Settings, A::ToggleAll, &["A"]),
+            (C::Settings, A::EditText, &["i"]),
             (C::Resize, A::Left, &["h", "<Left>"]),
             (C::Resize, A::Right, &["l", "<Right>"]),
             (C::Resize, A::Up, &["k", "<Up>"]),
@@ -933,7 +1100,7 @@ mod tests {
             .collect();
         assert_eq!(
             next,
-            ["1", "2", "3", "4", "5", "6", "7", "a", "f", "r", "s"]
+            ["1", "2", "3", "4", "5", "6", "7", "a", "f", "r", "s", "u"]
         );
         assert_eq!(
             km.key_for(&roles, Action::SaveFonts).as_deref(),
@@ -971,5 +1138,51 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    #[test]
+    fn set_keys_leader_change_and_conflicts() {
+        let mut km = Keymap::vim();
+        let l = km.leader;
+        let seq = |s: &str, l: Key| Key::parse_seq(s, l).unwrap();
+        km.set_keys(Context::Global, Action::Quit, vec![seq("Q", l)]);
+        assert_eq!(km.keys_of(Context::Global, Action::Quit), vec![seq("Q", l)]);
+        km.set_keys(Context::Colours, Action::Undo, vec![]);
+        assert!(km.unbound.contains(&(Context::Colours, Action::Undo)));
+        // a new leader moves every <leader> sequence with it
+        let comma = Key::new(KeyCode::Char(','), KeyModifiers::NONE);
+        let km2 = km.with_leader(comma);
+        assert_eq!(
+            km2.keys_of(Context::Global, Action::SavePalette),
+            vec![seq(",sp", comma)]
+        );
+        assert_eq!(
+            km2.keys_of(Context::Global, Action::Quit),
+            vec![seq("Q", comma)]
+        );
+        // y is copy-hex in Colours; binding pin to y clashes, binding it to Space overlaps the leader
+        assert_eq!(
+            km.conflicts(Context::Colours, Action::Pin, &seq("y", l))
+                .len(),
+            1
+        );
+        assert!(
+            !km.conflicts(Context::Colours, Action::Pin, &seq(" ", l))
+                .is_empty()
+        );
+        // the font list's n deliberately hides the global n: not a conflict
+        assert!(
+            km.conflicts(Context::FontList, Action::Filter('n'), &seq("n", l))
+                .is_empty()
+        );
+        assert!(km.warnings().is_empty());
+        km.set_keys(Context::Global, Action::PreviewCycle, vec![]);
+        km.set_keys(Context::Global, Action::Help, vec![seq("<M-h>", l)]);
+        assert_eq!(km.warnings().len(), 2);
     }
 }
