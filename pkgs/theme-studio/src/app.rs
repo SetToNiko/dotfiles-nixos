@@ -133,6 +133,13 @@ pub enum Overlay {
         question: String,
         then: crate::settings::Deferred,
     },
+    /// A dropdown list hanging under `at`: the preview's text kind (0) or
+    /// language (1).
+    Menu {
+        menu: u8,
+        sel: usize,
+        at: Rect,
+    },
 }
 
 pub struct App {
@@ -1671,6 +1678,22 @@ impl App {
         let overlay = std::mem::replace(&mut self.overlay, Overlay::None);
         self.overlay = match overlay {
             Overlay::Help => Overlay::None,
+            Overlay::Menu { menu, mut sel, at } => {
+                let last = crate::fonts_preview::menu_items(menu).len() - 1;
+                let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+                match k.code {
+                    KeyCode::Esc => return,
+                    KeyCode::Enter => return self.choose_menu(menu, sel),
+                    KeyCode::Down | KeyCode::Char('j') if !ctrl => sel = (sel + 1).min(last),
+                    KeyCode::Char('n') if ctrl => sel = (sel + 1).min(last),
+                    KeyCode::Up | KeyCode::Char('k') if !ctrl => sel = sel.saturating_sub(1),
+                    KeyCode::Char('p') if ctrl => sel = sel.saturating_sub(1),
+                    KeyCode::Home | KeyCode::Char('g') => sel = 0,
+                    KeyCode::End | KeyCode::Char('G') => sel = last,
+                    _ => {}
+                }
+                Overlay::Menu { menu, sel, at }
+            }
             // Settings page pop-ups edit the draft (see draft.rs)
             Overlay::ChooseKey { row, sel, original } => {
                 self.with_draft(|app| app.choose_key_key(row, sel, original, k));
@@ -1932,6 +1955,12 @@ impl App {
         // With a pop-up open (other than "copy from"), only the pop-up responds.
         let popup = !matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. });
         if popup && !matches!(target, Some((_, T::OverlayRow(_) | T::ConfirmChoice(_)))) {
+            // a click outside a dropdown closes it
+            if matches!(self.overlay, Overlay::Menu { .. })
+                && matches!(m.kind, MouseEventKind::Down(_))
+            {
+                self.overlay = Overlay::None;
+            }
             return;
         }
         match m.kind {
@@ -1950,6 +1979,7 @@ impl App {
                     Some((_, T::DlRow(_))) => {
                         self.run_downloads(if d > 0 { Action::Down } else { Action::Up })
                     }
+                    Some((_, T::DlPreview)) => self.preview_scroll(d),
                     _ => {}
                 }
             }
@@ -2115,6 +2145,9 @@ impl App {
                     } else {
                         *sel = i;
                     }
+                } else if let Overlay::Menu { menu, .. } = self.overlay {
+                    // one click chooses
+                    self.choose_menu(menu, i);
                 }
             }
             T::SettingsTab(_)
@@ -2127,6 +2160,8 @@ impl App {
             T::DlTab(_) | T::DlRow(_) | T::DlChip(_) | T::DlSearch | T::DlButton(_) => {
                 self.dl_click(t)
             }
+            T::PreviewMenu(n) => self.open_menu(n, r),
+            T::DlPreview => {}
             T::SettingsButton('s') => self.settings_save(),
             T::SettingsButton(_) => self.settings_discard(),
             T::ConfirmChoice(c) => {
@@ -3782,11 +3817,47 @@ mod tests {
         assert!(render(&mut app, 160, 45).contains("Install"));
         // the preview: Roboto Mono shows code; t / L / + change it
         let screen = render(&mut app, 160, 45);
-        assert!(screen.contains("Preview · code (Rust) · 12pt"), "{screen}");
+        assert!(screen.contains("Preview  Code ▾  Rust ▾  12pt"), "{screen}");
         press(&mut app, "L+");
-        assert!(render(&mut app, 160, 45).contains("Preview · code (Python) · 13pt"));
+        assert!(render(&mut app, 160, 45).contains("Preview  Code ▾  Python ▾  13pt"));
+        // > pages through the code, < comes back
+        press(&mut app, ">");
+        let pv = app.dl.preview.as_ref().unwrap();
+        assert!(pv.page > 0 && pv.page == pv.step, "{} {}", pv.page, pv.step);
+        press(&mut app, "<");
+        assert_eq!(app.dl.preview.as_ref().unwrap().page, 0);
+        // the wheel over the preview moves three lines
+        render(&mut app, 160, 45);
+        let r = app.hits.rect_of(crate::hit::Target::DlPreview).unwrap();
+        mouse(&mut app, MouseEventKind::ScrollDown, r.x + 2, r.y + 2);
+        assert_eq!(app.dl.preview.as_ref().unwrap().page, 3);
+        // the language dropdown: a click opens it on the current one,
+        // a click on a row chooses (and starts at the top)
+        click_on(&mut app, crate::hit::Target::PreviewMenu(1));
+        assert!(matches!(
+            app.overlay,
+            Overlay::Menu {
+                menu: 1,
+                sel: 1,
+                ..
+            }
+        ));
+        assert!(render(&mut app, 160, 45).contains(" Haskell "));
+        click_on(&mut app, crate::hit::Target::OverlayRow(10));
+        assert_eq!(app.dl.preview.as_ref().unwrap().lang, 10);
+        assert_eq!(app.dl.preview.as_ref().unwrap().page, 0);
+        assert!(render(&mut app, 160, 45).contains("Code ▾  Haskell ▾"));
+        // the kind dropdown: keys move, Enter chooses; a click outside closes
+        click_on(&mut app, crate::hit::Target::PreviewMenu(0));
+        press(&mut app, "j\n");
+        assert!(matches!(app.overlay, Overlay::None));
+        assert!(render(&mut app, 160, 45).contains("Preview  Icons ▾  13pt"));
+        click_on(&mut app, crate::hit::Target::PreviewMenu(0));
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 1, 1);
+        assert!(matches!(app.overlay, Overlay::None));
+        app.dl.preview.as_mut().unwrap().kind = Some(crate::samples::Kind::Code);
         press(&mut app, "t");
-        assert!(render(&mut app, 160, 45).contains("Preview · icons"));
+        assert!(render(&mut app, 160, 45).contains("Preview  Icons"));
         // a failed fetch says so
         app.dl
             .preview

@@ -22,9 +22,12 @@ pub struct FontPreview {
     /// The text shown; None: the font's default (code, icons or prose).
     pub kind: Option<Kind>,
     pub lang: usize,
-    /// Prose: the first paragraph shown, and where the next page starts.
+    /// Prose: the first paragraph shown; code: the first line. And where
+    /// the next page starts.
     pub page: usize,
     pub next_page: usize,
+    /// Code: lines a page moves by (from the pane's height).
+    pub step: usize,
     /// Points.
     pub size: u32,
     /// Fetched fonts: id → the family name to draw with (or what failed).
@@ -52,6 +55,7 @@ impl FontPreview {
             lang: 0,
             page: 0,
             next_page: 0,
+            step: 10,
             size: 12,
             families: HashMap::new(),
             fetching: HashSet::new(),
@@ -154,7 +158,15 @@ impl App {
             palette: &palette,
         };
         let markup = match kind {
-            Kind::Code => samples::code(&st, pv.lang),
+            Kind::Code => {
+                // about as many lines as fit, less two kept from the last page
+                let px = (pv.size * dpi / 72).max(6);
+                let lines = ((rows * cell_h) / (px * 12 / 10).max(1)) as usize;
+                pv.step = lines.saturating_sub(2).max(1);
+                let last = samples::code_lines(pv.lang).saturating_sub(1);
+                pv.page = pv.page.min(last);
+                samples::code(&st, pv.lang, pv.page)
+            }
             Kind::Icons => samples::icons(&st),
             Kind::Readme => samples::readme(&st),
             Kind::Prose => {
@@ -189,9 +201,23 @@ impl App {
                 pv.kind = Some(KINDS[(i + 1) % KINDS.len()].0);
                 pv.page = 0;
             }
-            Action::PreviewLang => pv.lang = (pv.lang + 1) % LANGS.len(),
-            Action::PreviewNext => pv.page = pv.next_page.max(pv.page),
-            Action::PreviewPrev => pv.page = pv.page.saturating_sub(4),
+            Action::PreviewLang => {
+                pv.lang = (pv.lang + 1) % LANGS.len();
+                pv.page = 0;
+            }
+            Action::PreviewNext => {
+                let code = sel.as_ref().is_some_and(|e| pv.kind_for(e) == Kind::Code);
+                pv.page = if code {
+                    (pv.page + pv.step).min(samples::code_lines(pv.lang).saturating_sub(1))
+                } else {
+                    pv.next_page.max(pv.page)
+                };
+            }
+            Action::PreviewPrev => {
+                let code = sel.as_ref().is_some_and(|e| pv.kind_for(e) == Kind::Code);
+                // prose goes back a few paragraphs (pages aren't kept)
+                pv.page = pv.page.saturating_sub(if code { pv.step } else { 4 });
+            }
             Action::SizeUp => pv.size = (pv.size + 1).min(48),
             Action::SizeDown => pv.size = pv.size.saturating_sub(1).max(6),
             Action::PreviewFetch => match sel {
@@ -210,6 +236,42 @@ impl App {
             _ => return false,
         }
         true
+    }
+
+    /// The wheel over the preview: code moves three lines, prose a page.
+    pub fn preview_scroll(&mut self, d: i32) {
+        let code = self
+            .dl_selected()
+            .is_some_and(|e| self.pv().kind_for(&e) == Kind::Code);
+        if !code {
+            self.preview_action(if d > 0 {
+                Action::PreviewNext
+            } else {
+                Action::PreviewPrev
+            });
+            return;
+        }
+        let pv = self.pv();
+        let last = samples::code_lines(pv.lang).saturating_sub(1);
+        pv.page = if d > 0 {
+            (pv.page + 3).min(last)
+        } else {
+            pv.page.saturating_sub(3)
+        };
+    }
+
+    /// The text kind chosen from the title's dropdown.
+    pub fn set_preview_kind(&mut self, kind: Kind) {
+        let pv = self.pv();
+        pv.kind = Some(kind);
+        pv.page = 0;
+    }
+
+    /// The language chosen from the title's dropdown.
+    pub fn set_preview_lang(&mut self, lang: usize) {
+        let pv = self.pv();
+        pv.lang = lang % LANGS.len();
+        pv.page = 0;
     }
 
     /// What the preview pane says when there's no image.
@@ -235,6 +297,51 @@ impl App {
                 )
             }
             _ => "drawing…".into(),
+        }
+    }
+}
+
+/// The choices of the preview's title dropdowns: 0 the text kind, 1 the
+/// language.
+pub fn menu_items(menu: u8) -> Vec<&'static str> {
+    if menu == 0 {
+        KINDS.iter().map(|(_, l)| kind_label(l)).collect()
+    } else {
+        LANGS.iter().map(|l| l.0).collect()
+    }
+}
+
+/// A text kind as the dropdown shows it ("Code", "README").
+pub fn kind_label(l: &str) -> &'static str {
+    match l {
+        "code" => "Code",
+        "icons" => "Icons",
+        "prose" => "Prose",
+        _ => "README",
+    }
+}
+
+impl App {
+    /// Opens a title dropdown under `at`, on the current choice.
+    pub fn open_menu(&mut self, menu: u8, at: ratatui::layout::Rect) {
+        let sel = self.dl_selected();
+        let pv = self.pv();
+        let sel = if menu == 0 {
+            let cur = sel.map_or(Kind::Code, |e| pv.kind_for(&e));
+            KINDS.iter().position(|(k, _)| *k == cur).unwrap_or(0)
+        } else {
+            pv.lang
+        };
+        self.overlay = crate::app::Overlay::Menu { menu, sel, at };
+    }
+
+    /// A choice from a title dropdown.
+    pub fn choose_menu(&mut self, menu: u8, i: usize) {
+        self.overlay = crate::app::Overlay::None;
+        if menu == 0 {
+            self.set_preview_kind(KINDS[i % KINDS.len()].0);
+        } else {
+            self.set_preview_lang(i);
         }
     }
 }

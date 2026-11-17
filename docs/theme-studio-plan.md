@@ -952,7 +952,7 @@ download work.
 - **Embedded terminals** (nvim, shell/yazi): ✅ resize at once. A PTY
   resize is cheap and nvim redraws on its own, so they don't wait.
 
-### 3. Fuller code previews, and dropdowns
+### 3. Fuller code previews, and dropdowns ✅
 
 - **More content:** each language's sample grows to a realistic file
   (~40–60 lines: imports, a type, a few functions, comments, strings,
@@ -1008,7 +1008,9 @@ Each step is committed separately and keeps the studio working.
 3. ✅ The palette dropdown in the pane title, with live preview. A click on
    the name or `<leader>op` opens it (the list has no keyboard focus of its
    own); off the Main page it's centred as before.
-4. Fuller code samples, the new languages, scrolling, the two dropdowns.
+4. ✅ Fuller code samples (51–66 lines, in `src/samples/code/`), the new
+   languages, scrolling (`<` / `>` a page, the wheel three lines), the two
+   dropdowns (opened with a click; `t` and `L` still cycle).
 5. Previews moved to `~/.local/share`, Nerd Fonts kept as Regular only,
    the clear button, then prefetching.
 6. Then the tournament (Phase 7 step 4).

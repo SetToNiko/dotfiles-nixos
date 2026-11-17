@@ -1857,6 +1857,39 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             ];
             popup(f, r, "Sure?", lines);
         }
+        Overlay::Menu { menu, sel, at } => {
+            // hangs under the title text that opened it
+            let items = crate::fonts_preview::menu_items(*menu);
+            let w = (items.iter().map(|s| s.chars().count()).max().unwrap_or(4) as u16 + 4)
+                .min(area.width);
+            let h = (items.len() as u16 + 2).min(area.bottom().saturating_sub(at.y + 1));
+            let r = Rect {
+                x: at.x.saturating_sub(1).min(area.right().saturating_sub(w)),
+                y: at.y + 1,
+                width: w,
+                height: h,
+            };
+            let mut lines = Vec::new();
+            for (i, item) in items.iter().enumerate().take(h.saturating_sub(2) as usize) {
+                let rr = Rect::new(r.x + 1, r.y + 1 + i as u16, r.width.saturating_sub(2), 1);
+                let style = if i == *sel {
+                    Style::new().reversed()
+                } else {
+                    Style::new()
+                };
+                let line = Line::styled(format!(" {item:<width$} ", width = w as usize - 4), style);
+                lines.push(if app.hits.add(rr, Target::OverlayRow(i)) {
+                    crate::hit::hover_line(line, 0)
+                } else {
+                    line
+                });
+            }
+            f.render_widget(Clear, r);
+            f.render_widget(
+                Paragraph::new(lines).block(Block::bordered().border_style(Style::new().yellow())),
+                r,
+            );
+        }
         Overlay::Open {
             filter,
             sel,

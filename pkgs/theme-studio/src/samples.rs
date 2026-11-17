@@ -21,63 +21,28 @@ pub const KINDS: [(Kind, &str); 4] = [
     (Kind::Readme, "README"),
 ];
 
-/// (name, keywords, line comment, code)
-pub const LANGS: [(&str, &[&str], &str, &str); 7] = [
+/// (name, keywords, line comment, code). The code is in `samples/code/`,
+/// realistic files of 40–60 lines.
+pub const LANGS: [(&str, &[&str], &str, &str); 13] = [
     (
         "Rust",
         &[
             "fn", "let", "mut", "if", "else", "match", "for", "in", "return", "pub", "struct",
-            "impl", "use", "Some", "None", "Ok", "Err", "self", "true", "false",
+            "enum", "impl", "use", "Some", "None", "Ok", "Err", "self", "Self", "true", "false",
+            "continue", "as",
         ],
         "//",
-        r#"use std::collections::HashMap;
-
-/// Counts how often each word appears.
-pub fn word_counts(text: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for word in text.split_whitespace() {
-        let w = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-        *counts.entry(w).or_insert(0) += 1;
-    }
-    counts
-}
-
-fn main() {
-    let counts = word_counts("the quick brown fox jumps over the lazy dog");
-    match counts.get("the") {
-        Some(n) if *n > 1 => println!("'the' appears {n} times (0O 1lI)"),
-        _ => println!("rare"),
-    }
-}"#,
+        include_str!("samples/code/rust.rs"),
     ),
     (
         "Python",
         &[
             "def", "class", "return", "if", "elif", "else", "for", "in", "import", "from", "with",
-            "as", "None", "True", "False", "and", "or", "not", "self",
+            "as", "None", "True", "False", "and", "or", "not", "self", "try", "except", "raise",
+            "pass", "lambda",
         ],
         "#",
-        r#"from dataclasses import dataclass
-from pathlib import Path
-
-
-@dataclass
-class Palette:
-    name: str
-    colours: dict[str, str]
-
-    def darkest(self) -> str:
-        """The colour with the lowest brightness."""
-        return min(self.colours.values(), key=lambda c: int(c[1:], 16))
-
-
-def load(path: Path) -> list[Palette]:
-    # one palette per line: name=#rrggbb,#rrggbb
-    out = []
-    for line in path.read_text().splitlines():
-        name, _, rest = line.partition("=")
-        out.append(Palette(name, dict(enumerate(rest.split(",")))))
-    return out"#,
+        include_str!("samples/code/python.py"),
     ),
     (
         "TypeScript",
@@ -101,85 +66,35 @@ def load(path: Path) -> list[Palette]:
             "true",
             "false",
             "null",
+            "class",
+            "extends",
+            "throw",
+            "try",
+            "catch",
+            "public",
+            "void",
+            "as",
         ],
         "//",
-        r#"interface Font {
-  family: string;
-  weights: number[];
-  monospace: boolean;
-}
-
-export async function loadFonts(url: string): Promise<Font[]> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const fonts: Font[] = await res.json();
-  // keep the coding fonts, widest range of weights first
-  return fonts
-    .filter((f) => f.monospace)
-    .sort((a, b) => b.weights.length - a.weights.length);
-}
-
-const sample = "0O 1lI {} [] () => !== <=";
-console.log(sample.length, 0x2a, 3.14);"#,
+        include_str!("samples/code/typescript.ts"),
     ),
     (
         "Go",
         &[
             "package", "import", "func", "return", "if", "else", "for", "range", "var", "const",
-            "type", "struct", "nil", "true", "false", "defer", "go", "err",
+            "type", "struct", "nil", "true", "false", "defer", "go", "err", "map",
         ],
         "//",
-        r#"package main
-
-import (
-	"fmt"
-	"os"
-	"strings"
-)
-
-// Theme pairs a palette with a font.
-type Theme struct {
-	Palette string
-	Font    string
-}
-
-func main() {
-	themes := []Theme{{"Gruvbox", "JetBrains Mono"}, {"Nord", "Iosevka"}}
-	for i, t := range themes {
-		fmt.Printf("%d: %s / %s\n", i, t.Palette, strings.ToUpper(t.Font))
-	}
-	if len(os.Args) > 1 {
-		os.Exit(0x2a)
-	}
-}"#,
+        include_str!("samples/code/go.go"),
     ),
     (
         "C",
         &[
             "int", "char", "void", "return", "if", "else", "for", "while", "struct", "static",
-            "const", "unsigned", "sizeof", "include", "define", "NULL",
+            "const", "unsigned", "sizeof", "include", "define", "NULL", "double", "long",
         ],
         "//",
-        r#"#include <stdio.h>
-#include <string.h>
-
-#define MAX_LINE 256
-
-/* Counts the lines of a file that contain `needle`. */
-static int count_matches(FILE *f, const char *needle) {
-    char line[MAX_LINE];
-    int n = 0;
-    while (fgets(line, sizeof line, f) != NULL) {
-        if (strstr(line, needle)) n++;
-    }
-    return n;
-}
-
-int main(int argc, char **argv) {
-    if (argc < 2) return 1;
-    printf("%d matches (0O 1lI)\n", count_matches(stdin, argv[1]));
-    return 0;
-}"#,
+        include_str!("samples/code/c.c"),
     ),
     (
         "Lua",
@@ -188,48 +103,162 @@ int main(int argc, char **argv) {
             "do", "while", "nil", "true", "false", "and", "or", "not",
         ],
         "--",
-        r#"-- nvim: apply a palette's colours
-local M = {}
-
-local function hl(group, opts)
-  vim.api.nvim_set_hl(0, group, opts)
-end
-
-function M.apply(p)
-  hl("Normal", { fg = p.fg0, bg = p.bg0 })
-  hl("Comment", { fg = p.grey1, italic = true })
-  for _, name in ipairs({ "Error", "Warn", "Info" }) do
-    hl("Diagnostic" .. name, { fg = p[name:lower()] or p.red })
-  end
-  vim.notify("theme applied 0O 1lI", vim.log.levels.INFO)
-end
-
-return M"#,
+        include_str!("samples/code/lua.lua"),
     ),
     (
         "shell",
         &[
             "if", "then", "else", "fi", "for", "in", "do", "done", "while", "case", "esac",
-            "function", "local", "return", "export",
+            "function", "local", "return", "export", "set", "exit", "shift",
         ],
         "#",
-        r#"#!/usr/bin/env bash
-# Switch to the next wallpaper, every 10 minutes.
-set -euo pipefail
-dir="${XDG_PICTURES_DIR:-$HOME/Pictures}/wallpapers"
-
-next() {
-  local files=("$dir"/*.{png,jpg})
-  printf '%s\n' "${files[RANDOM % ${#files[@]}]}"
-}
-
-while true; do
-  img=$(next)
-  if [ -f "$img" ]; then
-    feh --bg-fill "$img" && echo "now: ${img##*/}"
-  fi
-  sleep 600
-done"#,
+        include_str!("samples/code/shell.sh"),
+    ),
+    (
+        "Java",
+        &[
+            "package", "import", "public", "private", "final", "class", "enum", "record", "static",
+            "void", "return", "new", "if", "throw", "throws", "try", "catch", "var", "this", "int",
+            "null", "true", "false",
+        ],
+        "//",
+        include_str!("samples/code/java.java"),
+    ),
+    (
+        "Kotlin",
+        &[
+            "package",
+            "import",
+            "class",
+            "data",
+            "sealed",
+            "interface",
+            "val",
+            "var",
+            "fun",
+            "return",
+            "if",
+            "else",
+            "when",
+            "is",
+            "in",
+            "init",
+            "private",
+            "get",
+            "while",
+            "null",
+            "true",
+            "false",
+            "it",
+        ],
+        "//",
+        include_str!("samples/code/kotlin.kt"),
+    ),
+    (
+        "Ruby",
+        &[
+            "require",
+            "class",
+            "def",
+            "end",
+            "if",
+            "unless",
+            "else",
+            "do",
+            "return",
+            "include",
+            "attr_reader",
+            "raise",
+            "rescue",
+            "nil",
+            "true",
+            "false",
+            "self",
+            "new",
+            "or",
+        ],
+        "#",
+        include_str!("samples/code/ruby.rb"),
+    ),
+    (
+        "Haskell",
+        &[
+            "module",
+            "where",
+            "import",
+            "qualified",
+            "as",
+            "data",
+            "newtype",
+            "deriving",
+            "let",
+            "in",
+            "if",
+            "then",
+            "else",
+            "do",
+            "otherwise",
+        ],
+        "--",
+        include_str!("samples/code/haskell.hs"),
+    ),
+    (
+        "SQL",
+        &[
+            "CREATE",
+            "TABLE",
+            "IF",
+            "NOT",
+            "EXISTS",
+            "INTEGER",
+            "TEXT",
+            "TIMESTAMP",
+            "PRIMARY",
+            "KEY",
+            "NULL",
+            "UNIQUE",
+            "CHECK",
+            "IN",
+            "DEFAULT",
+            "REFERENCES",
+            "ON",
+            "DELETE",
+            "CASCADE",
+            "INDEX",
+            "INSERT",
+            "INTO",
+            "VALUES",
+            "CONFLICT",
+            "DO",
+            "NOTHING",
+            "WITH",
+            "AS",
+            "SELECT",
+            "FROM",
+            "JOIN",
+            "LEFT",
+            "WHERE",
+            "AND",
+            "IS",
+            "GROUP",
+            "BY",
+            "ORDER",
+            "DESC",
+            "LIMIT",
+            "OVER",
+            "BETWEEN",
+        ],
+        "--",
+        include_str!("samples/code/sql.sql"),
+    ),
+    (
+        "HTML/CSS",
+        &[
+            "DOCTYPE", "html", "head", "body", "meta", "title", "style", "header", "main",
+            "section", "div", "p", "h1", "code", "pre", "button", "a", "media",
+        ],
+        "<!--",
+        include_str!("samples/code/html.html"),
     ),
 ];
 
@@ -271,12 +300,18 @@ impl Style<'_> {
     }
 }
 
-/// Code, highlighted: keywords, strings, numbers, comments, calls, types.
-pub fn code(st: &Style, lang: usize) -> String {
+/// How many lines a language's sample has.
+pub fn code_lines(lang: usize) -> usize {
+    LANGS[lang % LANGS.len()].3.lines().count()
+}
+
+/// Code from line `first` on, highlighted: keywords, strings, numbers,
+/// comments, calls, types.
+pub fn code(st: &Style, lang: usize, first: usize) -> String {
     let (_, keywords, comment, src) = LANGS[lang % LANGS.len()];
     let span = |k: &str, t: &str| format!("<span foreground=\"{}\">{}</span>", st.c(k), esc(t));
     let mut out = st.open();
-    for line in src.lines() {
+    for line in src.lines().skip(first) {
         let mut rest = line;
         while !rest.is_empty() {
             let c = rest.chars().next().unwrap();
@@ -498,7 +533,7 @@ mod tests {
             palette: &p,
         };
         for (lang, l) in LANGS.iter().enumerate() {
-            let m = code(&st, lang);
+            let m = code(&st, lang, 0);
             assert!(m.starts_with("<span font=\"Inter &lt;Bold&gt; 12\""));
             assert_eq!(
                 m.matches("<span").count(),
@@ -508,7 +543,7 @@ mod tests {
             );
             assert!(!m.contains("<<") && !m.contains("& "), "escaped");
         }
-        assert!(code(&st, 0).contains(">fn</span>"), "keywords coloured");
+        assert!(code(&st, 0, 0).contains(">fn</span>"), "keywords coloured");
         for m in [icons(&st), readme(&st)] {
             assert_eq!(m.matches("<span").count(), m.matches("</span>").count());
         }
@@ -543,7 +578,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("theme-studio-samples-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut texts: Vec<(String, String)> = (0..LANGS.len())
-            .map(|l| (LANGS[l].0.to_string(), code(&st, l)))
+            .map(|l| (LANGS[l].0.replace('/', "-"), code(&st, l, 0)))
             .collect();
         texts.push(("icons".into(), icons(&st)));
         texts.push(("readme".into(), readme(&st)));

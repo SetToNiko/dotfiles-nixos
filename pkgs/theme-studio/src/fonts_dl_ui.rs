@@ -86,39 +86,53 @@ pub fn draw_downloads(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
     use crate::samples::{KINDS, Kind, LANGS};
     let selected = app.dl_selected();
-    let (title, kind) = match (&selected, app.dl.preview.as_ref()) {
-        (Some(e), Some(pv)) => {
-            let kind = pv.kind_for(e);
-            let label = KINDS
-                .iter()
-                .find(|(k, _)| *k == kind)
-                .map_or("", |(_, l)| *l);
-            let lang = if kind == Kind::Code {
-                format!(" ({})", LANGS[pv.lang].0)
-            } else {
-                String::new()
-            };
-            (
-                format!(" Preview · {label}{lang} · {}pt ", pv.size),
-                Some(kind),
-            )
+    // " Preview  Code ▾  Rust ▾  12pt ": the kind and the language are
+    // dropdowns
+    let mut title: Vec<Span> = vec![" Preview ".into()];
+    let mut kind = None;
+    if let (Some(e), Some(pv)) = (&selected, app.dl.preview.as_ref()) {
+        let k = pv.kind_for(e);
+        kind = Some(k);
+        let label = KINDS
+            .iter()
+            .find(|(x, _)| *x == k)
+            .map_or("README", |(_, l)| crate::fonts_preview::kind_label(l));
+        let mut menus = vec![(0u8, format!("{label} ▾"))];
+        if k == Kind::Code {
+            menus.push((1, format!("{} ▾", LANGS[pv.lang].0)));
         }
-        _ => (" Preview ".to_string(), None),
-    };
+        let size = pv.size;
+        // the title starts after the corner
+        let mut x = area.x + 1 + title[0].width() as u16;
+        for (menu, text) in menus {
+            title.push(" ".into());
+            x += 1;
+            let w = (text.chars().count() as u16).min(area.right().saturating_sub(x));
+            let r = Rect::new(x, area.y, w, 1);
+            let base = Style::new().yellow();
+            let hovered = app.hits.add(r, Target::PreviewMenu(menu));
+            title.push(Span::styled(text, if hovered { hover(base) } else { base }));
+            x += w + 1;
+            title.push(" ".into());
+        }
+        title.push(format!(" {size}pt ").into());
+    }
     let mut hints = String::from(" t text  +/- size ");
     if kind == Some(Kind::Code) {
-        hints += " L language ";
+        hints += " L language  </> page ";
     }
     if kind == Some(Kind::Prose) {
         hints += " </> page ";
     }
     let block = Block::new()
         .borders(Borders::LEFT | Borders::TOP)
-        .title(title)
+        .title(Line::from(title))
         .title_bottom(Line::styled(hints, Style::new().dark_gray()))
         .border_style(Style::new().dark_gray());
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // the wheel scrolls the text
+    app.hits.add(inner, Target::DlPreview);
     if selected.is_none() {
         let text = if app.dl.tab == DlTab::Installed {
             " Installed: the main page's sample shows it."

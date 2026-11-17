@@ -62,12 +62,19 @@ pub enum Target {
     DlChip(u8),
     DlSearch,
     DlButton(char),
+    /// Download fonts page: the preview (the wheel scrolls it; no hover).
+    DlPreview,
+    /// The preview's title dropdowns: 0 the text kind, 1 the language.
+    PreviewMenu(u8),
 }
 
 impl Target {
     /// Gets a hover highlight (and the hand pointer).
     pub fn shows_hover(self) -> bool {
-        !matches!(self, Target::PaneBody(_) | Target::SettingsDiff)
+        !matches!(
+            self,
+            Target::PaneBody(_) | Target::SettingsDiff | Target::DlPreview
+        )
     }
 }
 
