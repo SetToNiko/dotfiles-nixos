@@ -277,6 +277,12 @@ pub enum Action {
     PreviewNext,
     PreviewPrev,
     FillFamily,
+    /// Tournament: show the fonts' names, the bracket, take a pick back.
+    TourNames,
+    TourBracket,
+    TourUndo,
+    /// Tournament results: use the font for mono (0), ui (1) or bar (2).
+    UseFor(u8),
     OpenPalette,
     OpenFonts,
     NewPalette,
@@ -360,6 +366,9 @@ pub fn all_actions() -> Vec<Action> {
         A::PreviewNext,
         A::PreviewPrev,
         A::FillFamily,
+        A::TourNames,
+        A::TourBracket,
+        A::TourUndo,
         A::OpenPalette,
         A::OpenFonts,
         A::NewPalette,
@@ -388,6 +397,7 @@ pub fn all_actions() -> Vec<Action> {
         A::Redo,
     ];
     v.extend((1..=9).map(A::Panel));
+    v.extend((0..3).map(A::UseFor));
     v.extend([
         A::FocusNext,
         A::FocusPrev,
@@ -460,6 +470,10 @@ impl Action {
             A::PreviewNext => "preview-next-page",
             A::PreviewPrev => "preview-previous-page",
             A::FillFamily => "fill-roles-from-family",
+            A::TourNames => "tournament-names",
+            A::TourBracket => "tournament-bracket",
+            A::TourUndo => "tournament-undo",
+            A::UseFor(r) => return format!("use-for-{}", crate::fonts::ROLES[r as usize % 3]),
             A::OpenPalette => "open-palette",
             A::OpenFonts => "open-font-preset",
             A::NewPalette => "new-palette",
@@ -560,6 +574,12 @@ impl Action {
             Action::PreviewNext => "preview: next page".into(),
             Action::PreviewPrev => "preview: previous page".into(),
             Action::FillFamily => "every role from this font family".into(),
+            Action::TourNames => "tournament: show / hide the fonts' names".into(),
+            Action::TourBracket => "tournament: show the bracket".into(),
+            Action::TourUndo => "tournament: take the last pick back".into(),
+            Action::UseFor(r) => {
+                format!("use the font for {}", crate::fonts::ROLES[r as usize % 3])
+            }
             Action::OpenPalette => "another palette for this theme".into(),
             Action::OpenFonts => "another font preset for this theme".into(),
             Action::NewPalette => "a new palette for this theme".into(),
@@ -1302,6 +1322,13 @@ impl Keymap {
             (C::FontList, A::Back, &["<Esc>"]),
             (C::FontList, A::Search, &["/"]),
             (C::FontList, A::FillFamily, &["F"]),
+            (C::Downloads, A::FillFamily, &["F"]),
+            (C::Downloads, A::TourNames, &["n"]),
+            (C::Downloads, A::TourBracket, &["b"]),
+            (C::Downloads, A::TourUndo, &["u"]),
+            (C::Downloads, A::UseFor(0), &["1"]),
+            (C::Downloads, A::UseFor(1), &["2"]),
+            (C::Downloads, A::UseFor(2), &["3"]),
         ];
         const CHIP_KEYS: [&str; 8] = ["m", "p", "n", "M", "P", "x", "b", "c"];
         for (i, (c, _)) in crate::fonts::CHIPS.iter().enumerate() {

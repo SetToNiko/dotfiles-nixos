@@ -66,6 +66,9 @@ pub enum Target {
     DlPreview,
     /// The preview's title dropdowns: 0 the text kind, 1 the language.
     PreviewMenu(u8),
+    /// Tournament: a pane (a click picks that font), a row (setup, results).
+    TourPane(u8),
+    TourRow(usize),
 }
 
 impl Target {

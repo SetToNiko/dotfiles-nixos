@@ -37,6 +37,10 @@ pub struct Prefetch {
     building: Option<Vec<String>>,
     /// Still to fetch (taken from the end).
     queue: Vec<Entry>,
+    /// Fetched first, prefetching on or off: a tournament's fonts.
+    pub urgent: Vec<Entry>,
+    /// Those of them on their way (they don't count in the progress).
+    urgent_in_flight: HashSet<String>,
     in_flight: HashSet<String>,
     /// Nerd Font archives among them.
     pub(crate) nerd_in_flight: HashSet<String>,
@@ -57,14 +61,17 @@ pub struct Prefetch {
 impl Prefetch {
     /// Downloading (or about to).
     pub fn active(&self) -> bool {
-        !self.queue.is_empty() || !self.in_flight.is_empty() || self.building.is_some()
+        !self.queue.is_empty()
+            || !self.urgent.is_empty()
+            || !self.in_flight.is_empty()
+            || self.building.is_some()
     }
 
     /// A preview finished; true if it was one of these.
     pub fn finished(&mut self, id: &str) -> bool {
         self.nerd_in_flight.remove(id);
         let ours = self.in_flight.remove(id);
-        if ours {
+        if ours && !self.urgent_in_flight.remove(id) {
             self.done += 1;
         }
         ours
@@ -154,6 +161,8 @@ impl App {
     /// parts run on threads. True when the screen should be redrawn.
     pub fn poll_prefetch(&mut self) -> bool {
         self.measure_previews();
+        // a tournament's fonts first, whatever the settings say
+        self.feed(true);
         let s = &self.settings.fonts_page;
         if !s.prefetch {
             // ones on their way still land; nothing new starts
@@ -187,9 +196,28 @@ impl App {
             }
             return false;
         }
+        self.feed(false);
+        // the status line's "fetching previews 12/72", a few times a second
+        let p = &mut self.prefetch;
+        let due = p.drawn.1.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY);
+        if p.drawn.0 != p.done && due {
+            p.drawn = (p.done, Some(Instant::now()));
+            return true;
+        }
+        false
+    }
+
+    /// Starts downloads from the urgent queue or the prefetch queue, up to
+    /// AT_ONCE at a time (Nerd Font archives one at a time).
+    fn feed(&mut self, urgent: bool) {
         let fetch = self.prefetch.fetch.unwrap_or(download::fetch_preview);
         while self.prefetch.in_flight.len() < AT_ONCE {
-            let Some(e) = self.prefetch.queue.last() else {
+            let q = if urgent {
+                &self.prefetch.urgent
+            } else {
+                &self.prefetch.queue
+            };
+            let Some(e) = q.last() else {
                 break;
             };
             // Nerd Font archives one at a time
@@ -197,14 +225,21 @@ impl App {
             if nerd && !self.prefetch.nerd_in_flight.is_empty() {
                 break;
             }
-            let e = self.prefetch.queue.pop().unwrap();
+            let e = if urgent {
+                self.prefetch.urgent.pop()
+            } else {
+                self.prefetch.queue.pop()
+            }
+            .unwrap();
             if self.prefetch.in_flight.contains(&e.id) {
                 continue;
             }
             let tx = self.dl_sender();
             let pv = self.pv();
             if pv.families.contains_key(&e.id) {
-                self.prefetch.done += 1;
+                if !urgent {
+                    self.prefetch.done += 1;
+                }
                 continue;
             }
             // the page may be fetching it already; its result counts here too
@@ -214,16 +249,11 @@ impl App {
             if nerd {
                 self.prefetch.nerd_in_flight.insert(e.id.clone());
             }
+            if urgent {
+                self.prefetch.urgent_in_flight.insert(e.id.clone());
+            }
             self.prefetch.in_flight.insert(e.id);
         }
-        // the status line's "fetching previews 12/72", a few times a second
-        let p = &mut self.prefetch;
-        let due = p.drawn.1.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY);
-        if p.drawn.0 != p.done && due {
-            p.drawn = (p.done, Some(Instant::now()));
-            return true;
-        }
-        false
     }
 
     /// The Behaviour tab shows the space the previews take: measured on a

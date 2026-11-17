@@ -28,6 +28,9 @@ mod settings_ui;
 mod settle;
 mod store;
 mod theme;
+mod tour_page;
+mod tour_ui;
+mod tournament;
 mod ui;
 
 use std::io::stdout;

@@ -87,6 +87,8 @@ pub enum Deferred {
     ResetPreset(String),
     /// Deletes the preview fonts (Behaviour tab).
     ClearPreviews,
+    /// Starts a tournament of a pool (Fonts page, Tournament tab).
+    StartTournament(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -946,6 +948,7 @@ impl App {
             }
             Deferred::DeletePreset(name) => self.delete_preset(&name),
             Deferred::ResetPreset(name) => self.reset_preset(&name),
+            Deferred::StartTournament(pool) => self.tour_start(pool),
             Deferred::ClearPreviews => match crate::download::clear_previews() {
                 Ok(()) => {
                     let pv = self.pv();

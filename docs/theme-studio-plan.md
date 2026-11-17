@@ -898,8 +898,27 @@ move to Phase 8.)
   the keymaps / settings commits after it). Your first theme, "CRT
   Amber", was made from the active palette and fonts; `$mod+t` opens
   themes, `$mod+p` palettes.
-- ⏳ Step 4, the tournament, comes after Phases 7b and 7c (it reuses 7b's
-  download work).
+- ✅ Step 4, the tournament (after Phases 7b and 7c). As built:
+  - The pools: Google's five categories, Nerd Fonts, and the system's
+    installed fonts, monospaced or proportional (no bitmap or CJK / emoji /
+    math fonts). Pool size all, 16, 32 or 64 at random (←/→ on its row).
+  - Before it starts, a question with the fonts, the picks and the
+    previews still to fetch (count and size). They're fetched first,
+    whatever the prefetch setting (prefetch.rs's urgent queue); the bracket
+    is drawn up once they're in, and fonts whose preview failed sit out.
+  - A match: `h` / `l` (←/→) or a click picks, `u` takes it back, `n`
+    names, `b` the bracket, `t` code or prose, `L` the language, `+` / `-`
+    the size. Esc leaves; it's saved after every pick and listed in the
+    setup to pick up again (`d` deletes one).
+  - The results: the top 10 in groups with a preview; Enter installs a
+    catalogue font, `1` / `2` / `3` use it for mono, ui or bar, `F` fills
+    every role from its family (applied at once, like picking).
+  - Saved in `~/.local/state/theme-studio/tournaments/`.
+  - Along the way: the help screen (`?`) got readable fixed-width columns,
+    paged with ←/→ when they don't all fit (it had grown too narrow).
+  Its keys: `tournament-names`, `tournament-bracket`, `tournament-undo`,
+  `use-for-mono` / `-ui` / `-bar` (rebindable).
+
 
 ### 6. Order of work
 
@@ -907,7 +926,7 @@ move to Phase 8.)
    scripts and rofi.
 2. ✅ Role picking with filters and applying at once; filling from a family.
 3. ✅ Preview fetching and rendering, the texts, the preview pane.
-4. The tournament (after Phase 7b).
+4. ✅ The tournament (after Phases 7b and 7c).
 
 ## Phase 7b: changes asked for after Phase 7 step 3
 
@@ -1185,7 +1204,7 @@ Each step is committed separately and keeps the studio working.
    fc-cache run under `nice -n 10`, ImageMagick under `nice -n 5`; Nerd
    Font archives one at a time. With 2,005 fonts queued and stubbed
    downloads, the slowest main-loop tick was 0.6 ms (debug build).
-7. Then the tournament (Phase 7 step 4).
+7. ✅ Then the tournament (Phase 7 step 4).
 
 ## Phase 8: polish
 

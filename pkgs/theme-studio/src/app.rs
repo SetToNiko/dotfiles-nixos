@@ -109,7 +109,11 @@ pub enum Overlay {
     CopyFrom {
         target: &'static str,
     },
-    Help,
+    /// The keys, in columns; `page`: the first column shown when they don't
+    /// all fit.
+    Help {
+        page: usize,
+    },
     /// Settings page: recording keys (a binding or the leader).
     Capture {
         what: crate::settings::Capture,
@@ -231,6 +235,8 @@ pub struct App {
     pub settings: crate::config::Settings,
     /// The Download fonts page.
     pub dl: crate::fonts_dl::DlPage,
+    /// The Fonts page's Tournament tab (made on first use).
+    pub tour_page: Option<crate::tour_page::TourPage>,
     /// The Settings page's tabs and selections.
     pub settings_page: crate::settings::SettingsPage,
     /// Keys of a sequence typed so far (e.g. the leader), waiting for the rest.
@@ -356,6 +362,7 @@ impl App {
             settings: config.settings.clone(),
             settings_page: Default::default(),
             dl: Default::default(),
+            tour_page: None,
             pending_keys: Vec::new(),
             store,
             name,
@@ -434,6 +441,9 @@ impl App {
                 redraw = true;
             }
             if self.poll_prefetch() {
+                redraw = true;
+            }
+            if self.poll_tournament() {
                 redraw = true;
             }
             if self.expire_message() {
@@ -1492,7 +1502,7 @@ impl App {
         }
         match a {
             Action::Quit => self.guard(Pending::Quit),
-            Action::Help => self.overlay = Overlay::Help,
+            Action::Help => self.overlay = Overlay::Help { page: 0 },
             Action::PageMain => self.page = Page::Main,
             Action::PageDownloads => self.page = Page::Downloads,
             Action::PageSettings => self.page = Page::Settings,
@@ -1609,7 +1619,7 @@ impl App {
 
     /// A font was picked (or a family filled the roles): save the theme's
     /// font preset and apply it straight away.
-    fn apply_picked_fonts(&mut self, what: String) {
+    pub(crate) fn apply_picked_fonts(&mut self, what: String) {
         self.fonts.picked = false;
         let name = if self.fonts.is_new {
             self.theme.clone()
@@ -1792,7 +1802,16 @@ impl App {
     fn on_overlay_key(&mut self, k: KeyEvent) {
         let overlay = std::mem::replace(&mut self.overlay, Overlay::None);
         self.overlay = match overlay {
-            Overlay::Help => Overlay::None,
+            // arrows and page keys page through the columns; any other key closes
+            Overlay::Help { page } => match k.code {
+                KeyCode::Right | KeyCode::PageDown | KeyCode::Char('l') => {
+                    Overlay::Help { page: page + 1 }
+                }
+                KeyCode::Left | KeyCode::PageUp | KeyCode::Char('h') => Overlay::Help {
+                    page: page.saturating_sub(1),
+                },
+                _ => Overlay::None,
+            },
             Overlay::Menu { menu, mut sel, at } => {
                 let last = crate::fonts_preview::menu_items(menu).len() - 1;
                 let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
@@ -2282,6 +2301,8 @@ impl App {
                 self.dl_click(t)
             }
             T::PreviewMenu(n) => self.open_menu(n, r),
+            T::TourPane(i) => self.tour_click_pane(i),
+            T::TourRow(i) => self.tour_click_row(i),
             T::DlPreview => {}
             T::SettingsButton('s') => self.settings_save(),
             T::SettingsButton(_) => self.settings_discard(),
@@ -4015,7 +4036,9 @@ mod tests {
         press(&mut app, "d");
         assert!(crate::download::read_list(&list).is_empty());
         assert!(app.dl_rows().is_empty());
-        // Nerd Fonts tab, with the release
+        // Nerd Fonts tab, with the release (past the Tournament tab)
+        press(&mut app, "]");
+        assert_eq!(app.dl.tab, DlTab::Tournament);
         press(&mut app, "]");
         assert_eq!(app.dl.tab, DlTab::Google, "wraps around");
         press(&mut app, "]");
@@ -4587,6 +4610,70 @@ mod tests {
             slowest < Duration::from_millis(20),
             "a tick took {slowest:?}"
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_tournament_of_installed_fonts_from_setup_to_results() {
+        use crate::tour_page::Stage;
+        let store = temp_store("tournament");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        let _ = std::fs::remove_dir_all(crate::tournament::dir());
+        app.fonts.installed = (0..5)
+            .map(|i| crate::fonts::Installed {
+                family: format!("Test Mono {i}"),
+                mono: true,
+                nerd: false,
+                bitmap: false,
+                special: false,
+            })
+            .collect();
+        app.page = Page::Downloads;
+        app.dl.tab = crate::fonts_dl::DlTab::Tournament;
+        let screen = |app: &mut App| render(app, 160, 45);
+        assert!(screen(&mut app).contains("Installed monospaced"));
+        // the installed monospaced pool: what it takes, then it starts
+        app.tour().sel = 6;
+        press(&mut app, "\n");
+        let Overlay::Ask { question, .. } = &app.overlay else {
+            panic!("asks first")
+        };
+        assert!(
+            question.contains("5 fonts, 4 picks; nothing to fetch"),
+            "{question}"
+        );
+        press(&mut app, "y");
+        assert_eq!(app.tour().stage, Stage::Fetching);
+        app.poll_tournament();
+        assert_eq!(app.tour().stage, Stage::Playing);
+        let s = screen(&mut app);
+        assert!(s.contains("round 1 of 3") && s.contains("← A"), "{s}");
+        assert!(!s.contains("Test Mono"), "names hidden");
+        press(&mut app, "n");
+        assert!(screen(&mut app).contains("Test Mono"));
+        // picks: four in all; u takes one back
+        press(&mut app, "hl");
+        press(&mut app, "u");
+        assert_eq!(app.tour().t.as_ref().unwrap().picks.len(), 1);
+        press(&mut app, "lhh");
+        assert_eq!(app.tour().stage, Stage::Results);
+        let s = screen(&mut app);
+        assert!(
+            s.contains("the top 10") && s.contains("1st") && s.contains("2nd"),
+            "{s}"
+        );
+        // the bracket
+        press(&mut app, "b");
+        assert!(screen(&mut app).contains("Round 1 (5 fonts)"));
+        press(&mut app, "\x1b");
+        assert!(!app.tour().bracket);
+        // back to the setup: the result is listed
+        press(&mut app, "\x1b");
+        assert_eq!(app.tour().stage, Stage::Setup);
+        assert!(screen(&mut app).contains("won by Test Mono"));
+        assert_eq!(app.tour_past().len(), 1);
+        let _ = std::fs::remove_dir_all(crate::tournament::dir());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

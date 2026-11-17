@@ -100,7 +100,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn local_time() -> String {
+pub(crate) fn local_time() -> String {
     Command::new("date")
         .arg("+%Y-%m-%d %H:%M:%S")
         .output()

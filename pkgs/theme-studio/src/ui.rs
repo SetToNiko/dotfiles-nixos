@@ -1349,6 +1349,42 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 .collect()
         } else if app.page == Page::Downloads && app.dl.searching {
             vec!["type to search".into(), "Enter/Esc done".into()]
+        } else if app.page == Page::Downloads
+            && app.dl.tab == crate::fonts_dl::DlTab::Tournament
+            && !app.dl.tabs_focused
+        {
+            use crate::tour_page::Stage;
+            let stage = app.tour_page.as_ref().map_or(Stage::Setup, |t| t.stage);
+            let bracket = app.tour_page.as_ref().is_some_and(|t| t.bracket);
+            let rows: Vec<(&[Action], &str)> = match stage {
+                _ if bracket => vec![(&[A::Down, A::Up], "scroll"), (&[A::Back], "close")],
+                Stage::Setup => vec![
+                    (&[A::Down, A::Up], "move"),
+                    (&[A::Confirm], "start / open"),
+                    (&[A::Left, A::Right], "pool size"),
+                    (&[A::Delete], "delete"),
+                ],
+                Stage::Fetching => vec![(&[A::Back], "stop")],
+                Stage::Playing => vec![
+                    (&[A::Left, A::Right], "pick"),
+                    (&[A::TourUndo], "take back"),
+                    (&[A::TourNames], "names"),
+                    (&[A::TourBracket], "bracket"),
+                    (&[A::PreviewText], "code/prose"),
+                    (&[A::PreviewLang], "language"),
+                    (&[A::SizeUp, A::SizeDown], "size"),
+                    (&[A::Back], "leave"),
+                ],
+                Stage::Results => vec![
+                    (&[A::Down, A::Up], "move"),
+                    (&[A::Confirm], "install"),
+                    (&[A::UseFor(0), A::UseFor(1), A::UseFor(2)], "mono/ui/bar"),
+                    (&[A::FillFamily], "every role"),
+                    (&[A::TourBracket], "bracket"),
+                    (&[A::Back], "leave"),
+                ],
+            };
+            rows.into_iter().filter_map(|(a, l)| hint(a, l)).collect()
         } else if app.page == Page::Downloads {
             let mut v: Vec<String> = [
                 hint(&[A::Down, A::Up], "move"),
@@ -1674,7 +1710,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 );
             }
         }
-        Overlay::Help => {
+        Overlay::Help { page } => {
             // Generated from the keymap, so it shows what the keys really are.
             let mut lines: Vec<Line> = Vec::new();
             for ctx in Context::ALL {
@@ -1703,30 +1739,44 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             }
             lines.push(Line::styled(
                 format!(
-                    " Leader: {}   Text fields (hex, search, names) take keys as typing.   Any key closes.",
+                    " Leader: {}   Text fields take keys as typing.   ←/→ more columns; any other key closes.",
                     crate::keymap::display_seq(&[app.keymap.leader], crate::keymap::Key::new(ratatui::crossterm::event::KeyCode::Null, ratatui::crossterm::event::KeyModifiers::NONE))
                 ),
                 Style::new().dark_gray(),
             ));
-            // two columns when it doesn't fit in one
+            // columns wide enough to read; when they don't all fit, !90/!92 page
+            const COL_W: u16 = 52;
             let r = centered(
                 area,
-                area.width.saturating_sub(4).min(150),
+                area.width.saturating_sub(4).min(4 * COL_W + 2),
                 area.height.saturating_sub(2),
             );
             f.render_widget(Clear, r);
+            let inner_h = r.height.saturating_sub(2) as usize;
+            let per_col = inner_h.max(1);
+            let cols: Vec<&[Line]> = lines.chunks(per_col).collect();
+            let fit = (r.width.saturating_sub(2) / COL_W).max(1) as usize;
+            let page = (*page).min(cols.len().saturating_sub(fit));
+            let more = if cols.len() > fit {
+                format!(
+                    " columns {} 13{} of {} (!90/!92 for more) ",
+                    page + 1,
+                    (page + fit).min(cols.len()),
+                    cols.len()
+                )
+            } else {
+                String::new()
+            };
             let block = Block::bordered()
                 .title(format!(" Keys: {} preset ", app.keymap.name))
+                .title_bottom(Line::styled(more, Style::new().yellow()))
                 .border_style(Style::new().yellow());
             let inner = block.inner(r);
             f.render_widget(block, r);
-            let per_col = inner.height as usize;
-            let cols = lines.len().div_ceil(per_col.max(1)).max(1);
-            let w = inner.width / cols as u16;
-            for (i, chunk) in lines.chunks(per_col.max(1)).enumerate() {
+            for (i, chunk) in cols.iter().skip(page).take(fit).enumerate() {
                 let col = Rect {
-                    x: inner.x + i as u16 * w,
-                    width: w,
+                    x: inner.x + i as u16 * COL_W,
+                    width: COL_W.min(inner.right().saturating_sub(inner.x + i as u16 * COL_W)),
                     ..inner
                 };
                 f.render_widget(Paragraph::new(chunk.to_vec()), col);

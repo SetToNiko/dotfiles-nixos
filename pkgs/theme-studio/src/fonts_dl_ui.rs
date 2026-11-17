@@ -61,6 +61,9 @@ pub fn draw_downloads(f: &mut Frame, app: &mut App, area: Rect) {
         (t, b)
     };
     draw_tabs(f, app, tabs);
+    if app.dl.tab == DlTab::Tournament {
+        return crate::tour_ui::draw_tournament(f, app, body);
+    }
     // wide: the list, then a column of details over the preview; narrow:
     // all three stacked. With the preview hidden, the list and the details.
     if !app.fonts_preview_visible {

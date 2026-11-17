@@ -78,6 +78,14 @@ impl FontsTab {
             },
             None => return Err("Nothing highlighted".into()),
         };
+        self.fill_roles(&group, &[0, 1, 2])
+    }
+
+    /// Fills `roles` from a family (a font tree group or a family name),
+    /// each with its best face; a role it has no face for keeps its font.
+    /// Returns what went where, or why not.
+    pub fn fill_roles(&mut self, group: &str, roles: &[usize]) -> Result<String, String> {
+        let group = group.to_string();
         // the group, and fonts named like it (the font tree can put a
         // family's Nerd Font variants in a group of their own)
         let norm = |s: &str| {
@@ -115,7 +123,7 @@ impl FontsTab {
         ];
         let mut done = Vec::new();
         let mut kept = Vec::new();
-        for (role, pick) in picks.iter().enumerate() {
+        for (role, pick) in picks.iter().enumerate().filter(|(r, _)| roles.contains(r)) {
             match pick {
                 Some(family) => {
                     self.preset.fonts[role].family = family.clone();

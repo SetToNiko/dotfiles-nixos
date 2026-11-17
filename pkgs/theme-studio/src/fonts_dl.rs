@@ -17,12 +17,14 @@ pub enum DlTab {
     Google,
     Nerd,
     Installed,
+    Tournament,
 }
 
-pub const DL_TABS: [(DlTab, &str); 3] = [
+pub const DL_TABS: [(DlTab, &str); 4] = [
     (DlTab::Google, "Google Fonts"),
     (DlTab::Nerd, "Nerd Fonts"),
     (DlTab::Installed, "Installed"),
+    (DlTab::Tournament, "Tournament"),
 ];
 
 /// The Google tab's category chips: (label, Fontsource category).
@@ -297,7 +299,13 @@ impl App {
     }
 
     pub fn dl_install(&mut self) {
-        let Some(e) = self.dl_selected() else { return };
+        if let Some(e) = self.dl_selected() {
+            self.dl_install_entry(e);
+        }
+    }
+
+    /// Installs a catalogue font (unless it is already, or on its way).
+    pub fn dl_install_entry(&mut self, e: Entry) {
         let listed = self.dl_listed();
         match self.dl_status(&e, &listed) {
             DlStatus::Downloading(..) => self.info(format!("{} is downloading", e.family)),
@@ -373,6 +381,18 @@ impl App {
                 _ => {}
             }
             return;
+        }
+        // the Tournament tab has its own keys (what it doesn't use goes on)
+        if self.dl.tab == DlTab::Tournament {
+            if self.run_tournament(a) {
+                return;
+            }
+            if !matches!(
+                a,
+                Action::Up | Action::Down | Action::TabNext | Action::TabPrev
+            ) {
+                return;
+            }
         }
         // the preview's keys (text, language, size, pages, fetch)
         if self.preview_action(a) {
