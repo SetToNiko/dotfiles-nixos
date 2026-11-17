@@ -1206,17 +1206,19 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let app = &*app;
     let fonts = app.side == Side::Fonts;
-    let mut spans: Vec<Span> = Vec::new();
-    if let Some((msg, err)) = &app.message {
-        spans.push(Span::styled(
-            format!(" {msg} "),
+    // the message at the left (after the tabs), the key hints at the right
+    let message = app.message.as_ref().map(|(msg, err)| {
+        Span::styled(
+            truncate(&format!(" {msg} "), area.width as usize),
             if *err {
                 Style::new().red().bold()
             } else {
                 Style::new().green()
             },
-        ));
-    } else {
+        )
+    });
+    let msg_w = message.as_ref().map_or(0, |s| s.width());
+    let hints = {
         use Action as A;
         let hint = |actions: &[Action], label: &str| -> Option<String> {
             let ctx = app.contexts();
@@ -1405,14 +1407,23 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
         .flatten()
         .collect();
         let last = hint(&[A::Help], "keys").unwrap_or_default();
-        let used: usize = spans.iter().map(|s| s.width()).sum();
-        let room = (area.width as usize).saturating_sub(used);
-        spans.push(Span::styled(
-            fit_hints(&context, &general, &last, room),
-            Style::new().dark_gray(),
-        ));
+        // a message keeps a space between it and the hints
+        let room = (area.width as usize).saturating_sub(msg_w + usize::from(msg_w > 0));
+        fit_hints(&context, &general, &last, room)
+    };
+    if let Some(m) = message {
+        f.render_widget(Paragraph::new(Line::from(m)), area);
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    let hints_w = (hints.chars().count() as u16).min(area.width);
+    let right = Rect {
+        x: area.right() - hints_w,
+        width: hints_w,
+        ..area
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(hints, Style::new().dark_gray())),
+        right,
+    );
 }
 
 /// As many hints as fit in `room` columns: the ones for the current control

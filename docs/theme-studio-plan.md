@@ -988,7 +988,7 @@ download work.
   the archive again.
 - **Ties in with the tournament,** whose pool needs the same files.
 
-### 5. Key hints at the other end of the bar
+### 5. Key hints at the other end of the bar ✅
 
 - **Now:** the status line runs page tabs, theme name, then the hints.
 - **Becomes:** tabs and theme name at the left, the key hints
@@ -1000,7 +1000,9 @@ download work.
 
 Each step is committed separately and keeps the studio working.
 
-1. Key hints at the right end of the bar.
+1. ✅ Key hints at the right end of the bar. With a message showing, the
+   hints that don't fit beside it are dropped (before, a message hid them
+   all).
 2. Images re-rendered after resizing stops.
 3. The palette dropdown in the pane title, with live preview.
 4. Fuller code samples, the new languages, scrolling, the two dropdowns.

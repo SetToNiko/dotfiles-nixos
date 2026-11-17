@@ -3901,4 +3901,36 @@ mod tests {
         assert_eq!(app.notice, None);
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn status_line_hints_sit_at_the_right() {
+        let store = temp_store("hints");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        let last_row = |app: &mut App| render(app, 160, 45).lines().last().unwrap().to_string();
+        // tabs at the bottom: tabs and theme at the left, hints at the right end
+        let row = last_row(&mut app);
+        assert!(row.trim_end().ends_with("? keys"), "{row}");
+        assert!(row.contains("F1"));
+        // a message sits after the tabs; the hints stay at the right
+        app.info("Nothing to undo");
+        let row = last_row(&mut app);
+        let (msg, keys) = (
+            row.find("Nothing to undo").unwrap(),
+            row.find("? keys").unwrap(),
+        );
+        assert!(row.find("F1").unwrap() < msg && msg < keys, "{row}");
+        assert!(row.trim_end().ends_with("? keys"), "{row}");
+        // tabs on top: the bottom line keeps the message and the hints
+        app.settings.layout.tabs = "top".into();
+        let screen = render(&mut app, 160, 45);
+        let (top, bottom) = (
+            screen.lines().next().unwrap(),
+            screen.lines().last().unwrap(),
+        );
+        assert!(top.contains("F1") && !top.contains("? keys"), "{top}");
+        assert!(bottom.starts_with(" Nothing to undo"), "{bottom}");
+        assert!(bottom.trim_end().ends_with("? keys"), "{bottom}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
