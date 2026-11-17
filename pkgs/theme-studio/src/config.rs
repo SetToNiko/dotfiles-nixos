@@ -227,6 +227,12 @@ pub struct LayoutSettings {
     pub tabs: String,
     /// Tabs inside a page (the Settings page's): "top" or "bottom".
     pub inner_tabs: String,
+    /// The key hints in the status line: "shown" or "hidden".
+    pub key_hints: String,
+    /// The previews at start: the Main page's (nvim and the shell) and the
+    /// Fonts page's, "shown" or "hidden".
+    pub main_preview: String,
+    pub fonts_preview: String,
     pub sizes: Sizes,
 }
 
@@ -235,6 +241,9 @@ impl Default for LayoutSettings {
         LayoutSettings {
             tabs: "bottom".into(),
             inner_tabs: "top".into(),
+            key_hints: "shown".into(),
+            main_preview: "shown".into(),
+            fonts_preview: "shown".into(),
             sizes: Sizes::default(),
         }
     }

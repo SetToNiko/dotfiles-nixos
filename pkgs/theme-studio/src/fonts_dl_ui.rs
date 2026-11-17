@@ -62,7 +62,20 @@ pub fn draw_downloads(f: &mut Frame, app: &mut App, area: Rect) {
     };
     draw_tabs(f, app, tabs);
     // wide: the list, then a column of details over the preview; narrow:
-    // all three stacked
+    // all three stacked. With the preview hidden, the list and the details.
+    if !app.fonts_preview_visible {
+        let (list, details) = if body.width >= 100 {
+            let [l, r] =
+                Layout::horizontal([Constraint::Min(44), Constraint::Percentage(55)]).areas(body);
+            (l, r)
+        } else {
+            let [l, d] = Layout::vertical([Constraint::Min(5), Constraint::Length(9)]).areas(body);
+            (l, d)
+        };
+        draw_list(f, app, list);
+        draw_details(f, app, details);
+        return;
+    }
     let (list, details, preview) = if body.width >= 100 {
         let [l, r] =
             Layout::horizontal([Constraint::Min(44), Constraint::Percentage(55)]).areas(body);

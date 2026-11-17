@@ -105,7 +105,16 @@ fn h_border(id: BorderId, first: Rect, start: u16, total: u16, from_end: bool) -
     }
 }
 
-pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes) -> Arrangement {
+/// `show_preview`: the preview column (or row) is shown; hidden, the fonts
+/// and colour columns share its space.
+pub fn arrange(
+    area: Rect,
+    page: Page,
+    picker: bool,
+    sample: bool,
+    show_preview: bool,
+    sizes: &Sizes,
+) -> Arrangement {
     if page != Page::Main {
         if area.width < 40 || area.height < 10 {
             return Arrangement::TooSmall {
@@ -118,15 +127,17 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes
         return Arrangement::Page { body, status };
     }
     let wide = area.width >= FONTS_W + COLOURS_W + PREVIEW_MIN_W;
+    let preview_w = if show_preview { PREVIEW_MIN_W } else { 0 };
     // the sample is too small to read under the narrow layout: left out there
     let sample = sample && wide;
     let fonts_need = ROLES_H + FONT_LIST_MIN + if sample { SAMPLE_MIN } else { 0 };
     let colours_need = LIST_MIN + if picker { PICKER_MIN } else { 0 };
     let columns_need = fonts_need.max(colours_need);
     let (need_w, need_h) = if wide {
-        (FONTS_W + COLOURS_W + PREVIEW_MIN_W, columns_need + 1)
+        (FONTS_W + COLOURS_W + preview_w, columns_need + 1)
     } else {
-        (FONTS_W + COLOURS_W, columns_need + PREVIEW_ROW_MIN + 1)
+        let row = if show_preview { PREVIEW_ROW_MIN } else { 0 };
+        (FONTS_W + COLOURS_W, columns_need + row + 1)
     };
     if area.width < need_w || area.height < need_h {
         return Arrangement::TooSmall { need_w, need_h };
@@ -135,7 +146,17 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes
     // rounded, so a border put at a cell stays exactly there
     let share = |n: u16, f: f64| (n as f64 * f.clamp(0.0, 1.0)).round() as u16;
     let mut borders = Vec::new();
-    let (fonts_col, colours_col, preview) = if wide {
+    let (fonts_col, colours_col, preview) = if !show_preview {
+        // fonts and colours share the width, in the proportion they have
+        // when the preview is shown
+        let fonts_share = sizes.fonts_width / (sizes.fonts_width + sizes.colours_width).max(0.01);
+        let fw = share(main.width, fonts_share)
+            .max(FONTS_W)
+            .min(main.width - COLOURS_W);
+        let [f, c] = Layout::horizontal([Constraint::Length(fw), Constraint::Min(0)]).areas(main);
+        borders.push(v_border(BorderId::FontsColours, f, main.x, main.width));
+        (f, c, Rect::default())
+    } else if wide {
         let fw = share(main.width, sizes.fonts_width)
             .max(FONTS_W)
             .min(main.width - COLOURS_W - PREVIEW_MIN_W);
@@ -217,13 +238,15 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes
         ));
     }
     // between nvim and the shell (inside the preview's frame, above the bar)
-    let desk = crate::preview::desk_area(preview);
-    let ((a, _), stacked) = crate::preview::split_windows(desk, wide, sizes.preview_split);
-    borders.push(if stacked {
-        h_border(BorderId::PreviewSplit, a, desk.y, desk.height, false)
-    } else {
-        v_border(BorderId::PreviewSplit, a, desk.x, desk.width)
-    });
+    if show_preview {
+        let desk = crate::preview::desk_area(preview);
+        let ((a, _), stacked) = crate::preview::split_windows(desk, wide, sizes.preview_split);
+        borders.push(if stacked {
+            h_border(BorderId::PreviewSplit, a, desk.y, desk.height, false)
+        } else {
+            v_border(BorderId::PreviewSplit, a, desk.x, desk.width)
+        });
+    }
     Arrangement::Main(MainLayout {
         roles,
         font_list,
@@ -258,6 +281,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.page,
         app.picker_visible,
         app.sample_visible,
+        app.main_preview_visible,
         &app.sizes,
     );
     if let Arrangement::TooSmall { need_w, need_h } = arrangement {
@@ -291,7 +315,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             if let Some(p) = l.picker {
                 draw_picker(f, app, p);
             }
-            draw_preview(f, app, l.preview, l.wide);
+            // hidden: nothing drawn, and nvim and the shell keep their size
+            if !l.preview.is_empty() {
+                draw_preview(f, app, l.preview, l.wide);
+            }
             // draggable borders: highlighted under the mouse and while dragged
             for b in &l.borders {
                 if app.preview.mode == PreviewMode::Swatches && b.id == BorderId::PreviewSplit {
@@ -1451,6 +1478,10 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
         .into_iter()
         .flatten()
         .collect();
+        // hidden (settings: layout.key-hints, or the toggle): none
+        if !app.hints_visible {
+            return draw_message_only(f, area, message);
+        }
         let last = hint(&[A::Help], "keys").unwrap_or_default();
         // a message keeps a space between it and the hints
         let room = (area.width as usize).saturating_sub(msg_w + usize::from(msg_w > 0));
@@ -1473,6 +1504,13 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
 
 /// As many hints as fit in `room` columns: the ones for the current control
 /// first, then the general ones, and `last` (the help key) always at the end.
+/// The status line without key hints: just the message, if any.
+fn draw_message_only(f: &mut Frame, area: Rect, message: Option<Span<'static>>) {
+    if let Some(m) = message {
+        f.render_widget(Paragraph::new(Line::from(m)), area);
+    }
+}
+
 fn fit_hints(context: &[String], general: &[String], last: &str, room: usize) -> String {
     let mut out = String::from(" ");
     let budget = room.saturating_sub(last.chars().count() + 3);

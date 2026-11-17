@@ -83,6 +83,12 @@ fn home() -> PathBuf {
 }
 
 fn xdg(var: &str, fallback: &str) -> PathBuf {
+    // tests never touch your folders: a temporary home of their own
+    if cfg!(test) {
+        return std::env::temp_dir()
+            .join(format!("theme-studio-test-home-{}", std::process::id()))
+            .join(fallback);
+    }
     std::env::var_os(var)
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())

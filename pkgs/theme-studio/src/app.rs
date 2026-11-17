@@ -199,6 +199,11 @@ pub struct App {
     pub picker_visible: bool,
     /// The font sample (pane 3) is on screen.
     pub sample_visible: bool,
+    /// The key hints in the status line, and the previews (Main: nvim and
+    /// the shell; Fonts page: the preview pane), for this session.
+    pub hints_visible: bool,
+    pub main_preview_visible: bool,
+    pub fonts_preview_visible: bool,
     /// Cursor in the colour list (group and colour rows); `sel` is the colour.
     pub row_sel: usize,
     /// Open colour groups (indexes into GROUPS).
@@ -303,6 +308,9 @@ impl App {
             page: Page::Main,
             picker_visible: config.settings.colours.picker_shown(),
             sample_visible: config.settings.fonts.sample_at_start != "hidden",
+            hints_visible: config.settings.layout.key_hints != "hidden",
+            main_preview_visible: config.settings.layout.main_preview != "hidden",
+            fonts_preview_visible: config.settings.layout.fonts_preview != "hidden",
             row_sel: 0,
             edit_session: None,
             wide: true,
@@ -971,6 +979,11 @@ impl App {
                 self.open_picker();
             }
             6 | 7 => {
+                // jumping to a hidden preview shows it again
+                if !self.main_preview_visible {
+                    self.main_preview_visible = true;
+                    self.preview.rects.clear();
+                }
                 self.preview.mode = PreviewMode::Desktop;
                 let id = match (n, self.preview.show_yazi) {
                     (6, _) => PaneId::Nvim,
@@ -1396,6 +1409,8 @@ impl App {
                 | Action::PageMain
                 | Action::PageDownloads
                 | Action::PageSettings
+                | Action::ToggleHints
+                | Action::TogglePreview
         );
         if self.page == Page::Settings && !page_action {
             return self.run_settings(a);
@@ -1424,6 +1439,18 @@ impl App {
                     self.picker_visible = true;
                 }
             }
+            Action::ToggleHints => self.hints_visible = !self.hints_visible,
+            Action::TogglePreview => match self.page {
+                Page::Main => {
+                    self.main_preview_visible = !self.main_preview_visible;
+                    // a hidden window can't keep the keyboard
+                    if !self.main_preview_visible {
+                        self.preview.focus = None;
+                    }
+                }
+                Page::Downloads => self.fonts_preview_visible = !self.fonts_preview_visible,
+                Page::Settings => self.info("This page has no preview"),
+            },
             Action::ToggleSample => {
                 use crate::fonts::FontFocus;
                 self.sample_visible = !self.sample_visible;
@@ -2990,6 +3017,7 @@ mod tests {
             Page::Main,
             false,
             true,
+            true,
             &crate::config::Sizes::default(),
         ) else {
             panic!()
@@ -3013,6 +3041,7 @@ mod tests {
             Page::Main,
             true,
             true,
+            true,
             &crate::config::Sizes::default(),
         ) else {
             panic!()
@@ -3024,6 +3053,7 @@ mod tests {
         let Arrangement::Main(l) = arrange(
             r(137, 60),
             Page::Main,
+            true,
             true,
             true,
             &crate::config::Sizes::default(),
@@ -3041,6 +3071,7 @@ mod tests {
                 Page::Main,
                 false,
                 false,
+                true,
                 &crate::config::Sizes::default()
             ),
             Arrangement::TooSmall {
@@ -3052,6 +3083,7 @@ mod tests {
             arrange(
                 r(137, 20),
                 Page::Main,
+                true,
                 true,
                 true,
                 &crate::config::Sizes::default()
@@ -3067,6 +3099,7 @@ mod tests {
                 Page::Main,
                 true,
                 true,
+                true,
                 &crate::config::Sizes::default()
             ),
             Arrangement::TooSmall {
@@ -3079,6 +3112,7 @@ mod tests {
             arrange(
                 r(60, 20),
                 Page::Settings,
+                true,
                 true,
                 true,
                 &crate::config::Sizes::default()
@@ -4191,6 +4225,60 @@ mod tests {
                 ..
             }
         ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hints_and_previews_toggle_per_page() {
+        let store = temp_store("toggles");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        let screen = |app: &mut App| render(app, 160, 45);
+        // Main: <leader>tp hides the preview; the columns take its room
+        assert!(screen(&mut app).contains("Preview"));
+        press(&mut app, " tp");
+        assert!(!app.main_preview_visible);
+        let s = screen(&mut app);
+        assert!(!s.contains("Space 6 / Space 7"), "{s}");
+        let pane = app.palette_pane.unwrap();
+        assert_eq!(pane.x + pane.width, 160, "colours reach the right edge");
+        // jumping to nvim shows it again
+        press(&mut app, " 6");
+        assert!(app.main_preview_visible);
+        // (nvim has the keyboard now: take it back)
+        app.preview.focus = None;
+        press(&mut app, " tp");
+        // the Fonts page's preview is its own
+        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        assert!(app.fonts_preview_visible && !app.main_preview_visible);
+        press(&mut app, " tp");
+        assert!(!app.fonts_preview_visible && !app.main_preview_visible);
+        // <leader>th hides the key hints anywhere; messages still show
+        assert!(screen(&mut app).contains("? keys"));
+        press(&mut app, " th");
+        let s = screen(&mut app);
+        assert!(!s.contains("? keys"), "{s}");
+        app.info("Hello");
+        assert!(screen(&mut app).contains("Hello"));
+        // the settings say how a run starts
+        let mut config = crate::config::Settings::default();
+        config.layout.key_hints = "hidden".into();
+        config.layout.main_preview = "hidden".into();
+        let loaded = crate::config::Loaded {
+            keymap: Keymap::vim(),
+            presets: Keymap::builtin(),
+            settings: config,
+            warnings: Vec::new(),
+            dir: dir.join("studio-config"),
+        };
+        let mut app2 = App::with_config(
+            Store { dir: dir.clone() },
+            Start::Named("One".into()),
+            loaded,
+        )
+        .unwrap();
+        app2.preview.set_headless();
+        assert!(!app2.hints_visible && !app2.main_preview_visible && app2.fonts_preview_visible);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

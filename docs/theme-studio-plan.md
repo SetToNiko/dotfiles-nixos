@@ -1161,7 +1161,8 @@ Asked for on 2026-11-17 after Phase 7b. Defaults I picked are marked 🔸.
 
 Each step is committed separately and keeps the studio working.
 
-1. Fixes (9), the key hints setting (5), the preview toggles (6).
+1. ✅ Fixes (9), the key hints setting (5), the preview toggles (6).
+   `<leader>6` / `<leader>7` show a hidden Main preview again.
 2. Row highlights (8).
 3. The palette dropdown row (2) and moving up to the tabs (3).
 4. Installed fonts' preview (1).

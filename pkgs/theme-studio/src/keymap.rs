@@ -262,6 +262,8 @@ pub enum Action {
     PageSettings,
     TogglePicker,
     ToggleSample,
+    ToggleHints,
+    TogglePreview,
     PaneLeft,
     PaneRight,
     PaneUp,
@@ -343,6 +345,8 @@ pub fn all_actions() -> Vec<Action> {
         A::PageSettings,
         A::TogglePicker,
         A::ToggleSample,
+        A::ToggleHints,
+        A::TogglePreview,
         A::PaneLeft,
         A::PaneRight,
         A::PaneUp,
@@ -441,6 +445,8 @@ impl Action {
             A::PageSettings => "page-settings",
             A::TogglePicker => "toggle-picker",
             A::ToggleSample => "toggle-sample",
+            A::ToggleHints => "toggle-hints",
+            A::TogglePreview => "toggle-preview",
             A::PaneLeft => "pane-left",
             A::PaneRight => "pane-right",
             A::PaneUp => "pane-up",
@@ -539,6 +545,8 @@ impl Action {
             Action::PageSettings => "settings page".into(),
             Action::TogglePicker => "show / hide the colour picker".into(),
             Action::ToggleSample => "show / hide the font sample".into(),
+            Action::ToggleHints => "show / hide the key hints".into(),
+            Action::TogglePreview => "show / hide this page's preview".into(),
             Action::PaneLeft => "pane to the left".into(),
             Action::PaneRight => "pane to the right".into(),
             Action::PaneUp => "pane above".into(),
@@ -1226,6 +1234,8 @@ impl Keymap {
             (C::Resize, A::Back, &["<Esc>", "<CR>"]),
             (C::Colours, A::TogglePicker, &["<leader>cp"]),
             (C::Fonts, A::ToggleSample, &["<leader>fs"]),
+            (C::Global, A::ToggleHints, &["<leader>th"]),
+            (C::Global, A::TogglePreview, &["<leader>tp"]),
             (C::Global, A::PreviewCycle, &["<F12>"]),
             (C::Global, A::SavePalette, &["<leader>sp"]),
             (C::Global, A::SaveFonts, &["<leader>sf"]),
@@ -1395,7 +1405,7 @@ mod tests {
         assert_eq!(
             next,
             [
-                "1", "2", "3", "4", "5", "6", "7", "a", "f", "n", "o", "r", "s", "u"
+                "1", "2", "3", "4", "5", "6", "7", "a", "f", "n", "o", "r", "s", "t", "u"
             ]
         );
         assert_eq!(

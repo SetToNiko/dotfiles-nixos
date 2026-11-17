@@ -31,6 +31,9 @@ pub enum BhRow {
     Leader,
     Tabs,
     InnerTabs,
+    KeyHints,
+    MainPreview,
+    FontsPreview,
     /// How long messages stay in the status line.
     MessageSeconds,
     /// Save confirmations: status line or a box.
@@ -110,6 +113,9 @@ pub fn behaviour_rows() -> Vec<BhRow> {
         R::Header("Layout"),
         R::Tabs,
         R::InnerTabs,
+        R::KeyHints,
+        R::MainPreview,
+        R::FontsPreview,
         R::SaveSizes,
         R::ResetSizes,
     ]);
@@ -314,6 +320,9 @@ impl App {
             BhRow::Leader => display_seq(&[self.keymap.leader], none),
             BhRow::Tabs => s.layout.tabs.clone(),
             BhRow::InnerTabs => s.layout.inner_tabs.clone(),
+            BhRow::KeyHints => s.layout.key_hints.clone(),
+            BhRow::MainPreview => s.layout.main_preview.clone(),
+            BhRow::FontsPreview => s.layout.fonts_preview.clone(),
             BhRow::SaveSizes | BhRow::ResetSizes => "Enter".into(),
             BhRow::MessageSeconds => match s.messages.seconds {
                 0 => "until a key".into(),
@@ -380,6 +389,9 @@ impl App {
             BhRow::Leader => "Leader key (of the active keymap preset)".into(),
             BhRow::Tabs => "Page tabs (Main, Fonts, Settings)".into(),
             BhRow::InnerTabs => "Tabs inside a page (Keymaps, Behaviour, History)".into(),
+            BhRow::KeyHints => "Key hints in the status line".into(),
+            BhRow::MainPreview => "Main page preview (nvim, the shell) at start".into(),
+            BhRow::FontsPreview => "Fonts page preview at start".into(),
             BhRow::SaveSizes => "Save the current pane sizes as the default".into(),
             BhRow::ResetSizes => "Pane sizes back to the shipped defaults".into(),
             BhRow::MessageSeconds => "Messages stay for (errors: until a key)".into(),
@@ -512,6 +524,16 @@ impl App {
                     }
                     BhRow::SavedAs => {
                         s.messages.saved = cycle(&s.messages.saved, &["bar", "popup"])
+                    }
+                    BhRow::KeyHints => {
+                        s.layout.key_hints = cycle(&s.layout.key_hints, &["shown", "hidden"])
+                    }
+                    BhRow::MainPreview => {
+                        s.layout.main_preview = cycle(&s.layout.main_preview, &["shown", "hidden"])
+                    }
+                    BhRow::FontsPreview => {
+                        s.layout.fonts_preview =
+                            cycle(&s.layout.fonts_preview, &["shown", "hidden"])
                     }
                     BhRow::InnerTabs => {
                         s.layout.inner_tabs = cycle(&s.layout.inner_tabs, &["top", "bottom"])
