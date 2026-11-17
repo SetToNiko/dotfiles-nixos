@@ -3884,7 +3884,7 @@ mod tests {
         app.settings_save();
         assert_eq!(app.notice.as_deref(), Some("Saved"));
         assert_eq!(app.message, None);
-        assert!(render(&mut app, 160, 45).contains("any key or a click closes this"));
+        assert!(render(&mut app, 160, 45).contains("press any key to dismiss"));
         // a key closes it and does nothing else
         let sel = app.sel;
         press(&mut app, "j");

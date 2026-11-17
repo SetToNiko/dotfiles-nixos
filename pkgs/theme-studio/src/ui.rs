@@ -320,7 +320,7 @@ fn draw_notice(f: &mut Frame, app: &App, area: Rect) {
     let Some(text) = &app.notice else {
         return;
     };
-    let hint = "any key or a click closes this";
+    let hint = "press any key to dismiss";
     let w = text.chars().count().max(hint.len()) as u16 + 4;
     let lines = vec![
         Line::styled(format!(" {text}"), Style::new().green().bold()),
