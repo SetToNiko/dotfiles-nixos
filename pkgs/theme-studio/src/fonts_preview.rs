@@ -16,7 +16,7 @@ use crate::keymap::Action;
 use crate::samples::{self, KINDS, Kind, LANGS};
 
 /// How long the highlight rests on a font before its preview is fetched.
-const PAUSE: Duration = Duration::from_millis(300);
+const PAUSE: Duration = Duration::from_millis(150);
 
 pub struct FontPreview {
     /// The text shown; None: the font's default (code, icons or prose).
@@ -170,13 +170,8 @@ impl App {
         };
         self.render_preview(&e, &family);
         match self.pv().renderer.take() {
-            Some(Ok(path)) => {
-                let img = image::open(&path);
-                let proto = self
-                    .picker
-                    .as_ref()
-                    .zip(img.ok())
-                    .map(|(p, i)| p.new_resize_protocol(i));
+            Some(Ok(img)) => {
+                let proto = self.picker.as_ref().map(|p| p.new_resize_protocol(img));
                 let pv = self.pv();
                 pv.image = proto;
                 pv.error = None;
@@ -192,6 +187,9 @@ impl App {
 
     /// Asks for the preview image (the renderer skips unchanged requests).
     fn render_preview(&mut self, e: &Entry, family: &str) {
+        // installed fonts are in the system's fontconfig; fetched ones get a
+        // setup of their own
+        let installed = self.dl.tab == crate::fonts_dl::DlTab::Installed;
         let (cell_w, cell_h) = self.picker.as_ref().map_or((8, 16), |p| {
             let s = p.font_size();
             (s.width as u32, s.height as u32)
@@ -216,7 +214,8 @@ impl App {
                 pv.step = lines.saturating_sub(2).max(1);
                 let last = samples::code_lines(pv.lang).saturating_sub(1);
                 pv.page = pv.page.min(last);
-                samples::code(&st, pv.lang, pv.page)
+                // only what shows (one more for a part-shown line)
+                samples::code(&st, pv.lang, pv.page, lines + 1)
             }
             Kind::Icons => samples::icons(&st),
             Kind::Readme => samples::readme(&st),
@@ -235,7 +234,7 @@ impl App {
             markup,
             bg,
             dpi,
-            Some(download::preview_fontconfig()),
+            (!installed).then(|| download::preview_fontconfig_for(&e.id)),
             // prose and the README wrap; code and icons are cut, like a terminal
             matches!(kind, Kind::Prose | Kind::Readme).then_some(width),
         );

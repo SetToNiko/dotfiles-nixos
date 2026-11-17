@@ -1170,7 +1170,15 @@ Each step is committed separately and keeps the studio working.
 4. ✅ Installed fonts' preview (1). The default text comes from the
    catalogue's category when it's loaded (else icons for Nerd Fonts, code
    for the rest), not from fc-scan's spacing.
-5. Faster previews (4), measured after each change.
+5. ✅ Faster previews (4). Measured (release build, Rust sample): the
+   whole file went from 114 ms to 62 ms (render, decode, encode), a
+   pane's worth from 69 ms to 51 ms; with 1,337 fetched previews the old
+   shared fontconfig cost 145 ms per render, the per-font one 50 ms.
+   Done: 8-bit BMP, per-font fontconfig, only the visible lines, decoding
+   on the renderer's thread, the last 8 images kept, a 150 ms pause,
+   ImageMagick under `nice`. Not needed: the terminal encode stays on the
+   main thread (about 7 ms), and the Rust renderer. `THEME_STUDIO_TIMING=1`
+   logs each render to `~/.local/state/theme-studio/timing.log`.
 6. Prefetching off the main thread (7).
 7. Then the tournament (Phase 7 step 4).
 

@@ -516,20 +516,21 @@ pub fn migrate_previews() {
     }
 }
 
-/// A fontconfig setup that adds the preview fonts to the system's, so they
-/// can be drawn without installing them.
-pub fn preview_fontconfig() -> PathBuf {
-    let path = cache_dir().join("preview-fonts.conf");
+/// A fontconfig setup for one previewed font: the system's fonts plus that
+/// font's folder. Much quicker to load than one listing every preview
+/// (fontconfig checks each folder it's given on every start).
+pub fn preview_fontconfig_for(id: &str) -> PathBuf {
+    let dir = cache_dir().join("fontconfig-confs");
+    let path = dir.join(format!("{id}.conf"));
     let conf = format!(
         "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  \
          <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n  <dir>{}</dir>\n  \
          <cachedir>{}</cachedir>\n</fontconfig>\n",
-        preview_dir().display(),
+        preview_dir().join(id).display(),
         cache_dir().join("fontconfig").display()
     );
-    // written again when the folders change (they moved once)
     if std::fs::read_to_string(&path).ok().as_deref() != Some(conf.as_str()) {
-        let _ = std::fs::create_dir_all(cache_dir());
+        let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(&path, conf);
     }
     path
@@ -558,6 +559,7 @@ pub fn previews_size() -> u64 {
 
 /// Deletes every preview font (they're fetched again when needed).
 pub fn clear_previews() -> Result<()> {
+    let _ = std::fs::remove_dir_all(cache_dir().join("fontconfig-confs"));
     let dir = preview_dir();
     if dir.exists() {
         std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;

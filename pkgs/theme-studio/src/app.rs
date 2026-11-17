@@ -496,13 +496,10 @@ impl App {
             .sample
             .request(markup, self.palette.get("bg0"), dpi);
         match self.fonts.sample.take() {
-            Some(Ok(path)) => match image::open(&path) {
-                Ok(img) => {
-                    self.sample_image = self.picker.as_ref().map(|p| p.new_resize_protocol(img));
-                    self.sample_error = None;
-                }
-                Err(e) => self.sample_error = Some(format!("{e}")),
-            },
+            Some(Ok(img)) => {
+                self.sample_image = self.picker.as_ref().map(|p| p.new_resize_protocol(img));
+                self.sample_error = None;
+            }
             Some(Err(e)) => self.sample_error = Some(e),
             None => {}
         }

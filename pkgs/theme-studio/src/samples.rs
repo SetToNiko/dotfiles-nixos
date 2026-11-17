@@ -305,13 +305,13 @@ pub fn code_lines(lang: usize) -> usize {
     LANGS[lang % LANGS.len()].3.lines().count()
 }
 
-/// Code from line `first` on, highlighted: keywords, strings, numbers,
-/// comments, calls, types.
-pub fn code(st: &Style, lang: usize, first: usize) -> String {
+/// `count` lines of code from line `first` on, highlighted: keywords,
+/// strings, numbers, comments, calls, types.
+pub fn code(st: &Style, lang: usize, first: usize, count: usize) -> String {
     let (_, keywords, comment, src) = LANGS[lang % LANGS.len()];
     let span = |k: &str, t: &str| format!("<span foreground=\"{}\">{}</span>", st.c(k), esc(t));
     let mut out = st.open();
-    for line in src.lines().skip(first) {
+    for line in src.lines().skip(first).take(count) {
         let mut rest = line;
         while !rest.is_empty() {
             let c = rest.chars().next().unwrap();
@@ -533,7 +533,7 @@ mod tests {
             palette: &p,
         };
         for (lang, l) in LANGS.iter().enumerate() {
-            let m = code(&st, lang, 0);
+            let m = code(&st, lang, 0, usize::MAX);
             assert!(m.starts_with("<span font=\"Inter &lt;Bold&gt; 12\""));
             assert_eq!(
                 m.matches("<span").count(),
@@ -543,7 +543,10 @@ mod tests {
             );
             assert!(!m.contains("<<") && !m.contains("& "), "escaped");
         }
-        assert!(code(&st, 0, 0).contains(">fn</span>"), "keywords coloured");
+        assert!(
+            code(&st, 0, 0, usize::MAX).contains(">fn</span>"),
+            "keywords coloured"
+        );
         for m in [icons(&st), readme(&st)] {
             assert_eq!(m.matches("<span").count(), m.matches("</span>").count());
         }
@@ -578,7 +581,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("theme-studio-samples-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut texts: Vec<(String, String)> = (0..LANGS.len())
-            .map(|l| (LANGS[l].0.replace('/', "-"), code(&st, l, 0)))
+            .map(|l| (LANGS[l].0.replace('/', "-"), code(&st, l, 0, usize::MAX)))
             .collect();
         texts.push(("icons".into(), icons(&st)));
         texts.push(("readme".into(), readme(&st)));
