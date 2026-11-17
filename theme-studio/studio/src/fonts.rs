@@ -213,15 +213,9 @@ impl FontStore {
     /// The host offset files with the old role keys get the new ones (not
     /// kept in the history: it's by file name, and fonts.json is taken).
     fn migrate_offsets(&self) -> Result<()> {
-        // the hosts folder: beside fonts.json in the old layout, else in the
-        // old configs folder (the data folder doesn't have one)
-        let dir = [
-            self.dir.join("hosts"),
-            crate::paths::legacy_configs().join("hosts"),
-        ]
-        .into_iter()
-        .find(|d| d.is_dir());
-        let Some(Ok(hosts)) = dir.map(std::fs::read_dir) else {
+        // a hosts folder beside fonts.json (the old layout kept them
+        // together; font-switch reads both key names either way)
+        let Ok(hosts) = std::fs::read_dir(self.dir.join("hosts")) else {
             return Ok(());
         };
         for host in hosts.flatten() {

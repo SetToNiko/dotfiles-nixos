@@ -381,11 +381,7 @@ mod tests {
         let share = crate::store::Store::locate().share;
         let out = Command::new("jq")
             .args(["-r", "-f"])
-            .arg(crate::paths::share_file(
-                &share,
-                "palette-derive.jq",
-                "palette-derive.jq",
-            ))
+            .arg(crate::paths::share_file(&share, "palette-derive.jq"))
             .arg(&input)
             .output();
         let Ok(out) = out else {

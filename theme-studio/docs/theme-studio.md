@@ -146,8 +146,9 @@ Environment variables:
 - `THEME_STUDIO_DATA`: your palettes, font presets and themes (default
   `~/.config/theme-studio`, here linked to `configs/theme-studio/`).
 - `THEME_STUDIO_SHARE`: the files the studio and scripts need (set by the
-  package).
-- `THEME_STUDIO_CONFIGS`: the old place for everything (default
-  `~/dotfiles-nixos/configs`), used while the move is under way.
+  package, or to the checkout's `share/` in live mode; a `cargo run` in the
+  checkout finds it by itself).
+- `THEME_STUDIO_SCRIPTS`: where the commands find their scripts (live mode
+  sets it to the checkout's `scripts/`).
 - `THEME_STUDIO_TIMING=1`: logs each font preview's render time to
   `~/.local/state/theme-studio/timing.log`.

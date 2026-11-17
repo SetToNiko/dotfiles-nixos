@@ -211,8 +211,7 @@ impl Store {
     }
 
     pub fn terminal_map(&self) -> Result<TerminalMap> {
-        let path =
-            crate::paths::share_file(&self.share, "terminal-colors.json", "terminal-colors.json");
+        let path = crate::paths::share_file(&self.share, "terminal-colors.json");
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         let v: Value = serde_json::from_str(&text)?;

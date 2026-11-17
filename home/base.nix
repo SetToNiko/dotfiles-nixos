@@ -21,7 +21,6 @@ let
     starship = "starship";
     yazi = "yazi";
     rofi = "rofi";
-    pywalfox = "pywalfox";
     # (theme-studio: programs.theme-studio.dataDir, below)
     # per-host fragments (e.g. ~/.config/host/i3.conf, included by i3/config)
     host = "hosts/${host}";

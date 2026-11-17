@@ -65,9 +65,9 @@ fi
   jq -r --arg n "$name" '.[$n] | to_entries[] | "    \(.key | gsub("_"; "-")): \(.value);"' "$data"
   echo '}'; } > "$out/rofi.rasi"
 
-# Firefox (Pywalfox): the mapping is pywalfox-colors.jq (configs/pywalfox/colors.jq before the move)
+# Firefox (Pywalfox): the mapping is share/pywalfox-colors.jq
 mkdir -p "$HOME/.cache/wal"
-jq --arg n "$name" -f "$(share_file pywalfox-colors.jq pywalfox/colors.jq)" \
+jq --arg n "$name" -f "$(share_file pywalfox-colors.jq)" \
   "$data" > "$HOME/.cache/wal/colors.json"
 
 if [ -z "$NO_RESTART" ]; then

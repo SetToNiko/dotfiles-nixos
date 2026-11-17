@@ -1,19 +1,16 @@
 //! Where things are. Four kinds of place, kept apart so the studio doesn't
-//! depend on one dotfiles layout (docs/migration.md):
+//! depend on one layout:
 //!
 //! - the **data folder**: your palettes.json, fonts.json and themes.json
-//!   (`$THEME_STUDIO_DATA`, else `$XDG_CONFIG_HOME/theme-studio` once it
-//!   holds a palettes.json);
+//!   (`$THEME_STUDIO_DATA`, else `$XDG_CONFIG_HOME/theme-studio`);
 //! - the **share folder**: files the studio and scripts need, such as
-//!   terminal-colors.json (`$THEME_STUDIO_SHARE`, set by the package);
+//!   terminal-colors.json (`$THEME_STUDIO_SHARE`, set by the package; else
+//!   the one installed beside the program, or the project's own when run
+//!   from a checkout);
 //! - the **switch scripts**: commands on PATH (`theme-switch`,
-//!   `font-switch`), else the scripts in the share folder's project;
+//!   `font-switch`), else the scripts beside the share folder;
 //! - the **desktop configs** the preview reads (i3, rofi, i3blocks, nvim):
-//!   `$XDG_CONFIG_HOME`, as on any distro.
-//!
-//! While the move is under way each of them falls back to the old place,
-//! the dotfiles' configs folder (`$THEME_STUDIO_CONFIGS`, default
-//! `~/dotfiles-nixos/configs`), so old and new layouts both work.
+//!   `$XDG_CONFIG_HOME`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,77 +32,51 @@ pub fn config_home() -> PathBuf {
     env_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
 }
 
-/// The old place for everything: the dotfiles' configs folder.
-pub fn legacy_configs() -> PathBuf {
-    env_dir("THEME_STUDIO_CONFIGS").unwrap_or_else(|| home().join("dotfiles-nixos/configs"))
-}
-
 /// Your palettes, font presets and themes.
 pub fn data_dir() -> PathBuf {
-    if let Some(d) = env_dir("THEME_STUDIO_DATA") {
+    env_dir("THEME_STUDIO_DATA").unwrap_or_else(|| config_home().join("theme-studio"))
+}
+
+/// Files the studio and the scripts need (terminal-colors.json, …):
+/// `$THEME_STUDIO_SHARE`; else `share/theme-studio/share` beside the
+/// program's `bin/` (an install); else the project's `share/` (a build in a
+/// checkout, e.g. `cargo run`).
+pub fn share_dir() -> PathBuf {
+    if let Some(d) = env_dir("THEME_STUDIO_SHARE") {
         return d;
     }
-    let xdg = config_home().join("theme-studio");
-    if xdg.join("palettes.json").exists() {
-        return xdg;
-    }
-    legacy_configs()
+    let installed = std::env::current_exe().ok().and_then(|exe| {
+        let d = exe.parent()?.parent()?.join("share/theme-studio/share");
+        d.is_dir().then_some(d)
+    });
+    installed.unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../share"))
 }
 
-/// Files the studio and the scripts need (terminal-colors.json, …).
-pub fn share_dir() -> PathBuf {
-    env_dir("THEME_STUDIO_SHARE").unwrap_or_else(legacy_configs)
+/// A file in the share folder.
+pub fn share_file(share: &Path, name: &str) -> PathBuf {
+    share.join(name)
 }
 
-/// A file in the share folder. Its name there, and (`legacy`) its name in
-/// the old configs folder, where it may still be.
-pub fn share_file(share: &Path, name: &str, legacy: &str) -> PathBuf {
-    let p = share.join(name);
-    if p.exists() {
-        return p;
-    }
-    let old = share.join(legacy);
-    if old.exists() {
-        return old;
-    }
-    legacy_configs().join(legacy)
-}
-
-/// Where the desktop's configs are read from for the preview: the XDG
-/// config folder when it has them, else the old configs folder.
+/// Where the desktop's configs are read from for the preview.
 pub fn desktop_dir() -> PathBuf {
-    let xdg = config_home();
-    if xdg.join("i3/theme").exists() {
-        xdg
-    } else {
-        legacy_configs()
-    }
+    config_home()
 }
 
-/// Where the preview's demo shell starts (it shows `git log`): the
-/// dotfiles repo when it's there, else the home folder.
+/// Where the preview's demo shell starts (it shows `git log`): the git
+/// checkout the share folder is in, when it's one (live), else home.
 pub fn demo_dir() -> PathBuf {
-    legacy_configs()
-        .parent()
-        .filter(|p| p.join(".git").exists())
+    let share = share_dir();
+    share
+        .ancestors()
+        .find(|d| d.join(".git").exists())
         .map(Path::to_path_buf)
         .unwrap_or_else(home)
 }
 
-/// The studio's guide (the README tab), found from the share folder: in
-/// the project, `docs/` beside `share/`; in the old layout (the share
-/// folder is the dotfiles' configs folder), the dotfiles' `docs/` or, once
-/// the project is there, `theme-studio/docs/`.
+/// The studio's guide (the README tab): `docs/` beside the share folder,
+/// as in the project and in the package.
 pub fn guide(share: &Path) -> PathBuf {
-    let candidates: Vec<PathBuf> = ["docs/theme-studio.md", "theme-studio/docs/theme-studio.md"]
-        .iter()
-        .filter_map(|rel| share.parent().map(|p| p.join(rel)))
-        .collect();
-    candidates
-        .iter()
-        .find(|p| p.exists())
-        .cloned()
-        .unwrap_or_else(|| candidates[0].clone())
+    share.parent().unwrap_or(share).join("docs/theme-studio.md")
 }
 
 /// Whether a command is on PATH.
@@ -122,9 +93,9 @@ fn on_path(name: &str) -> bool {
 }
 
 /// A switch script (`theme-switch`, `font-switch`, `themes-switch`) ready
-/// to run: the command on PATH, else `bash <script>.sh` from the project's
-/// scripts folder, else from the old configs folder. It's told where the
-/// data and share folders are, so it reads what the studio reads.
+/// to run: the command on PATH, else `bash <script>.sh` from the scripts
+/// folder beside the share folder. It's told where the data and share
+/// folders are, so it reads what the studio reads.
 pub fn switch_command(name: &str, data: &Path, share: &Path) -> Command {
     // Tests never touch the real desktop: the switch scripts write
     // ~/.config/colors and ~/.config/fonts and restart i3, whatever data
@@ -137,15 +108,11 @@ pub fn switch_command(name: &str, data: &Path, share: &Path) -> Command {
     let mut cmd = if on_path(name) {
         Command::new(name)
     } else {
-        let file = format!("{name}.sh");
-        let script = [
-            share.parent().map(|p| p.join("scripts").join(&file)),
-            Some(legacy_configs().join(&file)),
-        ]
-        .into_iter()
-        .flatten()
-        .find(|p| p.exists())
-        .unwrap_or_else(|| legacy_configs().join(&file));
+        let script = share
+            .parent()
+            .unwrap_or(share)
+            .join("scripts")
+            .join(format!("{name}.sh"));
         let mut c = Command::new("bash");
         c.arg(script);
         c
@@ -222,20 +189,24 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
+    /// Without $THEME_STUDIO_SHARE (as in tests), a build in the checkout
+    /// finds the project's share/, its guide and its scripts.
     #[test]
-    fn share_files_fall_back_to_their_old_names() {
-        let d = temp("share");
-        std::fs::create_dir_all(d.join("pywalfox")).unwrap();
-        std::fs::write(d.join("pywalfox/colors.jq"), "").unwrap();
-        assert_eq!(
-            share_file(&d, "pywalfox-colors.jq", "pywalfox/colors.jq"),
-            d.join("pywalfox/colors.jq")
+    fn a_checkout_build_finds_the_projects_files() {
+        let share = share_dir();
+        assert!(
+            share_file(&share, "terminal-colors.json").is_file(),
+            "{}",
+            share.display()
         );
-        std::fs::write(d.join("pywalfox-colors.jq"), "").unwrap();
-        assert_eq!(
-            share_file(&d, "pywalfox-colors.jq", "pywalfox/colors.jq"),
-            d.join("pywalfox-colors.jq")
+        assert!(guide(&share).is_file());
+        assert!(
+            share
+                .parent()
+                .unwrap()
+                .join("scripts/theme-switch.sh")
+                .is_file()
         );
-        std::fs::remove_dir_all(d).unwrap();
+        assert_eq!(data_dir(), config_home().join("theme-studio"));
     }
 }

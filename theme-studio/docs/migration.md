@@ -378,6 +378,33 @@ left: only the links themselves, the studio's fallbacks, and this plan.
 - **Check:** `grep -r 'dotfiles-nixos/configs'` in `theme-studio/` finds
   nothing; the full checklist below; `cargo test`; **`nrs`**.
 
+**Step 7 as built ✅** (done right after step 6, at your choice, rather
+than after a few days):
+
+- A last search, of both repos and the home folder (`~/.local/bin`,
+  autostart, desktop files, systemd user units, `~/.config`), found no user
+  of the old paths. The eleven links in `configs/` were checked to point
+  into the project and removed, with the emptied `lib/` and `pywalfox/`;
+  `home/base.nix` no longer links `~/.config/pywalfox` (nothing reads it).
+- The studio: the data folder is `$THEME_STUDIO_DATA` else
+  `~/.config/theme-studio`; the share folder `$THEME_STUDIO_SHARE`, else
+  the one installed beside the program, else the checkout's (`cargo run`);
+  the desktop configs `~/.config`; the scripts the commands on PATH, else
+  `scripts/` beside the share folder; the demo shell starts in the git
+  checkout the share folder is in, else home. `THEME_STUDIO_CONFIGS` and
+  every fallback to `~/dotfiles-nixos/configs` are gone.
+- The scripts: `data_file` is `$THEME_STUDIO_DATA` else
+  `~/.config/theme-studio`; `share_file` is `$THEME_STUDIO_SHARE` else
+  `../share`.
+- Checked: the live commands and the scripts run plainly gave byte-for-byte
+  the same output before and after the links went; the studio, driven end
+  to end with the installed commands, too; both hosts evaluate with the
+  same packages; 115 tests pass.
+
+The move is complete: everything Theme Studio needs is in `theme-studio/`,
+your data is in `configs/theme-studio/`, and the dotfiles only switch it on
+(`programs.theme-studio`, `services.theme-studio.loginFont`).
+
 ### Later: the split
 
 `git subtree split --prefix=theme-studio` gives a repo with the project's

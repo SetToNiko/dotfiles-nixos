@@ -66,12 +66,9 @@ Settings: $XDG_CONFIG_HOME/theme-studio (default ~/.config/theme-studio):
 
 Environment:
   THEME_STUDIO_DATA     your palettes.json, fonts.json and themes.json
-                        (default $XDG_CONFIG_HOME/theme-studio once it has a
-                        palettes.json)
+                        (default $XDG_CONFIG_HOME/theme-studio)
   THEME_STUDIO_SHARE    the files the studio and scripts need (set by the
                         package)
-  THEME_STUDIO_CONFIGS  the old place for all of it, still used when the
-                        others don't apply (default ~/dotfiles-nixos/configs)
   THEME_STUDIO_TIMING   set: log font preview render times to
                         ~/.local/state/theme-studio/timing.log
 
