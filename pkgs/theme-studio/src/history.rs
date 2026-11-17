@@ -196,7 +196,14 @@ impl History {
                 Some((p, s))
             })
             .collect();
-        out.sort_by_key(|(_, s)| std::cmp::Reverse((s.name.is_some(), s.time)));
+        // the file name breaks ties within a millisecond (it ends in a counter)
+        out.sort_by_key(|(p, s)| {
+            std::cmp::Reverse((
+                s.name.is_some(),
+                s.time,
+                p.file_name().map(|n| n.to_owned()),
+            ))
+        });
         out
     }
 
