@@ -384,22 +384,9 @@ fn esc(s: &str) -> String {
 pub fn sample_markup(fonts: &[Font; 3], sizes: [u32; 3], p: &Palette, name: &str) -> String {
     let c = |k: &str| p.get(k).hex();
     let span = |k: &str, t: &str| format!("<span foreground=\"{}\">{}</span>", c(k), esc(t));
-    let label = |role: usize| {
-        format!(
-            "<span font=\"{} {}\" foreground=\"{}\">{} · {} {}</span>",
-            esc(&fonts[0].family),
-            (sizes[0] as f64 * 0.75).round().max(6.0),
-            c("grey1"),
-            ROLES[role],
-            esc(&fonts[role].family),
-            sizes[role]
-        )
-    };
     let font = |role: usize| format!("{} {}", esc(&fonts[role].family), sizes[role]);
     let mut m = String::new();
     // mono: code, as nvim shows it
-    m += &label(0);
-    m += "\n";
     m += &format!("<span font=\"{}\" foreground=\"{}\">", font(0), c("fg0"));
     m += &format!(
         "{} {}{}{}{}\n",
@@ -431,7 +418,6 @@ pub fn sample_markup(fonts: &[Font; 3], sizes: [u32; 3], p: &Palette, name: &str
     );
     m += "</span>\n";
     // ui: the rofi theme menu
-    m += &label(1);
     m += "\n";
     m += &format!("<span font=\"{}\" foreground=\"{}\">", font(1), c("fg0"));
     m += &format!("Theme: {}\n", span("grey1", "type to search"));
@@ -443,7 +429,6 @@ pub fn sample_markup(fonts: &[Font; 3], sizes: [u32; 3], p: &Palette, name: &str
     );
     m += "</span>\n";
     // bar: workspaces and blocks on the bar background
-    m += &label(2);
     m += "\n";
     m += &format!(
         "<span font=\"{}\" background=\"{}\" foreground=\"{}\"><span background=\"{}\" foreground=\"{}\"> 1 </span> 2  3        vol 73% {} 󰂯 HelixBrigitte {} 18:41 </span>",

@@ -10,9 +10,8 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use crate::app::App;
 use crate::color::Rgb;
 use crate::hit::{Target, hover};
-use crate::keymap::{Context, Keymap, display_seq};
+use crate::keymap::{Keymap, display_seq};
 use crate::settings::{BhRow, DiffLine, FILES, HistFocus, KmRow, TABS, Tab, behaviour_rows};
-use crate::ui::friendly;
 
 /// Keeps `sel` on screen in a list `height` rows tall.
 fn follow(scroll: &mut usize, sel: usize, height: usize) {
@@ -59,16 +58,8 @@ fn value_spans(v: &str, style: Style) -> Vec<Span<'static>> {
 }
 
 pub fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
-    let back = app
-        .keymap
-        .key_for(&[Context::Global], crate::keymap::Action::PageMain)
-        .unwrap_or_default();
     let block = Block::bordered()
         .title(" Settings ")
-        .title_bottom(format!(
-            " {}: back to the main page   [ ]: tabs   changes are saved straight away ",
-            friendly(&back)
-        ))
         .border_style(Style::new().yellow());
     let inner = block.inner(area);
     f.render_widget(block, area);

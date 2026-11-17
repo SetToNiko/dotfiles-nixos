@@ -359,13 +359,8 @@ fn draw_page(f: &mut Frame, app: &App, area: Rect) {
         .into_iter()
         .map(|t| Line::raw(format!(" {t}")))
         .collect();
-    let back = app
-        .keymap
-        .key_for(&[Context::Global], Action::PageMain)
-        .unwrap_or_default();
     let block = Block::bordered()
         .title(title)
-        .title_bottom(format!(" {} back to the main page ", friendly(&back)))
         .border_style(Style::new().yellow());
     f.render_widget(Paragraph::new(lines).block(block), area);
 }

@@ -75,16 +75,40 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
         } else {
             font.size.to_string()
         };
+        // wide layouts: the size beside the name; narrow: below it
+        let (first, second) = if app.wide {
+            let room = (inner.width as usize).saturating_sub(9 + 2 + size.chars().count());
+            (
+                Line::from(vec![
+                    Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
+                    Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
+                    Span::styled(
+                        format!(" {}", truncate(&font.family, room.max(4))),
+                        name_style,
+                    ),
+                    Span::raw(format!("  {size}")),
+                ]),
+                Line::from(vec![
+                    Span::raw("         "),
+                    Span::styled(ROLE_USE[i], Style::new().dark_gray()),
+                ]),
+            )
+        } else {
+            (
+                Line::from(vec![
+                    Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
+                    Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
+                    Span::styled(format!(" {}", font.family), name_style),
+                ]),
+                Line::from(vec![
+                    Span::raw(format!("         {size:<12}")),
+                    Span::styled(ROLE_USE[i], Style::new().dark_gray()),
+                ]),
+            )
+        };
         let mut role = vec![
-            Line::from(vec![
-                Span::styled(if selected { " ▸ " } else { "   " }, Style::new().yellow()),
-                Span::styled(format!("{:<5}", ROLES[i]), Style::new().bold()),
-                Span::styled(format!(" {}", font.family), name_style),
-            ]),
-            Line::from(vec![
-                Span::raw(format!("         {size:<12}")),
-                Span::styled(ROLE_USE[i], Style::new().dark_gray()),
-            ]),
+            first,
+            second,
             match t.warnings(i).first() {
                 Some(w) => Line::styled(format!("         ⚠ {w}"), Style::new().yellow()),
                 None => Line::raw(""),
@@ -273,23 +297,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
 /// The sample image: the fonts drawn by Pango at this machine's sizes and
 /// DPI, in the palette being edited.
 pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
-    let browsing = matches!(app.fonts.focus, FontFocus::List | FontFocus::Search);
-    let title = Line::from(vec![
-        panel_number(3),
-        "Sample".into(),
-        Span::styled(
-            format!(
-                "  {}at {} dpi, sizes as on this machine ",
-                if browsing {
-                    "previewing the highlighted font, "
-                } else {
-                    ""
-                },
-                app.fonts.dpi
-            ),
-            Style::new().dark_gray(),
-        ),
-    ]);
+    let title = Line::from(vec![panel_number(3), "Sample ".into()]);
     let title = pane_title(app, area, title, 3);
     let b = Block::bordered().title(title).border_style(
         if app.side == Side::Fonts
