@@ -19,6 +19,9 @@
         inherit theme-studio;
         default = theme-studio;
       };
+      # programs.theme-studio (home-manager) and services.theme-studio.loginFont
+      homeManagerModules.default = ./packaging/nix/home-module.nix;
+      nixosModules.default = ./packaging/nix/nixos-module.nix;
       # cargo, rustc and the crate's dependencies, for working in studio/
       devShells.${system}.default = pkgs.mkShell { inputsFrom = [ theme-studio.bin ]; };
     };

@@ -114,7 +114,7 @@ pub struct FontSettings {
     pub sample_at_start: String,
     /// Opening the font list unfolds the groups of the role's current font.
     pub list_opens_to_current_font: bool,
-    /// The list of downloaded fonts that home/fonts.nix reads ("": next to
+    /// The list of downloaded fonts that packaging/nix/fonts.nix reads ("": next to
     /// settings.json; "~/" works).
     pub installed_list: String,
     // (the per-role filters, mono-filter / ui-filter / bar-filter, went: each

@@ -105,7 +105,7 @@ Three pages, on `F1`–`F3`:
 | `configs/theme-studio/fonts.json`       | font presets                                           |
 | `configs/terminal-colors.json`          | which palette key is each terminal colour              |
 | `configs/theme-studio/`                 | the studio's `keymaps.json` and `settings.json`, linked to `~/.config/theme-studio` |
-| `home/fonts-installed.json`             | fonts the studio downloaded, installed by `home/fonts.nix` on the next rebuild |
+| `home/fonts-installed.json`             | fonts the studio downloaded, installed by the home-manager module on the next rebuild |
 | `~/.local/share/fonts/theme-studio/`    | downloaded fonts until that rebuild                    |
 | `~/.local/share/theme-studio/previews/` | preview files of fonts that aren't installed           |
 | `~/.local/state/theme-studio/`          | config history and tournaments                         |
@@ -118,8 +118,22 @@ files when it starts, keeping the old one in the history.
 ## Building and testing
 
 The studio is built by `packaging/nix/package.nix`: by the dotfiles' flake
-(`nix run ~/dotfiles-nixos#theme-studio`, installed by `home/base.nix`), or
-on its own (`nix build ~/dotfiles-nixos/theme-studio`). To work on it:
+(`nix run ~/dotfiles-nixos#theme-studio`; installed by `programs.theme-studio` in `home/base.nix`), or
+on its own (`nix build ~/dotfiles-nixos/theme-studio`).
+
+Two modules set it up (the project's flake exports both):
+
+- **home-manager**, `packaging/nix/home-module.nix`, `programs.theme-studio`:
+  the studio and the three commands; `live` (a checkout: the commands run
+  its scripts, so edits apply without a rebuild); `dataDir` (linked to
+  `~/.config/theme-studio`); `fontsList` (downloaded fonts, installed);
+  `~/.config/colors` and `~/.config/fonts` regenerated on every switch, with
+  `fallbackPalette` / `fallbackFonts` when nothing is current.
+- **NixOS**, `packaging/nix/nixos-module.nix`,
+  `services.theme-studio.loginFont`: the login screen's font (the greeter
+  config `template`, the font folder in the system fontconfig).
+
+To work on it:
 
 ```sh
 cd ~/dotfiles-nixos/theme-studio/studio

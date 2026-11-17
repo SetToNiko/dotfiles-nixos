@@ -36,7 +36,7 @@
                 extraSpecialArgs = { inherit host; };
                 users.niko.imports = [
                   ./home/base.nix
-                  ./home/fonts.nix
+                  ./theme-studio/packaging/nix/home-module.nix
                   ./hosts/${host}/home.nix
                 ];
                 backupFileExtension = "backup";

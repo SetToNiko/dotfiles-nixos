@@ -22,7 +22,7 @@ let
     yazi = "yazi";
     rofi = "rofi";
     pywalfox = "pywalfox";
-    theme-studio = "theme-studio"; # keymaps.json, settings.json
+    # (theme-studio: programs.theme-studio.dataDir, below)
     # per-host fragments (e.g. ~/.config/host/i3.conf, included by i3/config)
     host = "hosts/${host}";
   };
@@ -135,29 +135,19 @@ in
     org.gradle.daemon.idletimeout=15000
   '';
 
-  # Regenerate ~/.config/colors from palettes.json on every switch, so the
-  # generated files never lag behind the palette format. Keeps the current
-  # scheme; picks a default on first setup or if the current one is gone.
-  home.activation.defaultTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    theme="$(cat "$HOME/.config/colors/current" 2>/dev/null || true)"
-    for name in "$theme" "Gruvbox Dark"; do
-      # ghostty: theme-switch.sh checks it for a theme matching the palette name
-      if [ -n "$name" ] && run env PATH="${pkgs.jq}/bin:${pkgs.ghostty}/bin:$PATH" NO_RESTART=1 \
-        ${pkgs.bash}/bin/bash "${dotfiles}/theme-switch.sh" "$name"; then
-        break
-      fi
-    done
-  '';
-  # Same for the font preset (~/.config/fonts, from fonts.json).
-  home.activation.defaultFonts = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    preset="$(cat "$HOME/.config/fonts/current" 2>/dev/null || true)"
-    for name in "$preset" "JetBrains Mono"; do
-      if [ -n "$name" ] && run env PATH="${pkgs.jq}/bin:${pkgs.fontconfig.bin}/bin:$PATH" NO_RESTART=1 \
-        ${pkgs.bash}/bin/bash "${dotfiles}/font-switch.sh" "$name"; then
-        break
-      fi
-    done
-  '';
+  # Theme Studio (theme-studio/, home-module.nix there): the studio and the
+  # theme-switch / themes-switch / font-switch commands, run live from the
+  # checkout; the data in configs/theme-studio, linked to
+  # ~/.config/theme-studio; ~/.config/colors and ~/.config/fonts regenerated
+  # on every switch (keeping the current ones); downloaded fonts installed.
+  programs.theme-studio = {
+    enable = true;
+    live = "${config.home.homeDirectory}/dotfiles-nixos/theme-studio";
+    dataDir = "${dotfiles}/theme-studio";
+    fontsList = ./fonts-installed.json;
+    fallbackPalette = "Gruvbox Dark";
+    fallbackFonts = "JetBrains Mono";
+  };
 
   home.stateVersion = "25.05";
   programs.bash = {
@@ -262,7 +252,6 @@ in
     asciiPower
     asciiBoot
     xss-lock
-    (callPackage ../theme-studio/packaging/nix/package.nix { }) # $mod+Ctrl+t
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)

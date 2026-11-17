@@ -330,6 +330,28 @@ they change.
   **`nrs`**; log out and in (login font); `nrs` again with a different
   active theme to see the activation regenerate it.
 
+**Step 5 as built ✅:**
+
+- `home-module.nix` as planned, with two more options: `refresh` (on by
+  default) and `fallbackPalette` / `fallbackFonts` (the old activation's
+  "Gruvbox Dark" and "JetBrains Mono", now set in `home/base.nix`). The
+  refresh steps run the commands after `linkGeneration`, since the commands
+  find the data through the `~/.config/theme-studio` link; they need no
+  PATH of their own (the commands carry it). Live mode is a second wrapper
+  (`theme-studio-live`) setting `THEME_STUDIO_SCRIPTS` and
+  `THEME_STUDIO_SHARE` to the checkout.
+- `fonts.nix` moved into `packaging/nix/` (`git mv`) as a function of the
+  list; the module installs its packages and removes the studio's copies.
+- `nixos-module.nix` has `enable`, `user`, `group` and `template`;
+  `ascii-boot.nix` sets them and keeps the animation, `greeter.png` and the
+  folder itself.
+- Checked by evaluating both hosts before and after: the greeter's `/etc`
+  files, `local.conf`, the tmpfiles rules (same set), the
+  `~/.config/theme-studio` link and the font packages are identical; the
+  only differences are the studio package (now the live wrapper) and the
+  activation steps' names. The live commands, run with a bare environment
+  as the activation runs them, wrote byte-for-byte the same files.
+
 ### 6. Callers switch to the new names (configs repo)
 
 - After step 5's `nrs`: i3's keys call `themes-switch`, `theme-switch`,

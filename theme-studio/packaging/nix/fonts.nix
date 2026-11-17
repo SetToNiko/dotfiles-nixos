@@ -1,15 +1,19 @@
-# Fonts downloaded with the theme studio (its Download fonts page, F2).
-# The studio records each download in fonts-installed.json; this installs
-# them for good:
+# Fonts downloaded with Theme Studio (its Fonts page, F2), made permanent.
+# The studio records each download in a list (settings.json
+# `fonts.installed-list`); home-module.nix passes that list here, and this
+# gives the packages that install them:
 #   google      pkgs.google-fonts.override { fonts = [ … ]; }
 #   nerd        pkgs.nerd-fonts.<attr>
 #   fontsource  the recorded files, with fetchurl and their hashes
-# The studio's own copies (~/.local/share/fonts/theme-studio/<id>) are then
-# removed on activation, so there are no duplicate families.
-{ pkgs, lib, ... }:
+# and the ids of the studio's own copies (~/.local/share/fonts/theme-studio/<id>),
+# which the module removes on activation so there are no duplicate families.
+{
+  pkgs,
+  lib,
+  list,
+}:
 
 let
-  list = lib.importJSON ./fonts-installed.json;
   fonts = list.fonts or { };
   from = source: lib.filterAttrs (_: f: f.source == source) fonts;
 
@@ -39,7 +43,7 @@ let
       if attr != null && pkgs.nerd-fonts ? ${attr} then
         [ pkgs.nerd-fonts.${attr} ]
       else
-        lib.warn "fonts.nix: no nerd-fonts package for ${asset}" [ ]
+        lib.warn "theme-studio fonts.nix: no nerd-fonts package for ${asset}" [ ]
     ) (from "nerd")
   );
 
@@ -58,27 +62,9 @@ let
       '') f.files}
     ''
   ) (from "fontsource");
-
-  ids = lib.mapAttrsToList (_: f: f.id) fonts;
 in
 {
-  home.packages =
+  packages =
     lib.optional (google != [ ]) (pkgs.google-fonts.override { fonts = google; }) ++ nerd ++ fontsource;
-
-  # Nix provides these now: drop the studio's downloaded copies
-  home.activation.studioFontCopies = lib.mkIf (ids != [ ]) (
-    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      studio="$HOME/.local/share/fonts/theme-studio"
-      removed=
-      for id in ${lib.escapeShellArgs ids}; do
-        if [ -d "$studio/$id" ]; then
-          run rm -rf "$studio/$id"
-          removed=1
-        fi
-      done
-      if [ -n "$removed" ]; then
-        run ${pkgs.fontconfig.bin}/bin/fc-cache -f
-      fi
-    ''
-  );
+  ids = lib.mapAttrsToList (_: f: f.id) fonts;
 }

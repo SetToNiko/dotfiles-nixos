@@ -3,7 +3,7 @@
 //! Fontsource fonts come from Fontsource (latin + latin-ext); Nerd Fonts come
 //! from the latest ryanoasis/nerd-fonts release. Files go to
 //! `~/.local/share/fonts/theme-studio/<id>/`, and each download is added to
-//! the installed-fonts list that home/fonts.nix reads, so a rebuild makes it
+//! the installed-fonts list that packaging/nix/fonts.nix reads, so a rebuild makes it
 //! permanent. Network and archive work goes through curl, tar and fc-cache,
 //! in background threads.
 
@@ -326,7 +326,7 @@ pub fn google_dirs(e: &Entry) -> Vec<String> {
     v
 }
 
-/// sha256 as a Nix SRI hash (for fetchurl in home/fonts.nix).
+/// sha256 as a Nix SRI hash (for fetchurl in packaging/nix/fonts.nix).
 fn sri(file: &Path) -> Result<String> {
     let out = low("sha256sum")
         .arg(file)
@@ -708,7 +708,7 @@ pub fn remove_files(root: &Path, id: &str) -> Result<()> {
 // ----- the installed-fonts list ------------------------------------------------------
 
 /// fonts-installed.json: `{"version": 1, "fonts": {name: {source, id, …}}}`,
-/// read by home/fonts.nix.
+/// read by packaging/nix/fonts.nix.
 pub fn read_list(path: &Path) -> Map<String, Value> {
     std::fs::read_to_string(path)
         .ok()
