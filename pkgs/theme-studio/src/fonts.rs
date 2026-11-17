@@ -14,8 +14,10 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use serde_json::{Map, Value, json};
 
 use crate::color::Rgb;
+use crate::font_tree::Node;
 use crate::palette::Palette;
 use crate::store::to_jq_string;
+use ratatui::layout::Rect;
 
 /// The three font roles, in fonts.json and on screen.
 pub const ROLES: [&str; 3] = ["mono", "ui", "bar"];
@@ -185,7 +187,14 @@ pub struct Installed {
     pub mono: bool,
     /// Has Nerd Font icons (checked with one icon, U+F115).
     pub nerd: bool,
+    /// Only bitmap files (PCF/BDF): render badly in Ghostty and GTK.
+    pub bitmap: bool,
+    /// Made for other scripts or symbols (CJK, emoji, math, Unifont), by name.
+    pub special: bool,
 }
+
+/// Name parts of fonts made for other scripts or for symbols.
+const SPECIAL: [&str; 5] = ["CJK", "Emoji", "Math", "Symbol", "Unifont"];
 
 /// Installed font families, sorted by name.
 pub fn installed_fonts() -> Vec<Installed> {
@@ -196,29 +205,162 @@ pub fn installed_fonts() -> Vec<Installed> {
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default()
     };
-    let mut fams: BTreeMap<String, (String, bool)> = BTreeMap::new();
-    for line in run(&["--format", "%{family[0]}\t%{spacing}\n"]).lines() {
-        let (family, spacing) = line.split_once('\t').unwrap_or((line, ""));
-        let family = family.trim();
+    // family → (name, monospaced, has a scalable file)
+    let mut fams: BTreeMap<String, (String, bool, bool)> = BTreeMap::new();
+    for line in run(&["--format", "%{family[0]}\t%{spacing}\t%{fontformat}\n"]).lines() {
+        let mut parts = line.split('\t');
+        let family = parts.next().unwrap_or("").trim();
+        let spacing = parts.next().unwrap_or("").trim();
+        let format = parts.next().unwrap_or("").trim();
         if family.is_empty() {
             continue;
         }
         let e = fams
             .entry(family.to_lowercase())
-            .or_insert((family.to_string(), false));
-        e.1 |= !spacing.trim().is_empty();
+            .or_insert((family.to_string(), false, false));
+        e.1 |= !spacing.is_empty();
+        e.2 |= !matches!(format, "PCF" | "BDF");
     }
     let nerd: HashSet<String> = run(&[":charset=f115", "--format", "%{family[0]}\n"])
         .lines()
         .map(|l| l.trim().to_lowercase())
         .collect();
     fams.into_iter()
-        .map(|(lower, (family, mono))| Installed {
+        .map(|(lower, (family, mono, scalable))| Installed {
             nerd: nerd.contains(&lower),
+            special: SPECIAL.iter().any(|s| family.contains(s)),
+            bitmap: !scalable,
             family,
             mono,
         })
         .collect()
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Spacing {
+    #[default]
+    Any,
+    Mono,
+    Propo,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NerdKind {
+    #[default]
+    Any,
+    Nerd,
+    NerdMono,
+    NerdPropo,
+    NotNerd,
+}
+
+/// The font list's filter chips. A font has to pass all of them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Filters {
+    pub spacing: Spacing,
+    pub nerd: NerdKind,
+    /// Bitmap fonts are hidden unless this is on.
+    pub show_bitmap: bool,
+    /// CJK / emoji / math fonts are hidden unless this is on.
+    pub show_special: bool,
+}
+
+/// Chip key and label, in display order.
+pub const CHIPS: [(char, &str); 8] = [
+    ('m', "mono"),
+    ('p', "propo"),
+    ('n', "NF"),
+    ('M', "NF Mono"),
+    ('P', "NF Propo"),
+    ('x', "no NF"),
+    ('b', "bitmap"),
+    ('c', "CJK·emoji·math"),
+];
+
+impl Filters {
+    pub fn allows(&self, f: &Installed) -> bool {
+        let spacing = match self.spacing {
+            Spacing::Any => true,
+            Spacing::Mono => f.mono,
+            Spacing::Propo => !f.mono,
+        };
+        let nerd = match self.nerd {
+            NerdKind::Any => true,
+            NerdKind::Nerd => f.nerd,
+            NerdKind::NerdMono => f.family.ends_with("Nerd Font Mono"),
+            NerdKind::NerdPropo => f.family.ends_with("Nerd Font Propo"),
+            NerdKind::NotNerd => !f.nerd,
+        };
+        spacing && nerd && (self.show_bitmap || !f.bitmap) && (self.show_special || !f.special)
+    }
+
+    pub fn is_on(&self, chip: char) -> bool {
+        match chip {
+            'm' => self.spacing == Spacing::Mono,
+            'p' => self.spacing == Spacing::Propo,
+            'n' => self.nerd == NerdKind::Nerd,
+            'M' => self.nerd == NerdKind::NerdMono,
+            'P' => self.nerd == NerdKind::NerdPropo,
+            'x' => self.nerd == NerdKind::NotNerd,
+            'b' => self.show_bitmap,
+            'c' => self.show_special,
+            _ => false,
+        }
+    }
+
+    /// Turns a chip on or off. Chips in the same row of choices (mono/propo,
+    /// the Nerd Font kinds) replace each other.
+    pub fn toggle(&mut self, chip: char) -> bool {
+        let flip_spacing =
+            |cur: Spacing, want: Spacing| if cur == want { Spacing::Any } else { want };
+        let flip_nerd =
+            |cur: NerdKind, want: NerdKind| if cur == want { NerdKind::Any } else { want };
+        match chip {
+            'm' => self.spacing = flip_spacing(self.spacing, Spacing::Mono),
+            'p' => self.spacing = flip_spacing(self.spacing, Spacing::Propo),
+            'n' => self.nerd = flip_nerd(self.nerd, NerdKind::Nerd),
+            'M' => self.nerd = flip_nerd(self.nerd, NerdKind::NerdMono),
+            'P' => self.nerd = flip_nerd(self.nerd, NerdKind::NerdPropo),
+            'x' => self.nerd = flip_nerd(self.nerd, NerdKind::NotNerd),
+            'b' => self.show_bitmap = !self.show_bitmap,
+            'c' => self.show_special = !self.show_special,
+            _ => return false,
+        }
+        true
+    }
+}
+
+/// A visible row of the font list.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Row {
+    /// A design or variant group; `count` is how many fonts it shows.
+    Group {
+        depth: usize,
+        path: String,
+        name: String,
+        expanded: bool,
+        count: usize,
+    },
+    Font {
+        depth: usize,
+        index: usize,
+    },
+}
+
+impl Row {
+    pub fn depth(&self) -> usize {
+        match self {
+            Row::Group { depth, .. } | Row::Font { depth, .. } => *depth,
+        }
+    }
+}
+
+/// Screen areas of the Fonts tab from the last draw, for mouse clicks.
+#[derive(Clone, Debug, Default)]
+pub struct FontAreas {
+    pub slots: Rect,
+    pub list: Rect,
+    pub chips: Vec<(char, Rect)>,
 }
 
 /// The X server's DPI (Xft.dpi), so the sample is the size the fonts really are.
@@ -246,7 +388,8 @@ fn esc(s: &str) -> String {
 /// Pango markup for the sample: code in the mono font, rofi rows in the ui
 /// font, the bar in the bar font, all in the palette's colours, at the sizes
 /// used on this machine.
-pub fn sample_markup(fonts: &[Font; 3], sizes: [u32; 3], p: &Palette) -> String {
+/// `name` is the palette being edited (shown as the selected rofi row).
+pub fn sample_markup(fonts: &[Font; 3], sizes: [u32; 3], p: &Palette, name: &str) -> String {
     let c = |k: &str| p.get(k).hex();
     let span = |k: &str, t: &str| format!("<span foreground=\"{}\">{}</span>", c(k), esc(t));
     let label = |role: usize| {
@@ -301,9 +444,10 @@ pub fn sample_markup(fonts: &[Font; 3], sizes: [u32; 3], p: &Palette) -> String 
     m += &format!("<span font=\"{}\" foreground=\"{}\">", font(1), c("fg0"));
     m += &format!("Theme: {}\n", span("grey1", "type to search"));
     m += &format!(
-        "<span background=\"{}\" foreground=\"{}\"> novmbr  </span>  Gruvbox Dark   Tokyo Night\n",
+        "<span background=\"{}\" foreground=\"{}\"> {}  </span>  Gruvbox Dark   Tokyo Night\n",
         c("yellow"),
-        c("bg0")
+        c("bg0"),
+        esc(name)
     );
     m += "</span>\n";
     // bar: workspaces and blocks on the bar background
@@ -449,8 +593,12 @@ pub struct FontsTab {
     pub slot: usize,
     pub focus: FontFocus,
     pub installed: Vec<Installed>,
+    pub tree: Vec<Node>,
+    /// Open groups, by path ("JetBrains Mono", "JetBrains Mono/Nerd Font").
+    pub expanded: HashSet<String>,
     pub search: String,
-    pub mono_only: bool,
+    pub filters: Filters,
+    pub areas: FontAreas,
     pub list_sel: usize,
     pub list_scroll: usize,
     pub dpi: u32,
@@ -486,8 +634,11 @@ impl FontsTab {
             slot: 0,
             focus: FontFocus::Slots,
             installed: Vec::new(),
+            tree: Vec::new(),
+            expanded: HashSet::new(),
             search: String::new(),
-            mono_only: false,
+            filters: Filters::default(),
+            areas: FontAreas::default(),
             list_sel: 0,
             list_scroll: 0,
             dpi: 96,
@@ -498,8 +649,14 @@ impl FontsTab {
 
     /// Reads the installed fonts and screen DPI (the first time the tab opens).
     pub fn refresh_installed(&mut self) {
-        self.installed = installed_fonts();
+        let fonts = installed_fonts();
+        self.set_installed(fonts);
         self.dpi = screen_dpi();
+    }
+
+    pub fn set_installed(&mut self, fonts: Vec<Installed>) {
+        self.tree = crate::font_tree::build(&fonts);
+        self.installed = fonts;
     }
 
     pub fn dirty(&self) -> bool {
@@ -511,27 +668,182 @@ impl FontsTab {
         (base as i32 + self.offsets[role]).max(1) as u32
     }
 
-    /// Installed fonts matching the search and filter.
-    pub fn matches(&self) -> Vec<usize> {
-        let q = self.search.to_lowercase();
-        self.installed
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| (!self.mono_only || f.mono) && f.family.to_lowercase().contains(&q))
-            .map(|(i, _)| i)
-            .collect()
+    /// The rows the list shows: the grouped tree (open groups expanded) when
+    /// not searching, a flat list of matching fonts while searching. Groups
+    /// with no font passing the filters are left out.
+    pub fn rows(&self) -> Vec<Row> {
+        let allowed = |i: usize| self.filters.allows(&self.installed[i]);
+        if !self.search.is_empty() {
+            let q = self.search.to_lowercase();
+            return (0..self.installed.len())
+                .filter(|&i| allowed(i) && self.installed[i].family.to_lowercase().contains(&q))
+                .map(|index| Row::Font { depth: 0, index })
+                .collect();
+        }
+        fn walk(t: &FontsTab, nodes: &[Node], depth: usize, parent: &str, out: &mut Vec<Row>) {
+            for n in nodes {
+                match n {
+                    Node::Leaf(i) => {
+                        if t.filters.allows(&t.installed[*i]) {
+                            out.push(Row::Font { depth, index: *i });
+                        }
+                    }
+                    Node::Group { name, children } => {
+                        let count = n
+                            .leaves()
+                            .into_iter()
+                            .filter(|&i| t.filters.allows(&t.installed[i]))
+                            .count();
+                        if count == 0 {
+                            continue;
+                        }
+                        let path = if parent.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{parent}/{name}")
+                        };
+                        let expanded = t.expanded.contains(&path);
+                        out.push(Row::Group {
+                            depth,
+                            path: path.clone(),
+                            name: name.clone(),
+                            expanded,
+                            count,
+                        });
+                        if expanded {
+                            walk(t, children, depth + 1, &path, out);
+                        }
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, &self.tree, 0, "", &mut out);
+        out
+    }
+
+    /// The font on the highlighted row, if it is a font.
+    pub fn highlighted(&self) -> Option<usize> {
+        match self.rows().get(self.list_sel) {
+            Some(Row::Font { index, .. }) => Some(*index),
+            _ => None,
+        }
     }
 
     /// The fonts the sample shows: while browsing the list, the highlighted
-    /// family stands in for the selected role.
+    /// font stands in for the selected role.
     pub fn shown_fonts(&self) -> [Font; 3] {
         let mut fonts = self.preset.fonts.clone();
         if matches!(self.focus, FontFocus::List | FontFocus::Search)
-            && let Some(&i) = self.matches().get(self.list_sel)
+            && let Some(i) = self.highlighted()
         {
             fonts[self.slot].family = self.installed[i].family.clone();
         }
         fonts
+    }
+
+    /// Group paths leading to a font in the tree.
+    fn path_to(&self, index: usize) -> Vec<String> {
+        fn find(nodes: &[Node], index: usize, parent: &str, out: &mut Vec<String>) -> bool {
+            for n in nodes {
+                match n {
+                    Node::Leaf(i) if *i == index => return true,
+                    Node::Leaf(_) => {}
+                    Node::Group { name, children } => {
+                        let path = if parent.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{parent}/{name}")
+                        };
+                        out.push(path.clone());
+                        if find(children, index, &path, out) {
+                            return true;
+                        }
+                        out.pop();
+                    }
+                }
+            }
+            false
+        }
+        let mut out = Vec::new();
+        find(&self.tree, index, "", &mut out);
+        out
+    }
+
+    fn clamp_sel(&mut self) {
+        self.list_sel = self.list_sel.min(self.rows().len().saturating_sub(1));
+    }
+
+    /// Opens or closes the group on the highlighted row.
+    fn set_expanded(&mut self, open: bool) {
+        if let Some(Row::Group { path, .. }) = self.rows().get(self.list_sel) {
+            if open {
+                self.expanded.insert(path.clone());
+            } else {
+                self.expanded.remove(path);
+            }
+        }
+    }
+
+    /// Enter / click on the highlighted row: a group opens or closes, a font
+    /// is used for the selected role.
+    fn activate(&mut self) {
+        match self.rows().get(self.list_sel) {
+            Some(Row::Group { expanded, .. }) => {
+                let open = !expanded;
+                self.set_expanded(open);
+            }
+            Some(Row::Font { .. }) => self.pick(),
+            None => {}
+        }
+    }
+
+    /// Left / h: close the highlighted group, or go up to the group a font is in.
+    fn go_up(&mut self) {
+        let rows = self.rows();
+        match rows.get(self.list_sel) {
+            Some(Row::Group { expanded: true, .. }) => self.set_expanded(false),
+            Some(r) if r.depth() > 0 => {
+                let d = r.depth();
+                if let Some(i) = (0..self.list_sel).rev().find(|&i| rows[i].depth() < d) {
+                    self.list_sel = i;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Mouse: a click on a role, a filter chip, or a list row (a second click
+    /// on the highlighted row opens the group / uses the font).
+    pub fn click(&mut self, x: u16, y: u16) {
+        let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+        if let Some(&(c, _)) = self.areas.chips.iter().find(|(_, r)| inside(*r)) {
+            self.filters.toggle(c);
+            self.focus = FontFocus::List;
+            self.clamp_sel();
+        } else if inside(self.areas.slots) {
+            let role = ((y - self.areas.slots.y) / 3) as usize;
+            if role < 3 {
+                self.slot = role;
+                self.focus = FontFocus::Slots;
+            }
+        } else if inside(self.areas.list) {
+            let i = self.list_scroll + (y - self.areas.list.y) as usize;
+            if i < self.rows().len() {
+                if i == self.list_sel && self.focus == FontFocus::List {
+                    self.activate();
+                } else {
+                    self.list_sel = i;
+                    self.focus = FontFocus::List;
+                }
+            }
+        }
+    }
+
+    pub fn scroll(&mut self, d: i32) {
+        let n = self.rows().len();
+        self.list_sel = (self.list_sel as i32 + d).clamp(0, n.saturating_sub(1) as i32) as usize;
+        self.focus = FontFocus::List;
     }
 
     /// Problems with a role's font, for the slot and the status line.
@@ -558,22 +870,36 @@ impl FontsTab {
     }
 
     /// Selects the list row of the selected role's current family.
+    /// Opens the groups the role's current font is in and highlights it.
     pub fn open_list(&mut self) {
         self.search.clear();
         let family = self.preset.fonts[self.slot].family.to_lowercase();
-        let m = self.matches();
-        self.list_sel = m
+        if let Some(index) = self
+            .installed
             .iter()
-            .position(|&i| self.installed[i].family.to_lowercase() == family)
-            .unwrap_or(0);
+            .position(|f| f.family.to_lowercase() == family)
+        {
+            for p in self.path_to(index) {
+                self.expanded.insert(p);
+            }
+            if let Some(i) = self.rows().iter().position(|r| {
+                *r == Row::Font {
+                    depth: r.depth(),
+                    index,
+                }
+            }) {
+                self.list_sel = i;
+            }
+        }
+        self.clamp_sel();
         self.focus = FontFocus::List;
     }
 
     fn pick(&mut self) {
-        if let Some(&i) = self.matches().get(self.list_sel) {
+        if let Some(i) = self.highlighted() {
             self.preset.fonts[self.slot].family = self.installed[i].family.clone();
+            self.focus = FontFocus::Slots;
         }
-        self.focus = FontFocus::Slots;
     }
 
     pub fn resize(&mut self, d: i32) {
@@ -608,7 +934,7 @@ impl FontsTab {
 
     /// Keys for the tab's own panels; returns false for keys it doesn't use.
     pub fn on_key(&mut self, k: KeyEvent) -> bool {
-        let n = self.matches().len();
+        let n = self.rows().len();
         match self.focus {
             FontFocus::Search => match k.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Down => self.focus = FontFocus::List,
@@ -632,12 +958,25 @@ impl FontsTab {
                 KeyCode::PageDown => self.list_sel = (self.list_sel + 10).min(n.saturating_sub(1)),
                 KeyCode::PageUp => self.list_sel = self.list_sel.saturating_sub(10),
                 KeyCode::Char('/') => self.focus = FontFocus::Search,
-                KeyCode::Char('m') => {
-                    self.mono_only = !self.mono_only;
-                    self.list_sel = 0;
+                KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
+                    match self.rows().get(self.list_sel) {
+                        Some(Row::Group {
+                            expanded: false, ..
+                        }) => self.set_expanded(true),
+                        // already open: step into it
+                        Some(Row::Group { expanded: true, .. }) => {
+                            self.list_sel = (self.list_sel + 1).min(n.saturating_sub(1))
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Enter => self.pick(),
-                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => self.focus = FontFocus::Slots,
+                KeyCode::Char('h') | KeyCode::Left => self.go_up(),
+                KeyCode::Enter => self.activate(),
+                KeyCode::Esc => self.focus = FontFocus::Slots,
+                KeyCode::Char(c) if CHIPS.iter().any(|(k, _)| *k == c) => {
+                    self.filters.toggle(c);
+                    self.clamp_sel();
+                }
                 _ => return false,
             },
             FontFocus::Slots => match k.code {
@@ -727,7 +1066,7 @@ mod tests {
         let fonts = Preset::default_preset().fonts;
         let job = Job {
             id: 1,
-            markup: sample_markup(&fonts, [14, 11, 11], &p),
+            markup: sample_markup(&fonts, [14, 11, 11], &p, "Test & <palette>"),
             bg: p.get("bg0"),
             dpi: 96,
             out: dir.join("s.png"),
@@ -743,74 +1082,177 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    #[test]
-    fn list_preview_search_and_pick() {
+    fn font(family: &str, mono: bool, nerd: bool) -> Installed {
+        Installed {
+            family: family.into(),
+            mono,
+            nerd,
+            bitmap: family == "Fixed",
+            special: family.contains("CJK"),
+        }
+    }
+
+    fn tab_with(fonts: Vec<Installed>) -> FontsTab {
         let dir = std::env::temp_dir();
         let mut t = FontsTab::new(
             &dir.join("nonexistent"),
             &dir,
             Arc::new(AtomicBool::new(false)),
         );
-        t.installed = vec![
-            Installed {
-                family: "Alpha Mono".into(),
-                mono: true,
-                nerd: false,
-            },
-            Installed {
-                family: "Beta Sans".into(),
-                mono: false,
-                nerd: false,
-            },
-            Installed {
-                family: "Gamma Mono NF".into(),
-                mono: true,
-                nerd: true,
-            },
-        ];
+        t.set_installed(fonts);
         t.preset = Preset::default_preset();
-        t.slot = 1;
+        t
+    }
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(
+            KeyCode::Char(c),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        )
+    }
+
+    fn special(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, ratatui::crossterm::event::KeyModifiers::NONE)
+    }
+
+    fn labels(t: &FontsTab) -> Vec<String> {
+        t.rows()
+            .iter()
+            .map(|r| match r {
+                Row::Group {
+                    depth,
+                    name,
+                    expanded,
+                    count,
+                    ..
+                } => {
+                    format!(
+                        "{}{}{name} {count}",
+                        "  ".repeat(*depth),
+                        if *expanded { "▾" } else { "▸" }
+                    )
+                }
+                Row::Font { depth, index } => {
+                    format!("{}{}", "  ".repeat(*depth), t.installed[*index].family)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn grouped_list_opens_filters_searches_and_picks() {
+        let mut t = tab_with(vec![
+            font("DejaVu Sans", false, false),
+            font("DejaVu Sans Mono", true, false),
+            font("Fixed", true, false),
+            font("JetBrainsMono Nerd Font", true, true),
+            font("JetBrainsMono Nerd Font Mono", true, true),
+            font("JetBrainsMono Nerd Font Propo", false, true),
+            font("Noto Sans CJK JP", false, false),
+            font("Noto Sans CJK KR", false, false),
+        ]);
+        // bitmap and CJK fonts are hidden at first; groups start closed
+        assert_eq!(labels(&t), ["▸DejaVu 2", "▸JetBrains Mono 3"]);
+        // opening the list shows where the role's font is
         t.open_list();
-        let key = |c| {
-            KeyEvent::new(
-                KeyCode::Char(c),
-                ratatui::crossterm::event::KeyModifiers::NONE,
-            )
-        };
-        t.on_key(key('m'));
-        assert_eq!(t.matches(), vec![0, 2]);
-        t.on_key(key('j'));
         assert_eq!(
-            t.shown_fonts()[1].family,
-            "Gamma Mono NF",
-            "browsing previews the font"
+            labels(&t),
+            [
+                "▸DejaVu 2",
+                "▾JetBrains Mono 3",
+                "  JetBrainsMono Nerd Font",
+                "  JetBrainsMono Nerd Font Mono",
+                "  JetBrainsMono Nerd Font Propo",
+            ]
         );
-        assert_ne!(
-            t.preset.fonts[1].family, "Gamma Mono NF",
-            "but doesn't set it yet"
+        assert_eq!(t.list_sel, 2);
+        // browsing previews the highlighted font without setting it
+        t.on_key(key('j'));
+        assert_eq!(t.shown_fonts()[0].family, "JetBrainsMono Nerd Font Mono");
+        assert_eq!(t.preset.fonts[0].family, "JetBrainsMono Nerd Font");
+        // h goes up to the group, again closes it
+        t.on_key(key('h'));
+        assert_eq!(t.list_sel, 1);
+        t.on_key(key('h'));
+        assert_eq!(labels(&t), ["▸DejaVu 2", "▸JetBrains Mono 3"]);
+        // filters: NF Mono only, then show the hidden kinds
+        t.on_key(key('M'));
+        assert_eq!(labels(&t), ["▸JetBrains Mono 1"]);
+        t.on_key(key('M'));
+        t.on_key(key('b'));
+        t.on_key(key('c'));
+        t.on_key(key('p'));
+        // (only Noto Sans CJK fonts here, so that is the shared name)
+        assert_eq!(
+            labels(&t),
+            ["▸DejaVu 1", "▸JetBrains Mono 1", "▸Noto Sans CJK 2"]
         );
+        t.on_key(key('p'));
+        assert!(labels(&t).contains(&"Fixed".to_string()));
+        // l opens a group, l again steps in, Enter uses the font
+        t.list_sel = 0;
+        t.on_key(key('l'));
+        t.on_key(key('l'));
+        t.on_key(special(KeyCode::Enter));
+        assert_eq!(t.preset.fonts[t.slot].family, "DejaVu Sans");
+        assert_eq!(t.focus, FontFocus::Slots);
+        // searching shows a flat list of matches
+        t.open_list();
         t.on_key(key('/'));
-        for c in "alp".chars() {
+        for c in "font mono".chars() {
             t.on_key(key(c));
         }
-        assert_eq!(t.matches(), vec![0]);
-        t.on_key(KeyEvent::new(
-            KeyCode::Enter,
-            ratatui::crossterm::event::KeyModifiers::NONE,
-        ));
-        t.on_key(KeyEvent::new(
-            KeyCode::Enter,
-            ratatui::crossterm::event::KeyModifiers::NONE,
-        ));
-        assert_eq!(t.preset.fonts[1].family, "Alpha Mono");
-        assert_eq!(t.focus, FontFocus::Slots);
+        assert_eq!(labels(&t), ["JetBrainsMono Nerd Font Mono"]);
+        t.on_key(special(KeyCode::Enter));
+        t.on_key(special(KeyCode::Enter));
+        assert_eq!(
+            t.preset.fonts[t.slot].family,
+            "JetBrainsMono Nerd Font Mono"
+        );
         assert!(t.dirty());
-        // warnings: mono role needs monospace, mono/bar want Nerd Font icons
+    }
+
+    #[test]
+    fn warnings_for_role_fonts() {
+        let mut t = tab_with(vec![
+            font("Beta Sans", false, false),
+            font("Gamma Mono NF", true, true),
+        ]);
         t.preset.fonts[0].family = "Beta Sans".into();
-        assert_eq!(t.warnings(0).len(), 2);
+        assert_eq!(
+            t.warnings(0).len(),
+            2,
+            "mono role: not monospaced, no icons"
+        );
         t.preset.fonts[2].family = "Gamma Mono NF".into();
         assert!(t.warnings(2).is_empty());
         t.preset.fonts[2].family = "Nope".into();
         assert!(t.warnings(2)[0].contains("not installed"));
+    }
+
+    #[test]
+    fn mouse_clicks_select_open_and_toggle() {
+        let mut t = tab_with(vec![
+            font("JetBrainsMono Nerd Font", true, true),
+            font("JetBrainsMono Nerd Font Mono", true, true),
+            font("Zeta", false, false),
+        ]);
+        t.areas = FontAreas {
+            slots: Rect::new(0, 0, 50, 9),
+            list: Rect::new(0, 20, 50, 10),
+            chips: vec![('m', Rect::new(0, 15, 8, 1))],
+        };
+        t.click(3, 7); // third role (bar)
+        assert_eq!((t.slot, t.focus), (2, FontFocus::Slots));
+        t.click(3, 20); // first row: select the group
+        assert_eq!((t.list_sel, t.focus), (0, FontFocus::List));
+        t.click(3, 20); // again: open it
+        assert_eq!(t.rows().len(), 4);
+        t.click(3, 22); // second font: select, then use it
+        t.click(3, 22);
+        assert_eq!(t.preset.fonts[2].family, "JetBrainsMono Nerd Font Mono");
+        t.click(2, 15); // mono chip
+        assert!(t.filters.is_on('m'));
+        assert!(!labels(&t).contains(&"Zeta".to_string()));
     }
 }

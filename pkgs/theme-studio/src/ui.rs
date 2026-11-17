@@ -768,9 +768,10 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                 crate::fonts::FontFocus::Slots => &["j/k role", "h/l size", "Enter pick font"],
                 crate::fonts::FontFocus::List => &[
                     "j/k browse",
+                    "l/h open/close",
                     "Enter use",
                     "/ search",
-                    "m mono only",
+                    "m p n M P x b c filters",
                     "Esc back",
                 ],
                 crate::fonts::FontFocus::Search => &["type to search", "Enter/Esc done"],
@@ -904,7 +905,11 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
                 ("F1  F2", "Colours tab / Fonts tab"),
                 (
                     "Fonts tab",
-                    "j/k role, h/l size (H/L by 4), Enter pick from the list: / search, m mono only",
+                    "roles: j/k, h/l size (H/L by 4), Enter opens the list",
+                ),
+                (
+                    "Font list",
+                    "l/h open/close a group, Enter use, / search; filters m mono p propo n NF M NF Mono P NF Propo x no NF b bitmap c CJK·emoji·math; mouse works too",
                 ),
                 ("q", "quit"),
                 (

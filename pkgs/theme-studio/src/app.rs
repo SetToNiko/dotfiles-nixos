@@ -235,7 +235,7 @@ impl App {
     fn update_sample(&mut self) {
         let fonts = self.fonts.shown_fonts();
         let sizes = [0, 1, 2].map(|r| self.fonts.effective_size(r, fonts[r].size));
-        let markup = crate::fonts::sample_markup(&fonts, sizes, &self.palette);
+        let markup = crate::fonts::sample_markup(&fonts, sizes, &self.palette, &self.name);
         let dpi = self.fonts.dpi;
         self.fonts
             .sample
@@ -319,6 +319,13 @@ impl App {
     /// Keys while the Fonts tab is showing (after the tab and quit keys).
     fn on_fonts_key(&mut self, k: KeyEvent) {
         use crate::fonts::FontFocus;
+        // In the font list, filter keys (m p n M P x b c) win over the shortcuts below.
+        let chip =
+            matches!(k.code, KeyCode::Char(c) if crate::fonts::CHIPS.iter().any(|(x, _)| *x == c));
+        if self.fonts.focus == FontFocus::List && chip {
+            self.fonts.on_key(k);
+            return;
+        }
         if self.fonts.focus == FontFocus::Search {
             self.fonts.on_key(k);
             return;
@@ -1077,6 +1084,14 @@ impl App {
 
     fn on_mouse(&mut self, m: MouseEvent) {
         if self.tab == Tab::Fonts {
+            if matches!(self.overlay, Overlay::None) {
+                match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) => self.fonts.click(m.column, m.row),
+                    MouseEventKind::ScrollDown => self.fonts.scroll(1),
+                    MouseEventKind::ScrollUp => self.fonts.scroll(-1),
+                    _ => {}
+                }
+            }
             return;
         }
         if !matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. }) {
@@ -1449,23 +1464,29 @@ mod tests {
         app.fonts.open("Base").unwrap();
         app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
         assert_eq!(app.tab, Tab::Fonts);
-        app.fonts.installed = vec![
+        app.fonts.set_installed(vec![
             crate::fonts::Installed {
                 family: "A".into(),
                 mono: true,
                 nerd: true,
+                bitmap: false,
+                special: false,
             },
             crate::fonts::Installed {
                 family: "B".into(),
                 mono: false,
                 nerd: false,
+                bitmap: false,
+                special: false,
             },
             crate::fonts::Installed {
                 family: "C Mono".into(),
                 mono: true,
                 nerd: false,
+                bitmap: false,
+                special: false,
             },
-        ];
+        ]);
         // bar (third role): pick C Mono from the list, two sizes bigger
         press(&mut app, "jj\nG\nll");
         assert_eq!(app.fonts.preset.fonts[2].family, "C Mono");

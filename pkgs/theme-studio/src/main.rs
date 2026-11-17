@@ -3,6 +3,7 @@
 mod app;
 mod color;
 mod desktop;
+mod font_tree;
 mod fonts;
 mod fonts_ui;
 mod palette;

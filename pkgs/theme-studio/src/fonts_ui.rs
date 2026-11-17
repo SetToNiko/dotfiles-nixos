@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Paragraph};
 use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::App;
-use crate::fonts::{FontFocus, ROLE_USE, ROLES};
+use crate::fonts::{CHIPS, FontAreas, FontFocus, ROLE_USE, ROLES, Row};
 use crate::ui::panel_number;
 
 fn block(title: Line<'static>, focused: bool) -> Block<'static> {
@@ -41,6 +41,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, area: Rect) {
     ]);
     let b = block(title, t.focus == FontFocus::Slots);
     let inner = b.inner(slots_area);
+    let slots_inner = inner;
     f.render_widget(b, slots_area);
     let mut lines = Vec::new();
     for (i, font) in t.preset.fonts.iter().enumerate() {
@@ -78,94 +79,167 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, area: Rect) {
     }
     f.render_widget(Paragraph::new(lines), inner);
 
-    // ² installed fonts
+    // ² installed fonts: search, filter chips, then the grouped list
     let browsing = matches!(t.focus, FontFocus::List | FontFocus::Search);
     let title = Line::from(vec![
         panel_number(2),
         "Installed fonts".into(),
         Span::styled(format!(" for {} ", ROLES[t.slot]), Style::new().dark_gray()),
-        if t.mono_only {
-            Span::styled("monospaced only ", Style::new().yellow())
-        } else {
-            "".into()
-        },
     ]);
     let b = block(title, browsing);
     let inner = b.inner(list_area);
     f.render_widget(b, list_area);
-    if inner.height < 2 {
+    if inner.height < 4 {
         return;
     }
+    let rows = t.rows();
+    let fonts_shown: usize = rows
+        .iter()
+        .map(|r| match r {
+            Row::Group {
+                depth: 0, count, ..
+            } => *count,
+            Row::Font { depth: 0, .. } => 1,
+            _ => 0,
+        })
+        .sum();
     let search_style = if t.focus == FontFocus::Search {
         Style::new().yellow()
     } else {
         Style::new().dark_gray()
     };
-    let matches = t.matches();
+    let search_text = if t.focus == FontFocus::Search {
+        format!("{}▏", t.search)
+    } else if t.search.is_empty() {
+        "search".to_string()
+    } else {
+        t.search.clone()
+    };
     let mut lines = vec![Line::from(vec![
         Span::styled(" / ", search_style),
-        Span::styled(
-            if t.focus == FontFocus::Search {
-                format!("{}▏", t.search)
-            } else if t.search.is_empty() {
-                "search".into()
-            } else {
-                t.search.clone()
-            },
-            search_style,
-        ),
-        Span::styled(
-            format!("   {} fonts", matches.len()),
-            Style::new().dark_gray(),
-        ),
+        Span::styled(search_text, search_style),
+        Span::styled(format!("   {fonts_shown} fonts"), Style::new().dark_gray()),
     ])];
-    let rows = inner.height as usize - 1;
-    let sel = t.list_sel.min(matches.len().saturating_sub(1));
+
+    // Chips, wrapped to the panel width; their positions are kept for clicks.
+    let mut chips: Vec<(char, Rect)> = Vec::new();
+    let mut chip_lines: Vec<Vec<Span>> = vec![vec![" ".into()]];
+    let mut x = 1u16;
+    for (c, label) in CHIPS {
+        let text = format!("[{c} {label}]");
+        let w = text.chars().count() as u16;
+        if x + w > inner.width && x > 1 {
+            chip_lines.push(vec![" ".into()]);
+            x = 1;
+        }
+        let row = chip_lines.len() as u16 - 1;
+        chips.push((
+            c,
+            Rect {
+                x: inner.x + x,
+                y: inner.y + 1 + row,
+                width: w,
+                height: 1,
+            },
+        ));
+        let style = if t.filters.is_on(c) {
+            Style::new().black().on_yellow()
+        } else {
+            Style::new().dark_gray()
+        };
+        let line = chip_lines.last_mut().unwrap();
+        line.push(Span::styled(text, style));
+        line.push(" ".into());
+        x += w + 1;
+    }
+    lines.extend(chip_lines.into_iter().map(Line::from));
+
+    let list_top = lines.len() as u16;
+    let height = (inner.height - list_top.min(inner.height)) as usize;
+    let sel = t.list_sel.min(rows.len().saturating_sub(1));
     let current = t.preset.fonts[t.slot].family.to_lowercase();
     // keep the selection visible
-    let app_fonts = &mut app.fonts;
-    if sel < app_fonts.list_scroll {
-        app_fonts.list_scroll = sel;
-    } else if sel >= app_fonts.list_scroll + rows {
-        app_fonts.list_scroll = sel + 1 - rows;
+    let mut scroll = t.list_scroll;
+    if sel < scroll {
+        scroll = sel;
+    } else if height > 0 && sel >= scroll + height {
+        scroll = sel + 1 - height;
     }
-    let t = &app.fonts;
-    for (row, &i) in matches.iter().enumerate().skip(t.list_scroll).take(rows) {
-        let font = &t.installed[i];
-        let is_sel = browsing && row == sel;
-        let mut spans = vec![
-            Span::styled(
-                if font.family.to_lowercase() == current {
-                    " ● "
-                } else {
-                    "   "
-                },
-                Style::new().yellow(),
-            ),
-            Span::styled(
-                format!("{:<32}", truncate(&font.family, 32)),
-                if is_sel {
-                    Style::new().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::new()
-                },
-            ),
-        ];
-        if font.mono {
-            spans.push(Span::styled(" mono", Style::new().dark_gray()));
-        }
-        if font.nerd {
-            spans.push(Span::styled(" NF", Style::new().green()));
-        }
-        lines.push(Line::from(spans));
+    for (row_i, row) in rows.iter().enumerate().skip(scroll).take(height) {
+        let is_sel = browsing && row_i == sel;
+        let sel_style = if is_sel {
+            Style::new().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new()
+        };
+        let indent = "  ".repeat(row.depth());
+        let line = match row {
+            Row::Group {
+                name,
+                expanded,
+                count,
+                ..
+            } => Line::from(vec![
+                Span::raw(format!(" {indent}")),
+                Span::styled(if *expanded { "▾ " } else { "▸ " }, Style::new().yellow()),
+                Span::styled(name.clone(), sel_style.bold()),
+                Span::styled(format!("  {count}"), Style::new().dark_gray()),
+            ]),
+            Row::Font { index, .. } => {
+                let font = &t.installed[*index];
+                let width = 34usize.saturating_sub(indent.len());
+                let mut spans = vec![
+                    Span::styled(
+                        if font.family.to_lowercase() == current {
+                            " ●"
+                        } else {
+                            "  "
+                        },
+                        Style::new().yellow(),
+                    ),
+                    Span::raw(indent.clone()),
+                    Span::styled(
+                        format!("{:<width$}", truncate(&font.family, width)),
+                        sel_style,
+                    ),
+                ];
+                if font.mono {
+                    spans.push(Span::styled(" mono", Style::new().dark_gray()));
+                }
+                if font.nerd {
+                    spans.push(Span::styled(" NF", Style::new().green()));
+                }
+                if font.bitmap {
+                    spans.push(Span::styled(" bitmap", Style::new().red()));
+                }
+                Line::from(spans)
+            }
+        };
+        lines.push(line);
     }
     if t.installed.is_empty() {
         lines.push(Line::styled(
             "   (no fonts from fc-list)",
             Style::new().red(),
         ));
+    } else if rows.is_empty() {
+        lines.push(Line::styled(
+            "   no fonts match the search and filters",
+            Style::new().dark_gray(),
+        ));
     }
     f.render_widget(Paragraph::new(lines), inner);
+    let t = &mut app.fonts;
+    t.list_scroll = scroll;
+    t.areas = FontAreas {
+        slots: slots_inner,
+        list: Rect {
+            y: inner.y + list_top,
+            height: height as u16,
+            ..inner
+        },
+        chips,
+    };
 }
 
 /// The sample image: the fonts drawn by Pango at this machine's sizes and
