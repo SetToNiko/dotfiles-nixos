@@ -4272,6 +4272,46 @@ mod tests {
     }
 
     #[test]
+    fn the_readme_tab_renders_scrolls_and_jumps_between_headings() {
+        let store = temp_store("readme");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        // the guide isn't next to the temp configs: give the tab its text
+        let mut md = String::from("# Guide\n\nFirst part.\n\n");
+        for i in 0..60 {
+            md += &format!("- line {i}\n");
+        }
+        md += "\n## Second\n\n| a | b |\n| - | - |\n| `x` | y |\n";
+        app.settings_page.readme = Some((None, Ok(md)));
+        app.page = Page::Settings;
+        press(&mut app, "]]]");
+        assert_eq!(app.settings_page.tab, crate::settings::Tab::Readme);
+        let screen = render(&mut app, 120, 30);
+        assert!(
+            screen.contains("README") && screen.contains("Guide") && screen.contains("• line 0"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("} /{ headings") || screen.contains("}/{ headings"),
+            "{screen}"
+        );
+        press(&mut app, "}");
+        let second = app.settings_page.readme_scroll;
+        assert!(second > 60);
+        let screen = render(&mut app, 120, 30);
+        assert!(
+            screen.lines().nth(3).is_some_and(|l| l.contains("Second")),
+            "{screen}"
+        );
+        press(&mut app, "{");
+        assert_eq!(app.settings_page.readme_scroll, 0);
+        // at the top, up goes on to the tab strip
+        press(&mut app, "k");
+        assert!(app.settings_page.tabs_focused);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn messages_time_out_and_saves_can_pop_up() {
         let store = temp_store("messages");
         let dir = store.dir.clone();

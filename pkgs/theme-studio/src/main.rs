@@ -7,6 +7,7 @@ mod behaviour;
 mod color;
 mod config;
 mod desktop;
+mod docs;
 mod download;
 mod draft;
 mod font_tree;

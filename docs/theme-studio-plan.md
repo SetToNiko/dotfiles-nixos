@@ -1396,6 +1396,28 @@ Each step is committed separately and keeps the studio working.
   the Main page instead of a palette editor and a Fonts tab.
 - Not now (asked): the login screen's colours following the palette.
 
+## Phase 9: a README tab ✅ done
+
+Asked for after Phase 8 (2026-11-17).
+
+- **What:** a fourth tab on the Settings page, **README**, showing
+  `docs/theme-studio.md` (✅ the studio's guide, not the repo README).
+- **Rendering** (✅ full Markdown): parsed with `pulldown-cmark`, drawn by
+  `docs.rs` into styled lines wrapped to the pane (at most 100 columns):
+  headings (H1 underlined), paragraphs, bullet and numbered lists (nested),
+  block quotes, inline code and code blocks, emphasis, links, rules, and
+  tables laid out in columns that narrow and wrap to fit.
+- **Moving** (✅ scroll and jump to headings): `j` / `k` and the wheel
+  (three lines a notch), PgDn / PgUp, `g` / `G`, and **`}` / `{`** for the
+  next / previous heading (new actions `next-heading` / `previous-heading`,
+  rebindable). `n` / `N`, first suggested, were taken: `n` names a version
+  on the History tab. Up at the top moves onto the tab strip, like the
+  other tabs. A scrollbar shows where you are.
+- **Where the text comes from:** read at runtime from the dotfiles
+  (`docs/theme-studio.md` beside the configs folder), and again when the
+  file changes, so edits show without a rebuild. The Nix package's source is
+  only `pkgs/theme-studio/`, so it can't be built in.
+
 ---
 
 ## Rust crates
@@ -1403,7 +1425,7 @@ Each step is committed separately and keeps the studio working.
 `ratatui`, `crossterm` (mouse), `tui-term` + `vt100` + `portable-pty`
 (embedded terminals), `ratatui-image` (kitty graphics), `serde` /
 `serde_json` with `preserve_order`, `ureq` (rustls; small, blocking, runs in
-a thread), `tar` + `xz2`, `sha2`.
+a thread), `tar` + `xz2`, `sha2`, `pulldown-cmark` (the README tab, Phase 9).
 
 No new **system** dependencies: ImageMagick, fontconfig, nvim, yazi, git and
 curl are already installed. `bat` is assumed for the demo script.

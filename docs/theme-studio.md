@@ -65,8 +65,9 @@ Three pages, on `F1`–`F3`:
   before installing), the installed ones, and a **tournament**: pairs of
   fonts from a category, side by side, until one is left.
 - **Settings:** Keymaps (rebind anything, presets), Behaviour (start-up
-  defaults and looks) and History (every config file's earlier versions,
-  previewed against now before restoring).
+  defaults and looks), History (every config file's earlier versions,
+  previewed against now before restoring) and README (this guide; `}` / `{`
+  jump between headings).
 
 `?` lists every key. Some of the Vim preset's:
 

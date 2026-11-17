@@ -16,12 +16,15 @@ pub enum Tab {
     Keymaps,
     Behaviour,
     History,
+    /// docs/theme-studio.md, rendered (docs.rs).
+    Readme,
 }
 
-pub const TABS: [(Tab, &str); 3] = [
+pub const TABS: [(Tab, &str); 4] = [
     (Tab::Keymaps, "Keymaps"),
     (Tab::Behaviour, "Behaviour"),
     (Tab::History, "History"),
+    (Tab::Readme, "README"),
 ];
 
 /// A row of the Keymaps tab.
@@ -132,6 +135,15 @@ pub struct SettingsPage {
     /// The difference view shows everything, not just what differs.
     pub show_all: bool,
     pub diff_scroll: usize,
+    /// README tab: the guide's text with the file's modified time (read
+    /// again when that changes), its render for the last width, and the
+    /// first line shown.
+    pub readme: Option<(
+        Option<std::time::SystemTime>,
+        std::result::Result<String, String>,
+    )>,
+    pub readme_doc: Option<(u16, crate::docs::Doc)>,
+    pub readme_scroll: usize,
     /// Cached until something changes (see history::generation).
     versions: Option<(VersionsKey, Vec<(PathBuf, SnapshotInfo)>)>,
     view: Option<(ViewKey, DiffView)>,
@@ -175,6 +187,9 @@ impl Default for SettingsPage {
             browse_all: false,
             show_all: false,
             diff_scroll: 0,
+            readme: None,
+            readme_doc: None,
+            readme_scroll: 0,
             versions: None,
             view: None,
         }
@@ -450,6 +465,7 @@ impl App {
                         }
                         &mut p.hist_sel
                     }
+                    Tab::Readme => return,
                 };
                 let again = *sel == i;
                 *sel = i;
@@ -464,6 +480,13 @@ impl App {
     /// The wheel over a list moves its selection; over the preview, scrolls.
     pub fn settings_scroll(&mut self, t: crate::hit::Target, d: i32) {
         use crate::hit::Target as T;
+        // the README: three lines a notch (and never up onto the tabs)
+        if self.settings_page.tab == Tab::Readme {
+            for _ in 0..3 {
+                self.run_readme_tab(if d > 0 { Action::Down } else { Action::Up });
+            }
+            return;
+        }
         if t == T::SettingsDiff && self.settings_page.browse.is_some() {
             let p = &mut self.settings_page;
             p.browse_scroll = (p.browse_scroll as i32 + d * 3).max(0) as usize;
@@ -551,6 +574,36 @@ impl App {
             Tab::Keymaps => self.with_draft(|app| app.run_keymaps_tab(a)),
             Tab::Behaviour => self.with_draft(|app| app.run_behaviour_tab(a)),
             Tab::History => self.run_history_tab(a),
+            Tab::Readme => self.run_readme_tab(a),
+        }
+    }
+
+    /// README tab keys: scrolling, paging, and jumping between headings.
+    fn run_readme_tab(&mut self, a: Action) {
+        let p = &mut self.settings_page;
+        let Some((_, doc)) = &p.readme_doc else {
+            return;
+        };
+        let last = doc.lines.len().saturating_sub(1);
+        let s = &mut p.readme_scroll;
+        match a {
+            Action::Down => *s = (*s + 1).min(last),
+            Action::Up => *s = s.saturating_sub(1),
+            Action::PageDown => *s = (*s + 20).min(last),
+            Action::PageUp => *s = s.saturating_sub(20),
+            Action::Top => *s = 0,
+            Action::Bottom => *s = last,
+            Action::NextHeading => {
+                if let Some(h) = doc.headings.iter().find(|&&h| h > *s) {
+                    *s = *h;
+                }
+            }
+            Action::PrevHeading => {
+                if let Some(h) = doc.headings.iter().rev().find(|&&h| h < *s) {
+                    *s = *h;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -565,6 +618,9 @@ impl App {
                 self.settings_page.km_sel == if up { first } else { last }
             }
             Tab::Behaviour => self.behaviour_at_edge(up),
+            // scrolled to the top: on to the tabs (never at the bottom, so
+            // the last lines can be scrolled to)
+            Tab::Readme => up && self.settings_page.readme_scroll == 0,
             Tab::History => match self.settings_page.hist_focus {
                 HistFocus::Files => at(self.settings_page.hist_file, FILES.len()),
                 HistFocus::Versions => {

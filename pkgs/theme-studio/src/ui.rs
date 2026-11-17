@@ -1457,6 +1457,12 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                     (&[A::ToggleAll], "everything"),
                     (&[A::Delete], "delete named"),
                 ],
+                Tab::Readme => vec![
+                    (&[A::Down, A::Up], "scroll"),
+                    (&[A::PageDown, A::PageUp], "page"),
+                    (&[A::NextHeading, A::PrevHeading], "headings"),
+                    (&[A::Top, A::Bottom], "top/end"),
+                ],
             };
             let mut v: Vec<String> = rows.into_iter().filter_map(|(a, l)| hint(a, l)).collect();
             v.extend(hint(&[A::TabPrev, A::TabNext], "tabs"));
