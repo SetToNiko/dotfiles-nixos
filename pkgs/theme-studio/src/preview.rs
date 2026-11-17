@@ -544,6 +544,8 @@ impl Preview {
         p: &Palette,
         map: Option<&TerminalMap>,
         name: &str,
+        // nvim above the shell (a preview column) instead of side by side
+        stack: bool,
     ) {
         let colors = TermColors::new(p, map);
         let roles = self.roles.clone();
@@ -571,7 +573,7 @@ impl Preview {
         } else {
             PaneId::Shell
         };
-        let (a, b) = if desk.width >= 2 * 30 {
+        let (a, b) = if !stack && desk.width >= 2 * 30 {
             let w = desk.width / 2;
             (
                 Rect { width: w, ..desk },
@@ -605,12 +607,12 @@ impl Preview {
             } else {
                 role("client.unfocused", 4)
             };
-            // Number and name on the border: 3 / 4 jump here (i3 itself shows no
+            // Number and name on the border: 6 / 7 jump here (i3 itself shows no
             // title with `border pixel`; this is studio chrome).
             let (n, label) = match id {
-                PaneId::Nvim => (3, "nvim"),
-                PaneId::Shell => (4, "shell"),
-                PaneId::Yazi => (4, "yazi"),
+                PaneId::Nvim => (6, "nvim"),
+                PaneId::Shell => (7, "shell"),
+                PaneId::Yazi => (7, "yazi"),
             };
             let label_fg = if id == focused {
                 border

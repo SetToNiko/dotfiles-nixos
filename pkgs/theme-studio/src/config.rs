@@ -71,10 +71,63 @@ impl FontListSettings {
     }
 }
 
-/// settings.json. Visibility defaults join in step 4 of the rework.
+/// How the colour column starts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct ColourSettings {
+    /// Groups open at start, by name ("Base", "Backgrounds", …).
+    pub open_groups: Vec<String>,
+    /// "hidden" or "shown"
+    pub picker_at_start: String,
+    /// "hide-on-esc" or "stay-open"
+    pub picker_after_editing: String,
+}
+
+impl Default for ColourSettings {
+    fn default() -> Self {
+        ColourSettings {
+            open_groups: vec!["Base".into()],
+            picker_at_start: "hidden".into(),
+            picker_after_editing: "hide-on-esc".into(),
+        }
+    }
+}
+
+impl ColourSettings {
+    pub fn picker_shown(&self) -> bool {
+        self.picker_at_start == "shown"
+    }
+
+    pub fn picker_hides_on_esc(&self) -> bool {
+        self.picker_after_editing != "stay-open"
+    }
+}
+
+/// How the fonts column starts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct FontSettings {
+    /// "shown" or "hidden"
+    pub sample_at_start: String,
+    /// Opening the font list unfolds the groups of the role's current font.
+    pub list_opens_to_current_font: bool,
+}
+
+impl Default for FontSettings {
+    fn default() -> Self {
+        FontSettings {
+            sample_at_start: "shown".into(),
+            list_opens_to_current_font: true,
+        }
+    }
+}
+
+/// settings.json: how things look when the studio starts.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Settings {
+    pub colours: ColourSettings,
+    pub fonts: FontSettings,
     pub font_list: FontListSettings,
 }
 

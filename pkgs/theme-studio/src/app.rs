@@ -58,11 +58,26 @@ impl Pending {
     }
 }
 
-/// The left pane's tab (F1 / F2).
+/// Which column has the keyboard (both are always on screen).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tab {
+pub enum Side {
     Colours,
     Fonts,
+}
+
+/// F1 / F2 / F3.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Page {
+    Main,
+    Downloads,
+    Settings,
+}
+
+/// A row of the colour list.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ColourRow {
+    Group { index: usize, expanded: bool },
+    Key(usize),
 }
 
 pub enum Overlay {
@@ -97,6 +112,9 @@ pub struct Areas {
     pub slider_s: Rect,
     pub slider_l: Rect,
     pub hex: Rect,
+    /// The fonts column and its sample pane (mouse routing).
+    pub fonts_column: Rect,
+    pub sample: Rect,
 }
 
 pub struct App {
@@ -127,7 +145,16 @@ pub struct App {
     pub overlay: Overlay,
     pub areas: Areas,
     pub preview: Preview,
-    pub tab: Tab,
+    pub side: Side,
+    pub page: Page,
+    /// The colour picker (pane 5) is on screen.
+    pub picker_visible: bool,
+    /// The font sample (pane 3) is on screen.
+    pub sample_visible: bool,
+    /// Cursor in the colour list (group and colour rows); `sel` is the colour.
+    pub row_sel: usize,
+    /// Open colour groups (indexes into GROUPS).
+    pub expanded_groups: std::collections::HashSet<usize>,
     pub fonts: FontsTab,
     /// Draws images in the terminal (kitty graphics); None in tests.
     pub picker: Option<Picker>,
@@ -180,7 +207,24 @@ impl App {
         let fonts = FontsTab::new(&store.dir, preview.draft_dir(), preview.dirty_flag());
         let mut app = App {
             preview,
-            tab: Tab::Colours,
+            side: Side::Colours,
+            page: Page::Main,
+            picker_visible: config.settings.colours.picker_shown(),
+            sample_visible: config.settings.fonts.sample_at_start != "hidden",
+            row_sel: 0,
+            expanded_groups: GROUPS
+                .iter()
+                .enumerate()
+                .filter(|(_, (g, _))| {
+                    config
+                        .settings
+                        .colours
+                        .open_groups
+                        .iter()
+                        .any(|o| o.eq_ignore_ascii_case(g))
+                })
+                .map(|(i, _)| i)
+                .collect(),
             fonts,
             picker: None,
             sample_image: None,
@@ -216,6 +260,9 @@ impl App {
         };
         app.load_picker();
         app.fonts.filters = app.settings.font_list.filters();
+        app.fonts.unfold_current = app.settings.fonts.list_opens_to_current_font;
+        app.fonts.refresh_installed();
+        app.sync_row();
         if !config.warnings.is_empty() {
             app.error(format!("Settings: {}", config.warnings.join("; ")));
         }
@@ -227,7 +274,7 @@ impl App {
         while !self.quit {
             // nvim in the preview re-reads this whenever it changes
             self.preview.sync_draft(&self.palette);
-            if self.tab == Tab::Fonts {
+            if self.page == Page::Main && self.sample_visible {
                 self.update_sample();
             }
             if self.preview.take_dirty() || redraw {
@@ -279,17 +326,9 @@ impl App {
         }
     }
 
-    /// Starts on the Fonts tab (`--fonts`).
+    /// Starts with the font roles focused (`--fonts`).
     pub fn open_fonts_tab(&mut self) {
-        self.switch_tab(Tab::Fonts);
-    }
-
-    fn switch_tab(&mut self, tab: Tab) {
-        if tab == Tab::Fonts && self.fonts.installed.is_empty() {
-            self.fonts.refresh_installed();
-        }
-        self.tab = tab;
-        self.preview.focus = None;
+        self.focus_pane(1);
     }
 
     // ----- font presets ----------------------------------------------------
@@ -360,11 +399,22 @@ impl App {
         self.hex_input = c.hex();
     }
 
-    fn select(&mut self, i: usize) {
+    /// Selects a colour without touching the list cursor.
+    fn select_key(&mut self, i: usize) {
         if i < self.keys.len() && i != self.sel {
             self.sel = i;
             self.last_edit = None;
             self.load_picker();
+        }
+    }
+
+    /// Selects a colour, opening its group and moving the list cursor to it.
+    fn select(&mut self, i: usize) {
+        if i < self.keys.len() {
+            self.select_key(i);
+            let g = self.group_of(i);
+            self.expanded_groups.insert(g);
+            self.sync_row();
         }
     }
 
@@ -634,34 +684,50 @@ impl App {
 
     // ----- input -----------------------------------------------------------
 
-    /// Number keys jump between the numbered panels: 1 key list, 2 colour
-    /// picker, 3 nvim, 4 shell (or yazi). 3 and 4 give that preview window
-    /// the keyboard; F12 hands it back.
-    pub fn goto_panel(&mut self, n: u8) {
+    /// Number keys jump between the numbered panes: ¹ font roles, ² font
+    /// list, ³ font sample, ⁴ colour list, ⁵ colour picker, ⁶ nvim, ⁷ shell
+    /// (or yazi). 6 and 7 give that preview window the keyboard; F12 hands it
+    /// back. A hidden picker or sample is shown.
+    pub fn focus_pane(&mut self, n: u8) {
+        use crate::fonts::FontFocus;
+        self.page = Page::Main;
         match n {
-            1 => {
+            1..=3 => {
                 self.preview.focus = None;
-                self.focus = Focus::List;
-            }
-            2 => {
-                self.preview.focus = None;
-                if self.focus == Focus::List {
-                    self.focus = Focus::Square;
+                self.side = Side::Fonts;
+                match n {
+                    1 => self.fonts.focus = FontFocus::Slots,
+                    2 => self.fonts.open_list(),
+                    _ => {
+                        self.sample_visible = true;
+                        self.fonts.focus = FontFocus::Sample;
+                    }
                 }
             }
-            3 | 4 => {
+            4 => {
+                self.preview.focus = None;
+                self.side = Side::Colours;
+                if self.focus != Focus::List {
+                    self.leave_picker();
+                }
+            }
+            5 => {
+                self.preview.focus = None;
+                self.open_picker();
+            }
+            6 | 7 => {
                 self.preview.mode = PreviewMode::Desktop;
                 let id = match (n, self.preview.show_yazi) {
-                    (3, _) => PaneId::Nvim,
+                    (6, _) => PaneId::Nvim,
                     (_, true) => PaneId::Yazi,
                     _ => PaneId::Shell,
                 };
-                // the right-hand slot counts whether it last showed the shell or yazi
+                // the lower slot counts whether it last showed the shell or yazi
                 let shown = self
                     .preview
                     .rects
                     .iter()
-                    .any(|(p, _)| *p == id || (n == 4 && *p != PaneId::Nvim));
+                    .any(|(p, _)| *p == id || (n == 7 && *p != PaneId::Nvim));
                 if !shown && !self.preview.rects.is_empty() {
                     self.info("That preview window isn't shown at this window size");
                     return;
@@ -672,18 +738,196 @@ impl App {
         }
     }
 
+    /// The number of the pane with the keyboard.
+    pub fn current_pane(&self) -> u8 {
+        use crate::fonts::FontFocus;
+        match (self.preview.focus, self.side) {
+            (Some(PaneId::Nvim), _) => 6,
+            (Some(_), _) => 7,
+            (None, Side::Fonts) => match self.fonts.focus {
+                FontFocus::Slots => 1,
+                FontFocus::List | FontFocus::Search => 2,
+                FontFocus::Sample => 3,
+            },
+            (None, Side::Colours) if self.focus == Focus::List => 4,
+            (None, Side::Colours) => 5,
+        }
+    }
+
+    /// `<C-w>h/j/k/l`: the neighbouring pane in the fonts and colour columns
+    /// (the preview windows take the keyboard, so they're only entered on
+    /// purpose: 6, 7, F12 or a click). Hidden panes are skipped.
+    fn move_pane(&mut self, dx: i32, dy: i32) {
+        let columns: [Vec<u8>; 2] = [
+            [1, 2, 3]
+                .into_iter()
+                .filter(|&p| p != 3 || self.sample_visible)
+                .collect(),
+            [4, 5]
+                .into_iter()
+                .filter(|&p| p != 5 || self.picker_visible)
+                .collect(),
+        ];
+        let cur = self.current_pane();
+        let Some((c, r)) = columns
+            .iter()
+            .enumerate()
+            .find_map(|(c, col)| col.iter().position(|&p| p == cur).map(|r| (c, r)))
+        else {
+            return;
+        };
+        let c2 = (c as i32 + dx).clamp(0, 1) as usize;
+        let col = &columns[c2];
+        let r2 = if dx != 0 {
+            r.min(col.len() - 1)
+        } else {
+            (r as i32 + dy).clamp(0, col.len() as i32 - 1) as usize
+        };
+        let target = col[r2];
+        if target != cur {
+            self.focus_pane(target);
+        }
+    }
+
+    /// Shows the picker and gives it the keyboard (editing a colour).
+    fn open_picker(&mut self) {
+        self.side = Side::Colours;
+        self.picker_visible = true;
+        if self.focus == Focus::List {
+            self.focus = Focus::Square;
+        }
+    }
+
+    /// Back to the colour list from the picker; the picker hides again
+    /// unless Settings says it stays open.
+    fn leave_picker(&mut self) {
+        self.focus = Focus::List;
+        if self.settings.colours.picker_hides_on_esc() {
+            self.picker_visible = false;
+        }
+    }
+
     /// The keymap contexts for the pane with the keyboard, most specific first.
     pub fn contexts(&self) -> [Context; 3] {
         use crate::fonts::FontFocus;
-        match self.tab {
-            Tab::Fonts if self.fonts.focus == FontFocus::Slots => {
-                [Context::FontRoles, Context::Fonts, Context::Global]
-            }
-            Tab::Fonts => [Context::FontList, Context::Fonts, Context::Global],
-            Tab::Colours if self.focus == Focus::List => {
+        if self.page != Page::Main {
+            return [Context::Global; 3];
+        }
+        match self.side {
+            Side::Fonts => match self.fonts.focus {
+                FontFocus::Slots => [Context::FontRoles, Context::Fonts, Context::Global],
+                FontFocus::List | FontFocus::Search => {
+                    [Context::FontList, Context::Fonts, Context::Global]
+                }
+                FontFocus::Sample => [Context::Fonts, Context::Global, Context::Global],
+            },
+            Side::Colours if self.focus == Focus::List => {
                 [Context::ColourList, Context::Colours, Context::Global]
             }
-            Tab::Colours => [Context::Picker, Context::Colours, Context::Global],
+            Side::Colours => [Context::Picker, Context::Colours, Context::Global],
+        }
+    }
+
+    // ----- colour list rows -----------------------------------------------
+
+    /// The colour list as shown: a row per group, and the colours of open groups.
+    pub fn colour_rows(&self) -> Vec<ColourRow> {
+        let mut out = Vec::new();
+        let mut key = 0;
+        for (index, (_, keys)) in GROUPS.iter().enumerate() {
+            let expanded = self.expanded_groups.contains(&index);
+            out.push(ColourRow::Group { index, expanded });
+            for _ in keys.iter() {
+                if expanded {
+                    out.push(ColourRow::Key(key));
+                }
+                key += 1;
+            }
+        }
+        out
+    }
+
+    fn group_of(&self, key: usize) -> usize {
+        let mut start = 0;
+        for (gi, (_, keys)) in GROUPS.iter().enumerate() {
+            if key < start + keys.len() {
+                return gi;
+            }
+            start += keys.len();
+        }
+        0
+    }
+
+    /// Moves the list cursor; landing on a colour selects it.
+    fn move_row(&mut self, d: i32) {
+        let rows = self.colour_rows();
+        self.row_sel = (self.row_sel as i32 + d).clamp(0, rows.len() as i32 - 1) as usize;
+        if let ColourRow::Key(k) = rows[self.row_sel] {
+            self.select_key(k);
+        }
+    }
+
+    /// Puts the list cursor on the selected colour if its group is open, else
+    /// on its group.
+    fn sync_row(&mut self) {
+        let rows = self.colour_rows();
+        let g = self.group_of(self.sel);
+        self.row_sel = rows
+            .iter()
+            .position(|r| *r == ColourRow::Key(self.sel))
+            .or_else(|| {
+                rows.iter()
+                    .position(|r| matches!(r, ColourRow::Group { index, .. } if *index == g))
+            })
+            .unwrap_or(0);
+    }
+
+    fn set_group_open(&mut self, g: usize, open: bool) {
+        if open {
+            self.expanded_groups.insert(g);
+        } else {
+            self.expanded_groups.remove(&g);
+        }
+    }
+
+    /// Colour-list keys: open/close groups, move, start editing.
+    fn list_action(&mut self, a: Action) {
+        let rows = self.colour_rows();
+        let last = rows.len() as i32 - 1;
+        match (a, rows.get(self.row_sel).copied()) {
+            (Action::Up, _) => self.move_row(-1),
+            (Action::Down, _) => self.move_row(1),
+            (Action::Top, _) => self.move_row(-(self.row_sel as i32)),
+            (Action::Bottom, _) => self.move_row(last - self.row_sel as i32),
+            (Action::PageDown, _) => self.move_row(10),
+            (Action::PageUp, _) => self.move_row(-10),
+            (Action::Confirm, Some(ColourRow::Group { index, expanded })) => {
+                self.set_group_open(index, !expanded)
+            }
+            (
+                Action::Right,
+                Some(ColourRow::Group {
+                    index,
+                    expanded: false,
+                }),
+            ) => self.set_group_open(index, true),
+            (Action::Right, Some(ColourRow::Group { expanded: true, .. })) => self.move_row(1),
+            (
+                Action::Left,
+                Some(ColourRow::Group {
+                    index,
+                    expanded: true,
+                }),
+            ) => self.set_group_open(index, false),
+            (Action::Left, Some(ColourRow::Key(k))) => {
+                let g = self.group_of(k);
+                self.row_sel = rows
+                    .iter()
+                    .position(|r| matches!(r, ColourRow::Group { index, .. } if *index == g))
+                    .unwrap_or(0);
+            }
+            (Action::Right | Action::Confirm, Some(ColourRow::Key(_))) => self.open_picker(),
+            _ => {}
         }
     }
 
@@ -716,10 +960,10 @@ impl App {
         self.message = None;
         // Text fields: keys are typing, not actions.
         if self.pending_keys.is_empty() {
-            if self.tab == Tab::Colours && self.focus == Focus::Hex {
+            if self.side == Side::Colours && self.focus == Focus::Hex {
                 return self.on_hex_key(k);
             }
-            if self.tab == Tab::Fonts && self.fonts.focus == FontFocus::Search {
+            if self.side == Side::Fonts && self.fonts.focus == FontFocus::Search {
                 return self.fonts.on_search_key(k);
             }
         }
@@ -741,17 +985,47 @@ impl App {
         if let Overlay::CopyFrom { target } = self.overlay {
             return self.run_copy_from(target, a);
         }
-        let fonts = self.tab == Tab::Fonts;
+        let fonts = self.side == Side::Fonts;
+        let page_action = matches!(
+            a,
+            Action::Quit
+                | Action::Help
+                | Action::PageMain
+                | Action::PageDownloads
+                | Action::PageSettings
+        );
+        if self.page != Page::Main && !page_action {
+            return;
+        }
         match a {
             Action::Quit => self.guard(Pending::Quit),
             Action::Help => self.overlay = Overlay::Help,
-            Action::TabColours => self.switch_tab(Tab::Colours),
-            Action::TabFonts => self.switch_tab(Tab::Fonts),
+            Action::PageMain => self.page = Page::Main,
+            Action::PageDownloads => self.page = Page::Downloads,
+            Action::PageSettings => self.page = Page::Settings,
             Action::PreviewCycle => {
-                self.switch_tab(Tab::Colours);
                 self.preview.mode = PreviewMode::Desktop;
                 self.preview.cycle_focus();
             }
+            Action::TogglePicker => {
+                if self.picker_visible {
+                    self.picker_visible = false;
+                    self.focus = Focus::List;
+                } else {
+                    self.picker_visible = true;
+                }
+            }
+            Action::ToggleSample => {
+                use crate::fonts::FontFocus;
+                self.sample_visible = !self.sample_visible;
+                if !self.sample_visible && self.fonts.focus == FontFocus::Sample {
+                    self.fonts.focus = FontFocus::Slots;
+                }
+            }
+            Action::PaneLeft => self.move_pane(-1, 0),
+            Action::PaneRight => self.move_pane(1, 0),
+            Action::PaneUp => self.move_pane(0, -1),
+            Action::PaneDown => self.move_pane(0, 1),
             Action::SavePalette => self.save(false),
             Action::SaveFonts => self.fonts_save(false),
             Action::ApplyPalette => self.apply(),
@@ -777,17 +1051,21 @@ impl App {
             Action::Open => self.open_overlay(),
             Action::New if fonts => self.guard(Pending::NewFonts),
             Action::New => self.guard(Pending::New),
-            Action::Panel(1) if fonts => self.fonts.focus = FontFocus::Slots,
-            Action::Panel(2) if fonts => self.fonts.open_list(),
-            Action::Panel(n) if fonts => {
-                self.switch_tab(Tab::Colours);
-                self.goto_panel(n);
-            }
-            Action::Panel(n) => self.goto_panel(n),
+            Action::Panel(n) => self.focus_pane(n),
+            // Tab in the fonts column: roles → list → sample → roles
             Action::FocusNext | Action::FocusPrev if fonts => {
-                if self.fonts.focus == FontFocus::Slots {
-                    self.fonts.open_list();
-                } else {
+                let order: Vec<u8> = [1, 2, 3]
+                    .into_iter()
+                    .filter(|&p| p != 3 || self.sample_visible)
+                    .collect();
+                let i = order
+                    .iter()
+                    .position(|&p| p == self.current_pane())
+                    .unwrap_or(0) as i32;
+                let d = if a == Action::FocusNext { 1 } else { -1 };
+                let next = order[(i + d).rem_euclid(order.len() as i32) as usize];
+                self.focus_pane(next);
+                if next == 1 {
                     self.fonts.focus = FontFocus::Slots;
                 }
             }
@@ -818,7 +1096,7 @@ impl App {
             }
             Action::FocusNext => self.cycle_focus(1),
             Action::FocusPrev => self.cycle_focus(-1),
-            Action::Back => self.focus = Focus::List,
+            Action::Back if self.focus != Focus::List => self.leave_picker(),
             Action::ToggleYazi => {
                 self.preview.mode = PreviewMode::Desktop;
                 self.preview.toggle_yazi();
@@ -833,16 +1111,7 @@ impl App {
                     PreviewMode::Swatches => PreviewMode::Desktop,
                 };
             }
-            _ if self.focus == Focus::List => match a {
-                Action::Up => self.move_sel(-1),
-                Action::Down => self.move_sel(1),
-                Action::Right | Action::Confirm => self.focus = Focus::Square,
-                Action::Top => self.select(0),
-                Action::Bottom => self.select(self.keys.len() - 1),
-                Action::PageDown => self.select((self.sel + 10).min(self.keys.len() - 1)),
-                Action::PageUp => self.select(self.sel.saturating_sub(10)),
-                _ => {}
-            },
+            _ if self.focus == Focus::List => self.list_action(a),
             _ => {
                 let (dx, dy, big) = match a {
                     Action::Left => (-1, 0, false),
@@ -893,22 +1162,31 @@ impl App {
 
     /// While picking the key to copy a colour from: move, Enter copies, Esc cancels.
     fn run_copy_from(&mut self, target: &'static str, a: Action) {
+        let on_key = matches!(
+            self.colour_rows().get(self.row_sel),
+            Some(ColourRow::Key(_))
+        );
         match a {
-            Action::Up => self.move_sel(-1),
-            Action::Down => self.move_sel(1),
-            Action::Top => self.select(0),
-            Action::Bottom => self.select(self.keys.len() - 1),
-            Action::PageDown => self.select((self.sel + 10).min(self.keys.len() - 1)),
-            Action::PageUp => self.select(self.sel.saturating_sub(10)),
-            Action::Confirm | Action::Right => {
+            // a colour row: copy it; a group row: open or close it
+            Action::Confirm | Action::Right if on_key => {
                 let from = self.key();
                 let c = self.palette.get(from);
-                self.sel = self.keys.iter().position(|k| *k == target).unwrap_or(0);
                 self.overlay = Overlay::None;
+                let to = self.keys.iter().position(|k| *k == target).unwrap_or(0);
+                self.select(to);
                 self.set_key(target, c);
                 self.info(format!("{target} = {from} ({})", c.hex()));
             }
             Action::Back => self.overlay = Overlay::None,
+            Action::Up
+            | Action::Down
+            | Action::Top
+            | Action::Bottom
+            | Action::PageUp
+            | Action::PageDown
+            | Action::Confirm
+            | Action::Right
+            | Action::Left => self.list_action(a),
             _ => {}
         }
     }
@@ -929,13 +1207,13 @@ impl App {
                     self.last_edit = None;
                     self.edit(c);
                     self.load_picker();
-                    self.focus = Focus::List;
+                    self.leave_picker();
                 }
                 None => self.error(format!("Not a colour: {} (use #rrggbb)", self.hex_input)),
             },
             KeyCode::Esc => {
                 self.load_picker();
-                self.focus = Focus::List;
+                self.leave_picker();
             }
             KeyCode::Tab => self.cycle_focus(1),
             KeyCode::BackTab => self.cycle_focus(-1),
@@ -1125,22 +1403,29 @@ impl App {
     }
 
     fn on_mouse(&mut self, m: MouseEvent) {
-        if self.tab == Tab::Fonts {
-            if matches!(self.overlay, Overlay::None) {
-                match m.kind {
-                    MouseEventKind::Down(MouseButton::Left) => self.fonts.click(m.column, m.row),
-                    MouseEventKind::ScrollDown => self.fonts.scroll(1),
-                    MouseEventKind::ScrollUp => self.fonts.scroll(-1),
-                    _ => {}
-                }
-            }
-            return;
-        }
-        if !matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. }) {
+        if self.page != Page::Main {
             return;
         }
         let (x, y) = (m.column, m.row);
         let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+        // The fonts column: roles, chips and rows (fonts.click), the sample.
+        if inside(self.areas.fonts_column) && matches!(self.overlay, Overlay::None) {
+            match m.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.preview.focus = None;
+                    self.side = Side::Fonts;
+                    if inside(self.areas.sample) {
+                        self.fonts.focus = crate::fonts::FontFocus::Sample;
+                    } else {
+                        self.fonts.click(x, y);
+                    }
+                }
+                MouseEventKind::ScrollDown => self.fonts.scroll(1),
+                MouseEventKind::ScrollUp => self.fonts.scroll(-1),
+                _ => {}
+            }
+            return;
+        }
         // Clicking a preview window gives it the keyboard; clicking anywhere
         // else gives it back to the editor.
         if let MouseEventKind::Down(_) = m.kind {
@@ -1165,19 +1450,40 @@ impl App {
             }
         };
         match m.kind {
-            MouseEventKind::ScrollDown if inside(self.areas.list) => self.move_sel(1),
-            MouseEventKind::ScrollUp if inside(self.areas.list) => self.move_sel(-1),
+            MouseEventKind::ScrollDown if inside(self.areas.list) => self.move_row(1),
+            MouseEventKind::ScrollUp if inside(self.areas.list) => self.move_row(-1),
             MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
                 let a = &self.areas;
                 let (sq, hue, sh, ss, sl, hex, list) = (
                     a.square, a.hue, a.slider_h, a.slider_s, a.slider_l, a.hex, a.list,
                 );
+                self.side = Side::Colours;
                 if inside(list) {
-                    if let Some(Some(i)) = self.areas.list_rows.get((y - list.y) as usize).copied()
+                    if !matches!(m.kind, MouseEventKind::Down(_)) {
+                        return; // dragging over the list does nothing
+                    }
+                    if let Some(Some(r)) = self.areas.list_rows.get((y - list.y) as usize).copied()
                     {
-                        self.select(i);
+                        let again = r == self.row_sel
+                            && self.focus == Focus::List
+                            && self.side == Side::Colours;
+                        self.row_sel = r;
+                        match self.colour_rows().get(r).copied() {
+                            Some(ColourRow::Group { index, expanded }) if again => {
+                                self.set_group_open(index, !expanded)
+                            }
+                            Some(ColourRow::Key(k)) => {
+                                self.select_key(k);
+                                if again && matches!(self.overlay, Overlay::None) {
+                                    self.open_picker();
+                                    return;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     if matches!(self.overlay, Overlay::None) {
+                        self.side = Side::Colours;
                         self.focus = Focus::List;
                     }
                 } else if inside(sq) {
@@ -1215,7 +1521,7 @@ impl App {
 
     /// Bracketed paste (Ctrl+Shift+V): a hex colour sets the selected key.
     fn on_paste(&mut self, s: &str) {
-        if self.tab == Tab::Fonts && matches!(self.overlay, Overlay::None) {
+        if self.side == Side::Fonts && matches!(self.overlay, Overlay::None) {
             if self.fonts.focus == crate::fonts::FontFocus::Search {
                 self.fonts.search.push_str(s.trim());
                 self.fonts.list_sel = 0;
@@ -1243,11 +1549,6 @@ impl App {
         }
     }
 
-    fn move_sel(&mut self, d: i32) {
-        let i = (self.sel as i32 + d).clamp(0, self.keys.len() as i32 - 1) as usize;
-        self.select(i);
-    }
-
     fn cycle_focus(&mut self, d: i32) {
         let i = FOCUS_ORDER
             .iter()
@@ -1255,6 +1556,9 @@ impl App {
             .unwrap_or(0) as i32;
         let n = FOCUS_ORDER.len() as i32;
         self.focus = FOCUS_ORDER[(i + d).rem_euclid(n) as usize];
+        if self.focus != Focus::List {
+            self.picker_visible = true;
+        }
         if self.focus == Focus::Hex {
             self.hex_input = "#".into(); // typing replaces the colour; Esc restores it
         }
@@ -1449,23 +1753,50 @@ mod tests {
         let mut app = test_app(temp_store("draw"), Start::Named("One".into()));
         let screen = render(&mut app, 160, 45);
         assert!(screen.contains("Palette: One"));
-        assert!(screen.contains("Backgrounds"));
-        // the list scrolls to keep the selection visible
-        press(&mut app, "G");
-        assert!(render(&mut app, 160, 45).contains("bg_diff_blue"));
-        press(&mut app, "g");
-        assert!(screen.contains("hex #1e1e22"));
+        // only Base is open; the other groups are rows that open
+        assert!(
+            screen.contains("▾ Base") && screen.contains("▸ Backgrounds"),
+            "{screen}"
+        );
+        assert!(
+            !screen.contains("bg_statusline1"),
+            "Backgrounds starts closed"
+        );
+        assert!(!screen.contains("hex #1e1e22"), "the picker starts hidden");
         // contrast column fits: e.g. "fg0 ... 11.8:1"
         let fg_row = screen.lines().find(|l| l.contains(" fg0 ")).unwrap();
         assert!(fg_row.contains(":1"), "contrast cut off: {fg_row}");
+        // the last row is the last group: open it and go to its last colour
+        press(&mut app, "G\nG");
+        assert!(render(&mut app, 160, 45).contains("bg_diff_blue"));
+        // editing a colour shows the picker; Esc hides it again
+        press(&mut app, "gj\n"); // g is the Base group row; j the first colour
+        assert!(render(&mut app, 160, 45).contains("hex"));
+        assert!(app.picker_visible);
+        press(&mut app, "\x1b");
+        assert!(!app.picker_visible);
+        // <leader>cp toggles it, <leader>fs the font sample
+        press(&mut app, " cp");
+        assert!(app.picker_visible);
+        press(&mut app, " cp");
+        assert!(!app.picker_visible);
+        press(&mut app, "1 fs");
+        assert!(!app.sample_visible);
+        press(&mut app, "4");
+        // too small: what's needed
         press(&mut app, "o?");
         let small = render(&mut app, 80, 20);
         assert!(small.contains("Window too small"));
         assert!(small.contains("Width = 80  Height = 20"));
-        assert!(small.contains("Width = 52  Height = 35"), "{small}");
+        assert!(small.contains("Width = 98"), "{small}");
         // every pop-up draws without panicking
         for keys in ["\x1b?", "\x1bS", "\x1b\x1bc", "\x1b"] {
             press(&mut app, keys);
+            render(&mut app, 160, 45);
+        }
+        // the other pages
+        for page in [2, 3, 1] {
+            app.on_key(KeyEvent::new(KeyCode::F(page), KeyModifiers::NONE));
             render(&mut app, 160, 45);
         }
     }
@@ -1473,12 +1804,24 @@ mod tests {
     #[test]
     fn number_keys_jump_between_panels() {
         let mut app = test_app(temp_store("panels"), Start::Named("One".into()));
-        render(&mut app, 160, 45); // lays out the preview windows
-        press(&mut app, "2");
-        assert_eq!(app.focus, Focus::Square);
-        press(&mut app, "1");
+        render(&mut app, 200, 50); // lays out the preview windows
+        assert!(!app.picker_visible, "the picker starts hidden");
+        press(&mut app, "5");
+        assert_eq!((app.side, app.focus), (Side::Colours, Focus::Square));
+        assert!(app.picker_visible, "5 shows it");
+        press(&mut app, "4");
         assert_eq!(app.focus, Focus::List);
+        assert!(!app.picker_visible, "leaving it hides it again");
+        press(&mut app, "1");
+        assert_eq!(
+            (app.side, app.fonts.focus),
+            (Side::Fonts, crate::fonts::FontFocus::Slots)
+        );
+        press(&mut app, "2");
+        assert_eq!(app.fonts.focus, crate::fonts::FontFocus::List);
         press(&mut app, "3");
+        assert_eq!(app.fonts.focus, crate::fonts::FontFocus::Sample);
+        press(&mut app, "6");
         assert_eq!(app.preview.focus, Some(PaneId::Nvim));
         // inside a preview window digits are typed into it, F12 comes back out
         press(&mut app, "1");
@@ -1486,15 +1829,34 @@ mod tests {
         while app.preview.focus.is_some() {
             app.on_key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
         }
-        press(&mut app, "Y4");
+        press(&mut app, "4Y7");
         assert_eq!(app.preview.focus, Some(PaneId::Yazi));
         app.on_key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
+        // <C-w>: across and down between the fonts and colour columns
+        press(&mut app, "1");
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, "l");
+        assert_eq!(app.current_pane(), 4);
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, "h");
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        press(&mut app, "j");
+        assert_eq!(app.current_pane(), 2);
         // digits still type into the hex box
-        press(&mut app, "1#123456\n");
+        press(&mut app, "4#123456\n");
         assert_eq!(app.palette.get("bg0"), Rgb(0x12, 0x34, 0x56));
         // titles carry the numbers
-        let screen = render(&mut app, 160, 45);
-        for t in ["¹Palette", "²Colour", "³nvim", "⁴yazi"] {
+        press(&mut app, "5");
+        let screen = render(&mut app, 200, 50);
+        for t in [
+            "¹Fonts",
+            "²Installed",
+            "³Sample",
+            "⁴Palette",
+            "⁵Colour",
+            "⁶nvim",
+            "⁷yazi",
+        ] {
             assert!(screen.contains(t), "missing {t}");
         }
     }
@@ -1511,8 +1873,8 @@ mod tests {
         let mut app = test_app(store, Start::Named("One".into()));
         app.fonts.store.dir = dir.clone();
         app.fonts.open("Base").unwrap();
-        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
-        assert_eq!(app.tab, Tab::Fonts);
+        press(&mut app, "1"); // the font roles
+        assert_eq!(app.side, Side::Fonts);
         app.fonts.set_installed(vec![
             crate::fonts::Installed {
                 family: "A".into(),
@@ -1564,11 +1926,10 @@ mod tests {
         assert_eq!(text, to_jq_string(&v));
         // the palette tab didn't change, and its keys still work after F1
         assert!(!app.dirty());
-        app.on_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
-        press(&mut app, "2");
-        assert_eq!(app.focus, Focus::Square);
+        press(&mut app, "5");
+        assert_eq!((app.side, app.focus), (Side::Colours, Focus::Square));
+        assert!(app.picker_visible);
         // the Fonts tab draws at every size (no image support in tests)
-        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
         let screen = render(&mut app, 160, 45);
         for t in [
             "¹Fonts: Wide bar",
@@ -1613,7 +1974,7 @@ mod tests {
         // <leader>sp saves the palette from anywhere
         press(&mut app, "#abcdef\n");
         assert!(app.dirty());
-        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        press(&mut app, "1"); // the fonts column
         press(&mut app, " sp");
         assert!(!app.dirty(), "saved from the Fonts tab");
         assert_eq!(
@@ -1634,59 +1995,68 @@ mod tests {
     }
 
     #[test]
-    fn layout_goes_side_by_side_then_stacked_then_too_small() {
+    fn layout_three_columns_then_preview_row_then_too_small() {
         use crate::ui::{Arrangement, arrange};
         let r = |w, h| Rect::new(0, 0, w, h);
-        match arrange(r(160, 45)) {
-            Arrangement::Panels {
-                list,
-                preview,
-                stacked,
-                ..
-            } => {
-                assert!(!stacked);
-                assert_eq!(list.width, 52);
-                assert_eq!(preview.x, 52);
-            }
-            a => panic!("{a:?}"),
-        }
-        // too narrow for both side by side: editor on top, preview below
-        match arrange(r(100, 50)) {
-            Arrangement::Panels {
-                list,
-                picker,
-                preview,
-                stacked,
-                ..
-            } => {
-                assert!(stacked);
-                assert_eq!((list.width, preview.width), (100, 100));
-                assert!(list.y < picker.y && picker.y < preview.y);
-                assert!(preview.height >= 12 && list.height >= 8);
-            }
-            a => panic!("{a:?}"),
-        }
+        // wide: fonts | colours | preview, the picker hidden, the sample shown
+        let Arrangement::Main(l) = arrange(r(200, 50), Page::Main, false, true) else {
+            panic!()
+        };
+        assert!(l.wide);
+        assert!(l.roles.x < l.colour_list.x && l.colour_list.x < l.preview.x);
         assert_eq!(
-            arrange(r(40, 50)),
+            (l.preview.y, l.preview.height),
+            (0, 49),
+            "preview is a full-height column"
+        );
+        assert!(l.picker.is_none() && l.sample.is_some());
+        let s = l.sample.unwrap();
+        assert!(
+            l.roles.y < l.font_list.y && l.font_list.y < s.y,
+            "roles, list, sample top to bottom"
+        );
+        // picker shown: under the list in the same column
+        let Arrangement::Main(l) = arrange(r(200, 50), Page::Main, true, true) else {
+            panic!()
+        };
+        let p = l.picker.unwrap();
+        assert_eq!(p.x, l.colour_list.x);
+        assert!(p.y > l.colour_list.y);
+        // narrow (your portrait monitor): columns on top, preview row underneath
+        let Arrangement::Main(l) = arrange(r(137, 60), Page::Main, true, true) else {
+            panic!()
+        };
+        assert!(!l.wide);
+        assert_eq!((l.preview.x, l.preview.width), (0, 137));
+        assert!(l.preview.y > l.roles.y && l.preview.y > l.colour_list.y);
+        assert_eq!(l.roles.y, l.colour_list.y, "fonts and colours side by side");
+        // too small, and what's needed (less height when things are hidden)
+        assert_eq!(
+            arrange(r(90, 60), Page::Main, false, false),
             Arrangement::TooSmall {
-                need_w: 52,
-                need_h: 35
+                need_w: 98,
+                need_h: 30
             }
         );
         assert_eq!(
-            arrange(r(100, 20)),
+            arrange(r(137, 20), Page::Main, true, true),
             Arrangement::TooSmall {
-                need_w: 52,
-                need_h: 35
+                need_w: 98,
+                need_h: 36
             }
         );
         assert_eq!(
-            arrange(r(130, 20)),
+            arrange(r(160, 20), Page::Main, true, true),
             Arrangement::TooSmall {
-                need_w: 112,
-                need_h: 23
+                need_w: 148,
+                need_h: 24
             }
         );
+        // other pages need little room
+        assert!(matches!(
+            arrange(r(60, 20), Page::Settings, true, true),
+            Arrangement::Page { .. }
+        ));
     }
 
     /// Dragging the window through every size never crashes the drawing

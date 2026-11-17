@@ -9,40 +9,54 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
-use crate::app::{App, Focus, Overlay, Tab, open_matches};
+use crate::app::{App, ColourRow, Focus, Overlay, Page, Side, open_matches};
 use crate::color::{self, Rgb};
 use crate::keymap::{Action, Context};
 use crate::palette::{self, GROUPS, TEXT_KEYS};
 use crate::preview::Mode as PreviewMode;
 
-/// Width of the editor column (key list and picker) when beside the preview;
-/// also the narrowest the editor can be.
-const EDITOR_W: u16 = 52;
+/// Narrowest the fonts column, the colour column and the preview can be.
+const FONTS_W: u16 = 46;
+const COLOURS_W: u16 = 52;
+const PREVIEW_MIN_W: u16 = 50;
+/// Font roles: three roles of three lines, plus borders.
+const ROLES_H: u16 = 3 * 3 + 2;
+const FONT_LIST_MIN: u16 = 6;
+const SAMPLE_MIN: u16 = 6;
 /// The picker is at least this tall, and grows (bigger colour square) when
-/// the editor has room beyond the whole key list.
+/// the colour column has room beyond the whole list.
 const PICKER_MIN: u16 = 14;
 const PICKER_MAX: u16 = 30;
-/// Rows the key list needs to show every key: 34 keys, 5 headers, 4 gaps, borders.
-const LIST_FULL: u16 = 34 + 5 + 4 + 2;
-/// Smallest useful key list (it scrolls) and preview.
+/// Rows the colour list needs with every group open: 34 colours, 5 groups, borders.
+const LIST_FULL: u16 = 34 + 5 + 2;
 const LIST_MIN: u16 = 8;
-const PREVIEW_MIN_W: u16 = 60;
-const PREVIEW_MIN_H: u16 = 12;
-/// Share of the height the preview gets when stacked under the editor.
-const STACKED_PREVIEW_SHARE: f64 = 0.4;
+/// The preview as a row under the columns (narrow windows).
+const PREVIEW_ROW_MIN: u16 = 12;
+
+/// The main page's panes. `wide`: three columns; otherwise fonts and colours
+/// side by side with the preview as a full-width row underneath.
+#[derive(Debug, PartialEq)]
+pub struct MainLayout {
+    pub roles: Rect,
+    pub font_list: Rect,
+    pub sample: Option<Rect>,
+    pub colour_list: Rect,
+    pub picker: Option<Rect>,
+    pub preview: Rect,
+    pub status: Rect,
+    pub wide: bool,
+}
 
 /// Where everything goes for a window size. Like btop, the layout follows
-/// the window as it's resized: editor and preview side by side when both
-/// fit, stacked (editor on top) when the window is too narrow, and a "too
-/// small" message with the needed size below the minimum.
+/// the window as it's resized, and below the minimum a message says what's
+/// needed.
 #[derive(Debug, PartialEq)]
 pub enum Arrangement {
-    Panels {
-        list: Rect,
-        picker: Rect,
-        preview: Rect,
+    Main(MainLayout),
+    /// Download fonts / Settings
+    Page {
+        body: Rect,
         status: Rect,
-        stacked: bool,
     },
     TooSmall {
         need_w: u16,
@@ -50,72 +64,162 @@ pub enum Arrangement {
     },
 }
 
-pub fn arrange(area: Rect) -> Arrangement {
-    let side_by_side = area.width >= EDITOR_W + PREVIEW_MIN_W;
-    let (need_w, need_h) = if side_by_side {
-        (EDITOR_W + PREVIEW_MIN_W, LIST_MIN + PICKER_MIN + 1)
+pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangement {
+    if page != Page::Main {
+        if area.width < 40 || area.height < 10 {
+            return Arrangement::TooSmall {
+                need_w: 40,
+                need_h: 10,
+            };
+        }
+        let [body, status] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
+        return Arrangement::Page { body, status };
+    }
+    let wide = area.width >= FONTS_W + COLOURS_W + PREVIEW_MIN_W;
+    let fonts_need = ROLES_H + FONT_LIST_MIN + if sample { SAMPLE_MIN } else { 0 };
+    let colours_need = LIST_MIN + if picker { PICKER_MIN } else { 0 };
+    let columns_need = fonts_need.max(colours_need);
+    let (need_w, need_h) = if wide {
+        (FONTS_W + COLOURS_W + PREVIEW_MIN_W, columns_need + 1)
     } else {
-        (EDITOR_W, LIST_MIN + PICKER_MIN + PREVIEW_MIN_H + 1)
+        (FONTS_W + COLOURS_W, columns_need + PREVIEW_ROW_MIN + 1)
     };
     if area.width < need_w || area.height < need_h {
         return Arrangement::TooSmall { need_w, need_h };
     }
     let [main, status] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
-    let (editor, preview) = if side_by_side {
-        let [e, p] =
-            Layout::horizontal([Constraint::Length(EDITOR_W), Constraint::Min(0)]).areas(main);
-        (e, p)
+    let share = |n: u16, f: f64| (n as f64 * f) as u16;
+    let (fonts_col, colours_col, preview) = if wide {
+        let fw = share(main.width, 0.28).max(FONTS_W);
+        let cw = share(main.width, 0.32)
+            .max(COLOURS_W)
+            .min(main.width - fw - PREVIEW_MIN_W);
+        let [f, c, p] = Layout::horizontal([
+            Constraint::Length(fw),
+            Constraint::Length(cw),
+            Constraint::Min(0),
+        ])
+        .areas(main);
+        (f, c, p)
     } else {
-        let most = main.height - LIST_MIN - PICKER_MIN;
-        let preview_h =
-            ((main.height as f64 * STACKED_PREVIEW_SHARE) as u16).clamp(PREVIEW_MIN_H, most);
-        let [e, p] =
+        let preview_h = share(main.height, 0.42).clamp(PREVIEW_ROW_MIN, main.height - columns_need);
+        let [top, p] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(preview_h)]).areas(main);
-        (e, p)
+        let fw = share(top.width, 0.45)
+            .max(FONTS_W)
+            .min(top.width - COLOURS_W);
+        let [f, c] = Layout::horizontal([Constraint::Length(fw), Constraint::Min(0)]).areas(top);
+        (f, c, p)
     };
-    let picker_h = editor
-        .height
-        .saturating_sub(LIST_FULL)
-        .clamp(PICKER_MIN, PICKER_MAX);
-    let picker_h = picker_h.min(editor.height - LIST_MIN);
-    let [list, picker] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(picker_h)]).areas(editor);
-    Arrangement::Panels {
-        list,
-        picker,
+    // fonts column: roles, list, sample
+    let sample_h = if sample {
+        share(fonts_col.height, 0.3).clamp(SAMPLE_MIN, fonts_col.height - ROLES_H - FONT_LIST_MIN)
+    } else {
+        0
+    };
+    let [roles, font_list, sample_area] = Layout::vertical([
+        Constraint::Length(ROLES_H),
+        Constraint::Min(0),
+        Constraint::Length(sample_h),
+    ])
+    .areas(fonts_col);
+    // colour column: list, picker
+    let picker_h = if picker {
+        colours_col
+            .height
+            .saturating_sub(LIST_FULL)
+            .clamp(PICKER_MIN, PICKER_MAX)
+            .min(colours_col.height - LIST_MIN)
+    } else {
+        0
+    };
+    let [colour_list, picker_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(picker_h)]).areas(colours_col);
+    Arrangement::Main(MainLayout {
+        roles,
+        font_list,
+        sample: sample.then_some(sample_area),
+        colour_list,
+        picker: picker.then_some(picker_area),
         preview,
         status,
-        stacked: !side_by_side,
-    }
+        wide,
+    })
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
-    match arrange(area) {
+    match arrange(area, app.page, app.picker_visible, app.sample_visible) {
         Arrangement::TooSmall { need_w, need_h } => draw_too_small(f, area, need_w, need_h),
-        Arrangement::Panels {
-            list,
-            picker,
-            preview,
-            status,
-            ..
-        } => {
-            if app.tab == Tab::Fonts {
-                let editor = list.union(picker);
-                crate::fonts_ui::draw_fonts(f, app, editor);
-                crate::fonts_ui::draw_sample(f, app, preview);
-            } else {
-                draw_list(f, app, list);
-                draw_picker(f, app, picker);
-                draw_preview(f, app, preview);
-            }
+        Arrangement::Page { body, status } => {
+            app.areas = Default::default();
+            draw_page(f, app, body);
             draw_status(f, app, status);
+            draw_overlay(f, app, area);
+            draw_pending(f, app, area);
+        }
+        Arrangement::Main(l) => {
+            app.areas.fonts_column = l
+                .roles
+                .union(l.font_list)
+                .union(l.sample.unwrap_or(l.roles));
+            crate::fonts_ui::draw_fonts(f, app, l.roles, l.font_list);
+            app.areas.sample = l.sample.unwrap_or_default();
+            if let Some(s) = l.sample {
+                crate::fonts_ui::draw_sample(f, app, s);
+            }
+            draw_list(f, app, l.colour_list);
+            match l.picker {
+                Some(p) => draw_picker(f, app, p),
+                None => {
+                    let a = &mut app.areas;
+                    (a.square, a.hue, a.slider_h, a.slider_s, a.slider_l, a.hex) =
+                        Default::default();
+                }
+            }
+            draw_preview(f, app, l.preview, l.wide);
+            draw_status(f, app, l.status);
             draw_overlay(f, app, area);
             draw_pending(f, app, area);
         }
     }
 }
 
+/// The Download fonts and Settings pages (filled in by later steps).
+fn draw_page(f: &mut Frame, app: &App, area: Rect) {
+    let (title, text) = match app.page {
+        Page::Downloads => (
+            " Download fonts ",
+            vec![
+                "Searching and installing fonts from Google Fonts and Nerd Fonts comes here (plan phase 6).".to_string(),
+            ],
+        ),
+        _ => (
+            " Settings ",
+            vec![
+                "Keymaps and behaviour settings come here (plan phase 5b, step 6).".to_string(),
+                String::new(),
+                format!("Until then, edit the files in {}:", crate::config::dir().display()),
+                "  keymaps.json   keymap presets and the active one".to_string(),
+                "  settings.json  what's open and shown when the studio starts".to_string(),
+            ],
+        ),
+    };
+    let lines: Vec<Line> = text
+        .into_iter()
+        .map(|t| Line::raw(format!(" {t}")))
+        .collect();
+    let back = app
+        .keymap
+        .key_for(&[Context::Global], Action::PageMain)
+        .unwrap_or_default();
+    let block = Block::bordered()
+        .title(title)
+        .title_bottom(format!(" {} back to the main page ", friendly(&back)))
+        .border_style(Style::new().yellow());
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
 /// btop-style: the current size (red where it falls short) and what's needed.
 fn draw_too_small(f: &mut Frame, area: Rect, need_w: u16, need_h: u16) {
     let ok = |have: u16, need: u16| {
@@ -170,7 +274,7 @@ fn swatch(c: Rgb, width: usize) -> Span<'static> {
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let title = Line::from(vec![
-        panel_number(1),
+        panel_number(4),
         "Palette: ".into(),
         Span::styled(app.name.clone(), Style::new().bold()),
         if app.dirty() {
@@ -180,92 +284,104 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
         },
         " ".into(),
     ]);
-    let block = focused_block(
-        title,
-        app.focus == Focus::List && app.preview.focus.is_none(),
-    );
+    let focused =
+        app.side == Side::Colours && app.focus == Focus::List && app.preview.focus.is_none();
+    let block = focused_block(title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Rows: group headers and keys; `Some(i)` marks key index i.
-    let mut rows: Vec<(Line, Option<usize>)> = Vec::new();
-    let mut i = 0;
     let bg0 = app.palette.get("bg0");
     let copy_target = match app.overlay {
         Overlay::CopyFrom { target } => Some(target),
         _ => None,
     };
-    for (gi, (group, keys)) in GROUPS.iter().enumerate() {
-        if gi > 0 {
-            rows.push((Line::raw(""), None));
-        }
-        rows.push((
-            Line::styled(format!(" {group}"), Style::new().bold().dark_gray()),
-            None,
-        ));
-        for key in keys.iter().copied() {
-            let c = app.palette.get(key);
-            let selected = i == app.sel;
-            let pinned = app.palette.is_pinned(key);
-            let mut name_style = Style::new();
-            if selected {
-                name_style = name_style.add_modifier(Modifier::REVERSED);
-            }
-            let marker = if copy_target == Some(key) {
-                Span::styled("→", Style::new().yellow())
-            } else if pinned {
-                Span::styled("", Style::new().yellow())
-            } else {
-                " ".into()
-            };
-            let mut spans = vec![
-                " ".into(),
-                marker,
-                " ".into(),
-                Span::styled(format!("{key:<16}"), name_style),
-                swatch(c, 4),
-                Span::styled(format!(" {} ", c.hex()), Style::new()),
-            ];
-            let info = if palette::is_base(key) || pinned {
-                String::new()
-            } else {
-                format!("⟵ {}", palette::sources(key))
-            };
-            let mut info_span = Span::styled(format!("{info:<12}"), Style::new().dark_gray());
-            if TEXT_KEYS.contains(&key) {
-                let ratio = color::contrast(c, bg0);
-                let style = if ratio < 3.0 {
-                    Style::new().red().bold()
-                } else if ratio < 4.5 {
-                    Style::new().yellow()
-                } else {
-                    Style::new().dark_gray()
-                };
-                spans.push(info_span);
-                info_span = Span::styled(format!("{ratio:>4.1}:1"), style);
-            }
-            spans.push(info_span);
-            rows.push((Line::from(spans), Some(i)));
-            i += 1;
-        }
-    }
-
-    // Scroll so the selected key stays visible.
-    let h = inner.height as usize;
-    let sel_row = rows
+    let rows = app.colour_rows();
+    let lines: Vec<Line> = rows
         .iter()
-        .position(|(_, k)| *k == Some(app.sel))
-        .unwrap_or(0);
-    if sel_row < app.list_scroll + 1 {
-        app.list_scroll = sel_row.saturating_sub(1);
-    } else if sel_row >= app.list_scroll + h {
-        app.list_scroll = sel_row + 1 - h;
+        .enumerate()
+        .map(|(r, row)| {
+            let cursor = r == app.row_sel && (focused || copy_target.is_some());
+            let cursor_style = if cursor {
+                Style::new().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::new()
+            };
+            match *row {
+                ColourRow::Group { index, expanded } => {
+                    let (name, keys) = GROUPS[index];
+                    Line::from(vec![
+                        Span::styled(if expanded { " ▾ " } else { " ▸ " }, Style::new().yellow()),
+                        Span::styled(name, cursor_style.bold()),
+                        Span::styled(format!("  {}", keys.len()), Style::new().dark_gray()),
+                    ])
+                }
+                ColourRow::Key(i) => {
+                    let key = app.keys[i];
+                    let c = app.palette.get(key);
+                    let pinned = app.palette.is_pinned(key);
+                    // the colour the picker shows, when the cursor is elsewhere
+                    let name_style = if cursor {
+                        cursor_style
+                    } else if i == app.sel {
+                        Style::new().bold().underlined()
+                    } else {
+                        Style::new()
+                    };
+                    let marker = if copy_target == Some(key) {
+                        Span::styled("→", Style::new().yellow())
+                    } else if pinned {
+                        Span::styled("", Style::new().yellow())
+                    } else {
+                        " ".into()
+                    };
+                    let mut spans = vec![
+                        "  ".into(),
+                        marker,
+                        " ".into(),
+                        Span::styled(format!("{key:<16}"), name_style),
+                        swatch(c, 4),
+                        Span::raw(format!(" {} ", c.hex())),
+                    ];
+                    let info = if palette::is_base(key) || pinned {
+                        String::new()
+                    } else {
+                        format!("⟵ {}", palette::sources(key))
+                    };
+                    spans.push(Span::styled(
+                        format!("{info:<11}"),
+                        Style::new().dark_gray(),
+                    ));
+                    if TEXT_KEYS.contains(&key) {
+                        let ratio = color::contrast(c, bg0);
+                        let style = if ratio < 3.0 {
+                            Style::new().red().bold()
+                        } else if ratio < 4.5 {
+                            Style::new().yellow()
+                        } else {
+                            Style::new().dark_gray()
+                        };
+                        spans.push(Span::styled(format!("{ratio:>4.1}:1"), style));
+                    }
+                    Line::from(spans)
+                }
+            }
+        })
+        .collect();
+
+    // Scroll so the cursor stays visible.
+    let h = inner.height as usize;
+    if app.row_sel < app.list_scroll {
+        app.list_scroll = app.row_sel;
+    } else if h > 0 && app.row_sel >= app.list_scroll + h {
+        app.list_scroll = app.row_sel + 1 - h;
     }
-    let visible: Vec<_> = rows.into_iter().skip(app.list_scroll).take(h).collect();
+    app.list_scroll = app.list_scroll.min(rows.len().saturating_sub(h.max(1)));
+    let shown: Vec<Line> = lines.into_iter().skip(app.list_scroll).take(h).collect();
     app.areas.list = inner;
-    app.areas.list_rows = visible.iter().map(|(_, k)| *k).collect();
-    let lines: Vec<Line> = visible.into_iter().map(|(l, _)| l).collect();
-    f.render_widget(Paragraph::new(lines), inner);
+    app.areas.list_rows = (app.list_scroll..app.list_scroll + shown.len())
+        .map(Some)
+        .collect();
+    f.render_widget(Paragraph::new(shown), inner);
 }
 
 // ----- picker -------------------------------------------------------------
@@ -289,13 +405,15 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
         )
     };
     let title = Line::from(vec![
-        panel_number(2),
+        panel_number(5),
         "Colour: ".into(),
         Span::styled(key, Style::new().bold()),
         " ".into(),
         state,
     ]);
-    let focused = !matches!(app.focus, Focus::List) && app.preview.focus.is_none();
+    let focused = app.side == Side::Colours
+        && !matches!(app.focus, Focus::List)
+        && app.preview.focus.is_none();
     let block = focused_block(title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -473,7 +591,8 @@ type CodeLine<'a> = (Vec<(&'a str, &'a str)>, Option<&'a str>);
 
 /// The live desktop (nvim, shell or yazi, i3 borders and bar, rofi), or the
 /// swatch view.
-fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
+/// `stack`: nvim above the shell (a preview column); otherwise side by side.
+fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
     if app.preview.mode == PreviewMode::Swatches {
         return draw_swatches(f, app, area);
     }
@@ -484,14 +603,20 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
             "  F12 next window / back to the editor ".into(),
         ]),
         None => {
-            Line::raw(" Preview  3 4, F12 or click: use a window   Y yazi   R rofi   V swatches ")
+            Line::raw(" Preview  6 7, F12 or click: use a window   Y yazi   R rofi   V swatches ")
         }
     };
     let block = focused_block(title, app.preview.focus.is_some());
     let inner = block.inner(area);
     f.render_widget(block, area);
-    app.preview
-        .draw_desktop(f, inner, &app.palette, app.terminal.as_ref(), &app.name);
+    app.preview.draw_desktop(
+        f,
+        inner,
+        &app.palette,
+        app.terminal.as_ref(),
+        &app.name,
+        stack,
+    );
 }
 
 /// Every key as a swatch, plus static samples (V switches to this view).
@@ -724,9 +849,15 @@ fn draw_swatches(f: &mut Frame, app: &App, area: Rect) {
 // ----- status line --------------------------------------------------------
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    let tab = |label: &'static str, on: bool| {
+    // pages, labelled with their keys (F1 Main, F2 Fonts, F3 Settings)
+    let page = |label: &str, action: Action, on: bool| {
+        let key = app
+            .keymap
+            .key_for(&[Context::Global], action)
+            .map(|k| friendly(&k))
+            .unwrap_or_default();
         Span::styled(
-            label,
+            format!(" {key} {label} "),
             if on {
                 Style::new().reversed().bold()
             } else {
@@ -734,15 +865,16 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             },
         )
     };
-    let fonts = app.tab == Tab::Fonts;
+    let fonts = app.side == Side::Fonts;
     let (name, dirty, active) = if fonts {
         (&app.fonts.name, app.fonts.dirty(), &app.fonts.active)
     } else {
         (&app.name, app.dirty(), &app.active)
     };
     let mut spans = vec![
-        tab(" F1 Colours ", !fonts),
-        tab(" F2 Fonts ", fonts),
+        page("Main", Action::PageMain, app.page == Page::Main),
+        page("Fonts", Action::PageDownloads, app.page == Page::Downloads),
+        page("Settings", Action::PageSettings, app.page == Page::Settings),
         " ".into(),
         Span::styled(
             format!(" {name}{} ", if dirty { " ●" } else { "" }),
@@ -799,6 +931,10 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         } else {
             let rows: Vec<(&[Action], &str)> = if fonts {
                 match app.fonts.focus {
+                    crate::fonts::FontFocus::Sample => vec![
+                        (&[A::ToggleSample], "hide sample"),
+                        (&[A::FocusNext], "next pane"),
+                    ],
                     crate::fonts::FontFocus::Slots => {
                         vec![
                             (&[A::Down, A::Up], "role"),
@@ -823,6 +959,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                         (&[A::Pin], "pin"),
                         (&[A::CopyFrom], "copy"),
                         (&[A::HexEntry], "hex"),
+                        (&[A::TogglePicker], "picker"),
                     ],
                     Focus::Square => vec![
                         (&[A::Left, A::Down, A::Up, A::Right], "saturation/value"),
@@ -843,7 +980,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             };
             rows.into_iter().filter_map(|(a, l)| hint(a, l)).collect()
         };
-        let panels = match (hint(&[A::Panel(1)], ""), hint(&[A::Panel(4)], "")) {
+        let panels = match (hint(&[A::Panel(1)], ""), hint(&[A::Panel(7)], "")) {
             (Some(a), Some(b)) => Some(format!("{}-{}panels", a.trim(), b)),
             _ => None,
         };

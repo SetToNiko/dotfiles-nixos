@@ -232,8 +232,15 @@ impl Context {
 pub enum Action {
     Quit,
     Help,
-    TabColours,
-    TabFonts,
+    PageMain,
+    PageDownloads,
+    PageSettings,
+    TogglePicker,
+    ToggleSample,
+    PaneLeft,
+    PaneRight,
+    PaneUp,
+    PaneDown,
     PreviewCycle,
     SavePalette,
     SaveFonts,
@@ -283,8 +290,15 @@ pub fn all_actions() -> Vec<Action> {
     let mut v = vec![
         A::Quit,
         A::Help,
-        A::TabColours,
-        A::TabFonts,
+        A::PageMain,
+        A::PageDownloads,
+        A::PageSettings,
+        A::TogglePicker,
+        A::ToggleSample,
+        A::PaneLeft,
+        A::PaneRight,
+        A::PaneUp,
+        A::PaneDown,
         A::PreviewCycle,
         A::SavePalette,
         A::SaveFonts,
@@ -351,8 +365,15 @@ impl Action {
         let s = match self {
             A::Quit => "quit",
             A::Help => "help",
-            A::TabColours => "tab-colours",
-            A::TabFonts => "tab-fonts",
+            A::PageMain => "page-main",
+            A::PageDownloads => "page-downloads",
+            A::PageSettings => "page-settings",
+            A::TogglePicker => "toggle-picker",
+            A::ToggleSample => "toggle-sample",
+            A::PaneLeft => "pane-left",
+            A::PaneRight => "pane-right",
+            A::PaneUp => "pane-up",
+            A::PaneDown => "pane-down",
             A::PreviewCycle => "preview-cycle",
             A::SavePalette => "save-palette",
             A::SaveFonts => "save-fonts",
@@ -402,6 +423,15 @@ impl Action {
         s.to_string()
     }
 
+    /// Names from earlier versions: renamed, or (None) dropped without a warning.
+    pub fn legacy(id: &str) -> Option<Option<Action>> {
+        match id {
+            "tab-colours" => Some(Some(Action::PageMain)),
+            "tab-fonts" => Some(None),
+            _ => None,
+        }
+    }
+
     pub fn from_id(id: &str) -> Option<Action> {
         all_actions().into_iter().find(|a| a.id() == id)
     }
@@ -410,8 +440,15 @@ impl Action {
         match self {
             Action::Quit => "quit".into(),
             Action::Help => "all keys".into(),
-            Action::TabColours => "Colours tab".into(),
-            Action::TabFonts => "Fonts tab".into(),
+            Action::PageMain => "main page".into(),
+            Action::PageDownloads => "download fonts page".into(),
+            Action::PageSettings => "settings page".into(),
+            Action::TogglePicker => "show / hide the colour picker".into(),
+            Action::ToggleSample => "show / hide the font sample".into(),
+            Action::PaneLeft => "pane to the left".into(),
+            Action::PaneRight => "pane to the right".into(),
+            Action::PaneUp => "pane above".into(),
+            Action::PaneDown => "pane below".into(),
             Action::PreviewCycle => "type into the preview / next window / back".into(),
             Action::SavePalette => "save palette".into(),
             Action::SaveFonts => "save font preset".into(),
@@ -633,9 +670,14 @@ impl Keymap {
                     continue;
                 };
                 for (aid, seqs) in actions {
-                    let Some(action) = Action::from_id(aid) else {
-                        warnings.push(format!("{name}: unknown action \"{aid}\""));
-                        continue;
+                    let action = match (Action::from_id(aid), Action::legacy(aid)) {
+                        (Some(a), _) => a,
+                        (None, Some(Some(renamed))) => renamed,
+                        (None, Some(None)) => continue, // no longer exists
+                        (None, None) => {
+                            warnings.push(format!("{name}: unknown action \"{aid}\""));
+                            continue;
+                        }
                     };
                     mentioned.insert((ctx, action));
                     let list = seqs.as_array().cloned().unwrap_or_default();
@@ -686,8 +728,18 @@ impl Keymap {
         let mut rows: Vec<(Context, Action, &[&str])> = vec![
             (C::Global, A::Quit, &["q"]),
             (C::Global, A::Help, &["?"]),
-            (C::Global, A::TabColours, &["<F1>"]),
-            (C::Global, A::TabFonts, &["<F2>"]),
+            (C::Global, A::PageMain, &["<F1>"]),
+            (C::Global, A::PageDownloads, &["<F2>"]),
+            (C::Global, A::PageSettings, &["<F3>"]),
+            (C::Global, A::PaneLeft, &["<C-w>h"]),
+            (C::Global, A::PaneRight, &["<C-w>l"]),
+            (C::Global, A::PaneUp, &["<C-w>k"]),
+            (C::Global, A::PaneDown, &["<C-w>j"]),
+            (C::Global, A::Panel(5), &["5"]),
+            (C::Global, A::Panel(6), &["6"]),
+            (C::Global, A::Panel(7), &["7"]),
+            (C::Colours, A::TogglePicker, &["<leader>cp"]),
+            (C::Fonts, A::ToggleSample, &["<leader>fs"]),
             (C::Global, A::PreviewCycle, &["<F12>"]),
             (C::Global, A::SavePalette, &["<leader>sp"]),
             (C::Global, A::SaveFonts, &["<leader>sf"]),
@@ -852,7 +904,7 @@ mod tests {
             .into_iter()
             .map(|(k, _)| k)
             .collect();
-        assert_eq!(next, ["s", "a"]);
+        assert_eq!(next, ["f", "s", "a"]);
         assert_eq!(
             km.key_for(&roles, Action::SaveFonts).as_deref(),
             Some("<leader>sf")

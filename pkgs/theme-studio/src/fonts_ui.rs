@@ -2,13 +2,13 @@
 //! and the sample image in place of the preview.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui_image::{Resize, StatefulImage};
 
-use crate::app::App;
+use crate::app::{App, Side};
 use crate::fonts::{CHIPS, FontAreas, FontFocus, ROLE_USE, ROLES, Row};
 use crate::ui::panel_number;
 
@@ -21,11 +21,12 @@ fn block(title: Line<'static>, focused: bool) -> Block<'static> {
     }
 }
 
-pub fn draw_fonts(f: &mut Frame, app: &mut App, area: Rect) {
+/// ¹ the font roles and ² the installed fonts (the fonts column; the sample
+/// is drawn by `draw_sample`).
+pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rect) {
+    // the fonts column has the keyboard (and not a preview window)
+    let active = app.side == Side::Fonts && app.preview.focus.is_none();
     let t = &app.fonts;
-    // three lines per role (name, size, first warning) plus borders
-    let [slots_area, list_area] =
-        Layout::vertical([Constraint::Length(3 * 3 + 2), Constraint::Min(0)]).areas(area);
 
     // ¹ roles
     let title = Line::from(vec![
@@ -39,7 +40,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, area: Rect) {
         },
         " ".into(),
     ]);
-    let b = block(title, t.focus == FontFocus::Slots);
+    let b = block(title, active && t.focus == FontFocus::Slots);
     let inner = b.inner(slots_area);
     let slots_inner = inner;
     f.render_widget(b, slots_area);
@@ -80,7 +81,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 
     // ² installed fonts: search, filter chips, then the grouped list
-    let browsing = matches!(t.focus, FontFocus::List | FontFocus::Search);
+    let browsing = active && matches!(t.focus, FontFocus::List | FontFocus::Search);
     let title = Line::from(vec![
         panel_number(2),
         "Installed fonts".into(),
@@ -247,7 +248,8 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, area: Rect) {
 pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
     let browsing = matches!(app.fonts.focus, FontFocus::List | FontFocus::Search);
     let title = Line::from(vec![
-        " Sample".into(),
+        panel_number(3),
+        "Sample".into(),
         Span::styled(
             format!(
                 "  {}at {} dpi, sizes as on this machine ",
@@ -261,9 +263,16 @@ pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
             Style::new().dark_gray(),
         ),
     ]);
-    let b = Block::bordered()
-        .title(title)
-        .border_style(Style::new().dark_gray());
+    let b = Block::bordered().title(title).border_style(
+        if app.side == Side::Fonts
+            && app.preview.focus.is_none()
+            && app.fonts.focus == FontFocus::Sample
+        {
+            Style::new().yellow()
+        } else {
+            Style::new().dark_gray()
+        },
+    );
     let inner = b.inner(area);
     f.render_widget(b, area);
     f.render_widget(

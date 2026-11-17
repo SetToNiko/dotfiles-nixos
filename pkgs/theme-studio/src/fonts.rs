@@ -578,6 +578,8 @@ pub enum FontFocus {
     Slots,
     /// ² the installed fonts list
     List,
+    /// ³ the sample (nothing to type; focusable so it can be resized)
+    Sample,
     /// typing into the list's search box
     Search,
 }
@@ -600,6 +602,8 @@ pub struct FontsTab {
     pub search: String,
     pub filters: Filters,
     pub areas: FontAreas,
+    /// Opening the list unfolds the groups of the role's current font (a setting).
+    pub unfold_current: bool,
     pub list_sel: usize,
     pub list_scroll: usize,
     pub dpi: u32,
@@ -640,6 +644,7 @@ impl FontsTab {
             search: String::new(),
             filters: Filters::default(),
             areas: FontAreas::default(),
+            unfold_current: true,
             list_sel: 0,
             list_scroll: 0,
             dpi: 96,
@@ -880,7 +885,11 @@ impl FontsTab {
             .iter()
             .position(|f| f.family.to_lowercase() == family)
         {
-            for p in self.path_to(index) {
+            for p in self
+                .path_to(index)
+                .into_iter()
+                .filter(|_| self.unfold_current)
+            {
                 self.expanded.insert(p);
             }
             if let Some(i) = self.rows().iter().position(|r| {
@@ -955,7 +964,7 @@ impl FontsTab {
         let n = self.rows().len();
         let last = n.saturating_sub(1);
         match self.focus {
-            FontFocus::Search => return false,
+            FontFocus::Search | FontFocus::Sample => return false,
             FontFocus::List => match a {
                 Action::Down => self.list_sel = (self.list_sel + 1).min(last),
                 Action::Up => self.list_sel = self.list_sel.saturating_sub(1),
