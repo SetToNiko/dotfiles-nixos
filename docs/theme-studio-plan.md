@@ -898,7 +898,7 @@ move to Phase 8.)
   the keymaps / settings commits after it). Your first theme, "CRT
   Amber", was made from the active palette and fonts; `$mod+t` opens
   themes, `$mod+p` palettes.
-- ⏳ Step 4, the tournament, comes after Phase 7b (it reuses 7b's
+- ⏳ Step 4, the tournament, comes after Phases 7b and 7c (it reuses 7b's
   download work).
 
 ### 6. Order of work
@@ -927,6 +927,9 @@ download work.
 - settings.json: `"messages": {"seconds": 3, "saved": "bar" | "popup"}`.
 
 ### 1. Palette dropdown in the Palette pane ✅
+
+(Revised in Phase 7c item 2: the dropdown moves into the pane, as its first
+row.)
 
 - **What:** ✅ the pane title is the dropdown:
   `⁴Palette: CRT Amber ▾` (the name comes back into the title, removed in
@@ -1016,7 +1019,155 @@ Each step is committed separately and keeps the studio working.
    (asks first), then prefetching (`prefetch.rs`: three at a time,
    "fetching previews 12/72" in the status line when no message shows;
    off by default). The Behaviour tab group is "Fonts page previews".
-6. Then the tournament (Phase 7 step 4).
+6. Then Phase 7c, then the tournament (Phase 7 step 4).
+
+## Phase 7c: after trying 7b (before the tournament)
+
+Asked for on 2026-11-17 after Phase 7b. Defaults I picked are marked 🔸.
+
+### 1. Installed fonts get a preview
+
+- **Now:** the Fonts page's Installed tab says "the main page's sample
+  shows it" and draws nothing.
+- **Becomes:** the highlighted installed font is previewed like the others,
+  from its files in `~/.local/share/fonts/theme-studio/<id>/` (nothing to
+  fetch). Its family name comes from `fc-scan` on a background thread.
+- **Default text:** icons for Nerd Fonts, code for monospaced fonts, prose
+  for the rest (spacing from `fc-scan`, since the list doesn't keep a
+  category).
+
+### 2. The palette dropdown inside the pane, reached by keyboard
+
+- **Revises 7b step 3.** The title shows the name, not a dropdown:
+  `⁴Palette: CRT Amber ●`. The dropdown is the pane's first row,
+  `CRT Amber ▾`, above the colour groups.
+- **Keyboard:** Up from the first colour row moves onto the dropdown row;
+  Enter (or Right) opens the list under it, inside the pane, with the live
+  preview as now. Down goes back to the colours. `<leader>op` still opens
+  it from anywhere.
+- **Mouse:** a click on the row opens it (the title is no longer a target
+  beyond focusing the pane).
+
+### 3. Moving the keyboard up to the page tabs
+
+- **Like the Settings page's tabs:** Up at the top of a pane in the top
+  row moves the keyboard to the page tab bar (F1 Main, F2 Fonts, F3
+  Settings) when the tab bar is on top. 🔸 When the tab bar is at the
+  bottom, Down at the bottom of a pane in the bottom row does the same.
+- **On a page with its own tabs** (Fonts: Google / Nerd / Installed;
+  Settings: Keymaps / Behaviour / History) the page's tabs come first:
+  Up from the list goes to the page's tabs, Up again to the page tabs.
+- **In the tab bar:** Left / Right switch pages at once and the keyboard
+  stays on the tab bar; Down (Up when at the bottom) or Enter goes back
+  into the page, to the pane it came from. The focused tab is drawn like
+  the Settings page's focused tabs.
+
+### 4. Faster font previews (150 ms or less)
+
+- **Target:** a fetched font's preview shows within 150 ms of
+  highlighting it (render, decode and the image on screen), measured on
+  this machine.
+- **Measured now** (Rust sample, 1004×1202): ImageMagick takes 100 ms with
+  its 16-bit PNG output and the system fontconfig, 150 ms with the preview
+  fontconfig. Starting magick is 10 ms; the same render to 8-bit BMP or
+  raw RGB is 40 ms; the preview fontconfig adds about 50 ms (it scans the
+  whole preview folder). Decoding the PNG and sending the image to Ghostty
+  happen on the main thread on top of that.
+- **Changes, in order (stopping once under target):**
+  1. Render to 8-bit BMP (or raw RGB) instead of 16-bit PNG.
+  2. A fontconfig file per previewed font, listing only that font's folder
+     plus the system configuration, instead of the whole preview folder.
+  3. Render only what the pane shows: the visible lines of code, at the
+     pane's width, not the whole 60-line file.
+  4. Decode and encode the image for the terminal off the main thread
+     (ratatui-image's thread protocol), so the studio stays responsive
+     while it's on its way.
+  5. Keep the last few rendered images (per font, text, size, page and
+     width), so going back to a font is instant.
+  6. Shorten the pause before fetching an unfetched font from 300 ms to
+     150 ms (it only stops fetching every font the cursor passes).
+- **If that isn't enough:** draw previews in the studio itself with a
+  Rust text renderer (cosmic-text) instead of ImageMagick: a few
+  milliseconds per image, but a larger change, and Pango's look and
+  fallbacks would need matching. Only with your go-ahead.
+- **The main page's font sample** benefits from 1, 3, 4 and 5 too.
+- **A timing switch:** `THEME_STUDIO_TIMING=1` logs each preview's
+  render and display time to `~/.local/state/theme-studio/timing.log`, to
+  check the target.
+
+### 5. Hiding the key hints
+
+- **A setting** (Behaviour tab, Layout group): key hints shown or hidden
+  (🔸 shown by default). Hidden, the bar keeps the tabs, the theme name and
+  messages; `?` still lists the keys.
+- 🔸 Also a key to toggle them for the session: `<leader>th`.
+
+### 6. Hiding the preview, per page
+
+- **Main page:** the preview column (three columns) or the preview row
+  (narrow layout) can be hidden; the fonts and colour columns then share
+  the space. nvim and the shell keep running while hidden.
+- **Fonts page:** the preview pane can be hidden; the list and details
+  take its space.
+- **Settings** (Behaviour tab, Layout group): "Main page preview at start"
+  and "Fonts page preview at start", shown or hidden, separately.
+- **Key:** 🔸 `<leader>tp` toggles the preview of the page you're on
+  (each page's state is its own). The other presets get one in their
+  style; all rebindable on the Keymaps tab. Like the picker, the state
+  isn't remembered between runs (the settings say how it starts).
+
+### 7. Prefetching that doesn't slow anything down
+
+- **Already:** each download runs on its own thread, three at a time.
+- **Still on the main thread, to move off it:**
+  - Building the queue: checking which of ~1,700 fonts are already
+    fetched (a folder read each). Done on a background thread.
+  - The Behaviour tab's "space used": it walks the preview folder on every
+    draw. Measured on a thread, at most every few seconds.
+  - Redraws: every download progress message (Nerd Font archives send
+    many) redraws the whole screen. Only progress shown on screen
+    triggers a redraw, at most ~10 times a second.
+- **Lower priority for the heavy work:** curl, tar (xz unpacking is CPU
+  heavy), fc-scan and ImageMagick run under `nice`, so the studio, nvim
+  and the shell come first.
+- 🔸 **Nerd Font archives one at a time** (Google files three at a time).
+- **A check:** a test with a fake catalogue of 2,000 fonts and stubbed
+  downloads asserts the main loop's work per tick stays small.
+
+### 8. Row highlights cover the text only
+
+- **Now:** the keyboard cursor reverses the whole row, padding included;
+  on the Behaviour tab it hides the colour swatches (a reversed `██` draws
+  in the background colour).
+- **Becomes:** the cursor's highlight covers each piece of text in the
+  row (the label, the value) but not the padding between them, and never
+  a swatch: swatches keep their colour.
+- **Everywhere a row cursor shows:** the Behaviour and Keymaps tabs, the
+  History tab's lists, the colour list, the font list and roles, the
+  Fonts page's lists, the Open and palette lists and the dropdowns.
+- **The unfocused cursor** (bold, underlined) follows the same rule.
+
+### 9. Fixes found along the way
+
+- **Tests write to your home folder:** the preview tests write
+  `~/.cache/theme-studio/preview-fonts.conf`. They'll use a temporary
+  folder instead.
+- **Until you rebuild,** the installed studio's previews may use the wrong
+  font: a test run already rewrote that file to point at the new
+  `~/.local/share/theme-studio/previews/`. `nrs` fixes it, and the first
+  start moves the old previews there.
+
+### 10. Order of work
+
+Each step is committed separately and keeps the studio working.
+
+1. Fixes (9), the key hints setting (5), the preview toggles (6).
+2. Row highlights (8).
+3. The palette dropdown row (2) and moving up to the tabs (3).
+4. Installed fonts' preview (1).
+5. Faster previews (4), measured after each change.
+6. Prefetching off the main thread (7).
+7. Then the tournament (Phase 7 step 4).
 
 ## Phase 8: polish
 
@@ -1052,7 +1203,7 @@ curl are already installed. `bat` is assumed for the demo script.
 2. Phases 2–3: palette editing with a simple colour-swatch preview.
 3. Phase 4: the full live preview.
 4. Phases 5–6: fonts in the studio.
-5. Phase 7 steps 1–3, Phase 7b, then Phase 7 step 4 (the tournament).
+5. Phase 7 steps 1–3, Phases 7b and 7c, then Phase 7 step 4 (the tournament).
 
 Each step is committed separately in the repo it belongs to (`configs/` or
 the outer repo).
