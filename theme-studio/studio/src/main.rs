@@ -109,6 +109,7 @@ fn main() -> Result<()> {
                     &p,
                     &theme::Theme {
                         palette: p.clone(),
+                        sizes: fonts.load(&f).ok().map(|preset| preset.sizes()),
                         fonts: f,
                     },
                 ) {
@@ -121,6 +122,8 @@ fn main() -> Result<()> {
             }
             for (what, r) in [
                 ("palettes.json", store.migrate()),
+                // before fonts.json: it takes the sizes from the presets
+                ("themes.json", themes.migrate(&fonts)),
                 ("fonts.json", fonts.migrate()),
             ] {
                 match r {

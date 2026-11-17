@@ -46,8 +46,9 @@ pub fn to_jq_string(v: &Value) -> String {
 /// `"presets"`), so the files can be migrated later. Both are read.
 pub const DATA_VERSION: u64 = 2;
 /// fonts.json's version. 3: the roles are `monospace`, `proportional` and
-/// `icons` (were `mono`, `ui` and `bar`).
-pub const FONTS_VERSION: u64 = 3;
+/// `icons` (were `mono`, `ui` and `bar`). 4: presets have no sizes (the
+/// theme has them, in themes.json).
+pub const FONTS_VERSION: u64 = 4;
 
 /// The version a data file is written as (by its map's field).
 fn version_of(field: &str) -> u64 {

@@ -413,6 +413,8 @@ impl App {
         // the old file goes to the history)
         for (what, result) in [
             ("palettes.json", app.store.migrate()),
+            // before fonts.json: it takes the sizes from the presets
+            ("themes.json", app.themes.migrate(&app.fonts.store)),
             ("fonts.json", app.fonts.store.migrate()),
         ] {
             match result {
@@ -455,6 +457,16 @@ impl App {
                 redraw = true;
             }
             if self.expire_message() {
+                redraw = true;
+            }
+            // a role's size, once h / l have been still for a moment: saved
+            // to the theme and applied (one i3 restart, not one per step)
+            if self
+                .fonts
+                .sized_at
+                .is_some_and(|t| t.elapsed() >= Duration::from_millis(400))
+            {
+                self.apply_sizes();
                 redraw = true;
             }
             // an image waiting for its pane's size to settle
@@ -546,7 +558,7 @@ impl App {
 
     fn fonts_save_as(&mut self, name: &str, then_apply: bool) {
         match self.fonts.save_as(name) {
-            Ok(()) if then_apply => match self.fonts.store.apply(name) {
+            Ok(()) if then_apply => match self.fonts.store.apply(name, self.fonts.preset.sizes()) {
                 Ok(()) => {
                     self.fonts.active = Some(name.to_string());
                     self.notify_saved(format!("Saved and applied \"{name}\""));
@@ -1662,7 +1674,7 @@ impl App {
         let result = self
             .fonts
             .save_as(&name)
-            .and_then(|_| self.fonts.store.apply(&name));
+            .and_then(|_| self.fonts.store.apply(&name, self.fonts.preset.sizes()));
         match result {
             Ok(()) => {
                 self.fonts.active = Some(name.clone());
@@ -2821,25 +2833,31 @@ mod tests {
         assert!(!app.fonts.dirty(), "saved straight away");
         press(&mut app, "ll");
         assert_eq!(app.fonts.preset.fonts[2].family, "C Nerd Font Propo");
-        assert_eq!(app.fonts.preset.fonts[2].size, 11);
+        // the sizes are the theme's, not the preset's: the new theme's 11, +2
+        assert_eq!(app.fonts.preset.fonts[2].size, 13);
         // number keys: 2 opens the list, 1 goes back
         press(&mut app, " 2");
         assert_eq!(app.fonts.focus, crate::fonts::FontFocus::List);
         press(&mut app, " 1");
-        // unsaved: opening another preset asks first
+        // a size isn't the preset's: it stays saved, and opening the preset
+        // again doesn't ask, and keeps the sizes
+        assert!(!app.fonts.dirty());
         press(&mut app, " ofBase\n");
-        assert!(matches!(
+        assert!(!matches!(
             app.overlay,
             Overlay::Confirm(Pending::OpenFonts(_))
         ));
-        press(&mut app, "\x1b");
-        // <leader>sf saves the preset in place, in jq's format
+        assert_eq!(app.fonts.preset.fonts[2].size, 13);
+        // <leader>sf saves the preset in place, in jq's format, families only
         press(&mut app, " sf");
         assert!(!app.fonts.dirty());
         let text = std::fs::read_to_string(dir.join("fonts.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(v["version"], 3, "saved as version 3");
-        assert_eq!(v["presets"]["Base"]["icons"]["family"], "C Nerd Font Propo");
+        assert_eq!(v["version"], 4, "saved as version 4");
+        assert_eq!(
+            v["presets"]["Base"]["icons"],
+            serde_json::json!({"family": "C Nerd Font Propo"})
+        );
         assert_eq!(text, to_jq_string(&v));
         // the palette tab didn't change, and its keys still work after F1
         assert!(!app.dirty());
@@ -4274,6 +4292,47 @@ mod tests {
     }
 
     #[test]
+    fn sizes_belong_to_the_theme_and_are_saved_when_the_keys_stop() {
+        let store = temp_store("sizes");
+        let dir = store.dir.clone();
+        std::fs::write(
+            dir.join("fonts.json"),
+            r#"{"version": 4, "presets": {"Base": {"monospace": {"family": "A"}, "proportional": {"family": "B"}, "icons": {"family": "C"}}, "Other": {"monospace": {"family": "D"}, "proportional": {"family": "E"}, "icons": {"family": "F"}}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("themes.json"),
+            r#"{"version": 2, "themes": {"T": {"palette": "One", "fonts": "Base", "sizes": {"monospace": 14, "proportional": 9, "icons": 9}}}}"#,
+        )
+        .unwrap();
+        let mut app = test_app(store, Start::Named("T".into()));
+        app.fonts.store.dir = dir.clone();
+        app.themes.dir = dir.clone();
+        app.open_theme("T");
+        assert_eq!(app.fonts.preset.sizes(), [14, 9, 9], "the theme's sizes");
+        // l on Icons: the size changes at once, and is saved and applied
+        // once the keys stop (the run loop calls apply_sizes after 400 ms)
+        press(&mut app, " 1");
+        app.fonts.slot = 2;
+        press(&mut app, "ll");
+        assert_eq!(app.fonts.preset.sizes(), [14, 9, 11]);
+        assert!(app.fonts.sized_at.is_some());
+        assert!(!app.fonts.dirty(), "the preset isn't changed by a size");
+        app.apply_sizes();
+        assert!(app.fonts.sized_at.is_none());
+        assert_eq!(app.themes.get("T").unwrap().sizes, Some([14, 9, 11]));
+        assert!(!app.theme_dirty(), "saved: nothing left unsaved");
+        // the preset file has no sizes
+        let f = std::fs::read_to_string(dir.join("fonts.json")).unwrap();
+        assert!(!f.contains("size"));
+        // swapping in another preset keeps the theme's sizes
+        app.fonts.open("Other").unwrap();
+        assert_eq!(app.fonts.preset.sizes(), [14, 9, 11]);
+        assert_eq!(app.fonts.preset.fonts[0].family, "D");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn the_readme_tab_renders_scrolls_and_jumps_between_headings() {
         let store = temp_store("readme");
         let dir = store.dir.clone();
@@ -4848,14 +4907,19 @@ mod tests {
 /// End to end against the real data and commands: re-picks the active
 /// preset's current fonts through the studio, which saves (unchanged) and
 /// applies them. Run with NO_RESTART=1 so i3 and Ghostty aren't restarted:
-/// `NO_RESTART=1 cargo test studio_applies_fonts -- --ignored --nocapture`.
+/// `THEME_STUDIO_REAL_SWITCH=1 NO_RESTART=1 cargo test studio_applies_fonts --
+/// --ignored --nocapture` (without the first, tests never run the scripts).
 #[cfg(test)]
 #[test]
 #[ignore]
 fn studio_applies_fonts_like_font_switch() {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let store = Store::locate();
-    eprintln!("data {} share {}", store.dir.display(), store.share.display());
+    eprintln!(
+        "data {} share {}",
+        store.dir.display(),
+        store.share.display()
+    );
     let config = crate::config::load(&crate::config::dir(), false);
     let mut app = App::with_config(store, Start::Active, config).unwrap();
     app.preview.set_headless();
@@ -4871,9 +4935,14 @@ fn studio_applies_fonts_like_font_switch() {
             "role {role}: {} {}  highlighted {:?}",
             before.family,
             before.size,
-            app.fonts.highlighted().map(|i| app.fonts.installed[i].family.clone())
+            app.fonts
+                .highlighted()
+                .map(|i| app.fonts.installed[i].family.clone())
         );
         key(&mut app, KeyCode::Enter); // use it
-        eprintln!("  -> {:?}  message {:?}", app.fonts.preset.fonts[role], app.message);
+        eprintln!(
+            "  -> {:?}  message {:?}",
+            app.fonts.preset.fonts[role], app.message
+        );
     }
 }

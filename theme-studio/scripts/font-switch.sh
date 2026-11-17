@@ -7,6 +7,10 @@
 #   icons         a Nerd Font Propo: i3 window titles and the bar (i3blocks);
 #                 falls back to proportional if missing
 # (Before fonts.json version 3 they were mono, ui and bar; both are read.)
+# The sizes aren't the preset's but the theme's (themes.json `sizes`), so
+# switching presets keeps them: $FONT_SIZES ("14 9 9", set by themes-switch
+# and the studio), else the active theme's (~/.config/colors/theme), else
+# the preset's own (fonts.json before version 4), else 14 11 11.
 # Sizes get a per-host offset from ~/.config/host/fonts.json
 # ({"monospace": 0, "proportional": 3, "icons": 3}; icons falls back to the
 # proportional offset).
@@ -17,10 +21,10 @@ fonts="${FONTS:-$(data_file fonts.json)}"
 out="$HOME/.config/fonts"
 . "$here/lib/rofi-picker.sh" # json_picker, json_data (either fonts.json layout)
 
-# Menu rows: bold name, then each font's family and size written in that font,
-# and "(active)" after the current preset
+# Menu rows: bold name, then each font's family written in that font, and
+# "(active)" after the current preset
 menu_rows='def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
-  def sample: "<span font_family=\"\(.family | esc)\">\(.family | esc) \(.size)</span>";
+  def sample: "<span font_family=\"\(.family | esc)\">\(.family | esc)</span>";
   def role($new; $old): .[$new] // .[$old];
   to_entries[]
   | (.value | role("proportional"; "ui")) as $ui
@@ -43,18 +47,33 @@ trap 'rm -f "$data"' EXIT
 json_data "$fonts" > "$data"
 jq -e --arg n "$name" 'has($n)' "$data" >/dev/null || { echo "no font preset '$name'" >&2; exit 1; }
 
+# The sizes: as {"monospace": …, "proportional": …, "icons": …}, or null
+sizes=null
+if [ -n "$FONT_SIZES" ]; then
+  read -r s_mono s_ui s_bar <<<"$FONT_SIZES"
+  sizes=$(jq -n -c --arg a "$s_mono" --arg b "$s_ui" --arg c "$s_bar" \
+    '{monospace: ($a | tonumber), proportional: ($b | tonumber), icons: ($c | tonumber)}') || sizes=null
+else
+  theme=$(cat "$HOME/.config/colors/theme" 2>/dev/null)
+  themes=$(data_file themes.json)
+  if [ -n "$theme" ] && [ -f "$themes" ]; then
+    sizes=$(json_data "$themes" | jq -c --arg t "$theme" '.[$t].sizes // null') || sizes=null
+  fi
+fi
+
 offsets=$(cat "$HOME/.config/host/fonts.json" 2>/dev/null) || offsets='{}'
 { read -r mono; read -r mono_size; read -r ui; read -r ui_size; read -r bar; read -r bar_size; } < <(
-  jq -r --arg n "$name" --argjson off "$offsets" '
+  jq -r --arg n "$name" --argjson off "$offsets" --argjson sizes "${sizes:-null}" '
     def role($new; $old): .[$new] // .[$old];
     ($off | role("proportional"; "ui") // 0) as $ui_off
+    | ($sizes // {}) as $s
     | .[$n] as $p
     | ($p | role("monospace"; "mono")) as $m
     | ($p | role("proportional"; "ui")) as $u
     | ($p | role("icons"; "bar") // $u) as $b
-    | $m.family, $m.size + ($off | role("monospace"; "mono") // 0),
-      $u.family, $u.size + $ui_off,
-      $b.family, $b.size + ($off | role("icons"; "bar") // $ui_off)' "$data")
+    | $m.family, ($s.monospace // $m.size // 14) + ($off | role("monospace"; "mono") // 0),
+      $u.family, ($s.proportional // $u.size // 11) + $ui_off,
+      $b.family, ($s.icons // $b.size // 11) + ($off | role("icons"; "bar") // $ui_off)' "$data")
 
 for family in "$mono" "$ui" "$bar"; do
   fc-list -q ":family=$family" || echo "warning: font '$family' is not installed" >&2

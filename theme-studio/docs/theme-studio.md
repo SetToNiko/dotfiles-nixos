@@ -10,9 +10,11 @@ own folder, in `migration.md`.
 
 ## Themes, palettes and font presets
 
-A **theme** is a name plus a palette plus a font preset. Palettes and font
-presets are building blocks: several themes can share one, and editing it
-changes every theme that uses it.
+A **theme** is a name plus a palette plus a font preset, plus the fonts'
+sizes. Palettes and font presets are building blocks: several themes can
+share one, and editing it changes every theme that uses it. The sizes are
+the theme's own, so swapping in another preset (or another font) keeps
+them.
 
 - **Palettes** (`palettes.json`) have 34 keys. 8 are base colours; the rest
   are derived from them (`palette-derive.jq`) until edited by hand, which
@@ -27,8 +29,13 @@ changes every theme that uses it.
   | Proportional | proportional      | rofi, GTK apps, "sans-serif" (web pages, Electron)        |
   | Icons        | a Nerd Font Propo | i3 window titles and the bar                              |
 
-  Sizes get a per-machine offset from `configs/hosts/<host>/fonts.json`
-  (`{"monospace": 0, "proportional": 3, "icons": 3}`).
+  A preset only names the fonts. The **sizes**, one per role, belong to the
+  theme (`themes.json`: `"sizes": {"monospace": 14, "proportional": 9,
+  "icons": 9}`); `h` / `l` on a role in the studio change them, saved and
+  applied a moment after the last key press. `$mod+Shift+t` applies a
+  preset at the active theme's sizes. Each machine adds its offset from
+  `configs/hosts/<host>/fonts.json` (`{"monospace": 0, "proportional": 3,
+  "icons": 3}`).
 
 ## Switching
 

@@ -40,6 +40,20 @@ fn role_entry<'a>(obj: &'a Map<String, Value>, role: usize) -> Option<&'a Value>
     obj.get(ROLES[role]).or_else(|| obj.get(OLD_ROLES[role]))
 }
 
+/// A preset without its roles' sizes (fonts.json version 4).
+pub fn drop_sizes(obj: Map<String, Value>) -> Map<String, Value> {
+    obj.into_iter()
+        .map(|(k, mut v)| {
+            if ROLES.contains(&k.as_str())
+                && let Some(o) = v.as_object_mut()
+            {
+                o.remove("size");
+            }
+            (k, v)
+        })
+        .collect()
+}
+
 /// A preset or offset file with the old role keys renamed (in place, so
 /// the order stays).
 pub fn rename_roles(obj: Map<String, Value>) -> Map<String, Value> {
@@ -51,13 +65,20 @@ pub fn rename_roles(obj: Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
+/// A role's font. The family comes from the font preset; the size from the
+/// theme (themes.json `sizes`), so switching presets keeps the sizes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Font {
     pub family: String,
     pub size: u32,
 }
 
-/// A font preset: the Monospace, Proportional and Icons fonts.
+/// Sizes when neither the theme nor (an older) preset has any.
+pub const DEFAULT_SIZES: [u32; 3] = [14, 11, 11];
+
+/// A font preset: the Monospace, Proportional and Icons fonts' families.
+/// (The sizes held here are the theme's, for drawing and applying; they
+/// aren't saved with the preset.)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preset {
     pub fonts: [Font; 3],
@@ -67,13 +88,18 @@ pub struct Preset {
 
 impl Preset {
     /// Reads a preset (either key names); a missing Icons font falls back
-    /// to the Proportional one, like font-switch.sh.
+    /// to the Proportional one, like font-switch.sh. Sizes are read when
+    /// the preset still has them (before fonts.json version 4), else the
+    /// defaults; the theme's sizes replace them (`set_sizes`).
     pub fn from_json(obj: &Map<String, Value>) -> Result<Preset> {
         let font = |role: usize| -> Option<Font> {
             let f = role_entry(obj, role)?;
             Some(Font {
                 family: f.get("family")?.as_str()?.to_string(),
-                size: f.get("size")?.as_u64()? as u32,
+                size: f
+                    .get("size")
+                    .and_then(Value::as_u64)
+                    .map_or(DEFAULT_SIZES[role], |s| s as u32),
             })
         };
         let mono = font(0).ok_or_else(|| anyhow!("no monospace font"))?;
@@ -90,18 +116,36 @@ impl Preset {
         })
     }
 
+    /// The preset as fonts.json keeps it: families only.
     pub fn to_json(&self) -> Map<String, Value> {
         let mut m = Map::new();
         for (role, f) in ROLES.iter().zip(&self.fonts) {
-            m.insert(
-                role.to_string(),
-                json!({ "family": f.family, "size": f.size }),
-            );
+            m.insert(role.to_string(), json!({ "family": f.family }));
         }
         for (k, v) in &self.extra {
             m.insert(k.clone(), v.clone());
         }
         m
+    }
+
+    pub fn sizes(&self) -> [u32; 3] {
+        [0, 1, 2].map(|r| self.fonts[r].size)
+    }
+
+    pub fn set_sizes(&mut self, sizes: [u32; 3]) {
+        for (f, s) in self.fonts.iter_mut().zip(sizes) {
+            f.size = s;
+        }
+    }
+
+    /// The same fonts (families and other keys), whatever the sizes.
+    pub fn same_fonts(&self, other: &Preset) -> bool {
+        self.extra == other.extra
+            && self
+                .fonts
+                .iter()
+                .zip(&other.fonts)
+                .all(|(a, b)| a.family == b.family)
     }
 
     /// What a new preset starts from.
@@ -148,14 +192,16 @@ impl FontStore {
         crate::store::data_map(v, "presets").ok_or_else(|| anyhow!("fonts.json has no presets"))
     }
 
-    /// Brings fonts.json up to the current version (3: the new role keys),
-    /// and the host offset files (configs/hosts/*/fonts.json) with it.
+    /// Brings fonts.json up to the current version (3: the new role keys;
+    /// 4: no sizes, they're the theme's), and the host offset files
+    /// (configs/hosts/*/fonts.json) with it. Run after themes.json's
+    /// migration, which takes the sizes from here first.
     pub fn migrate(&self) -> Result<Option<u64>> {
         let done = crate::store::migrate_data_file(&self.path(), "presets", |presets| {
             presets
                 .into_iter()
                 .map(|(name, p)| match p {
-                    Value::Object(o) => (name, Value::Object(rename_roles(o))),
+                    Value::Object(o) => (name, Value::Object(drop_sizes(rename_roles(o)))),
                     other => (name, other),
                 })
                 .collect()
@@ -211,19 +257,22 @@ impl FontStore {
         crate::store::write_json_file(&self.path(), &crate::store::data_file("presets", all))
     }
 
-    /// Runs font-switch.sh to make a saved preset the system fonts.
-    pub fn apply(&self, name: &str) -> Result<()> {
-        self.run_switch(name, false)
+    /// Runs font-switch to make a saved preset the system fonts, at the
+    /// theme's sizes (`FONT_SIZES`; without it font-switch would use the
+    /// active theme's, which may be another theme).
+    pub fn apply(&self, name: &str, sizes: [u32; 3]) -> Result<()> {
+        self.run_switch(name, sizes, false)
     }
 
     /// Applies without restarting Ghostty and i3 (a theme's palette, applied
     /// next, restarts them once for both).
-    pub fn apply_quietly(&self, name: &str) -> Result<()> {
-        self.run_switch(name, true)
+    pub fn apply_quietly(&self, name: &str, sizes: [u32; 3]) -> Result<()> {
+        self.run_switch(name, sizes, true)
     }
 
-    fn run_switch(&self, name: &str, quiet: bool) -> Result<()> {
+    fn run_switch(&self, name: &str, sizes: [u32; 3], quiet: bool) -> Result<()> {
         let mut cmd = crate::paths::switch_command("font-switch", &self.dir, &self.share);
+        cmd.env("FONT_SIZES", sizes.map(|s| s.to_string()).join(" "));
         if quiet {
             cmd.env("NO_RESTART", "1");
         }
@@ -812,6 +861,8 @@ pub struct FontsTab {
     pub saved_filters: Option<Filters>,
     /// A font was just picked (the app saves and applies it).
     pub picked: bool,
+    /// When a role's size last changed, until the app applies it.
+    pub sized_at: Option<std::time::Instant>,
 }
 
 impl FontsTab {
@@ -856,6 +907,7 @@ impl FontsTab {
             picking: None,
             saved_filters: None,
             picked: false,
+            sized_at: None,
         }
     }
 
@@ -872,7 +924,8 @@ impl FontsTab {
     }
 
     pub fn dirty(&self) -> bool {
-        self.is_new || self.preset != self.saved
+        // sizes are the theme's: they don't make the preset unsaved
+        self.is_new || !self.preset.same_fonts(&self.saved)
     }
 
     /// Size actually used on this machine (base + host offset).
@@ -1136,13 +1189,18 @@ impl FontsTab {
         }
     }
 
+    /// h / l on a role: the theme's size for it. The app saves and applies
+    /// it once the keys have been still for a moment (`sized_at`).
     pub fn resize(&mut self, d: i32) {
         let f = &mut self.preset.fonts[self.slot];
         f.size = (f.size as i32 + d).clamp(4, 72) as u32;
+        self.sized_at = Some(std::time::Instant::now());
     }
 
+    /// Opens a preset: its fonts, at the sizes in use (they're the theme's).
     pub fn open(&mut self, name: &str) -> Result<()> {
-        let p = self.store.load(name)?;
+        let mut p = self.store.load(name)?;
+        p.set_sizes(self.preset.sizes());
         self.name = name.to_string();
         self.is_new = false;
         self.saved = p.clone();
@@ -1258,7 +1316,9 @@ mod tests {
             out.keys().collect::<Vec<_>>(),
             ["monospace", "proportional", "icons", "note"]
         );
-        assert_eq!(Preset::from_json(&out).unwrap(), p);
+        // written without sizes (they're the theme's): the same fonts
+        assert!(out.values().filter_map(|v| v.get("size")).next().is_none());
+        assert!(Preset::from_json(&out).unwrap().same_fonts(&p));
     }
 
     #[test]
@@ -1279,7 +1339,10 @@ mod tests {
             let o = v.as_object().unwrap();
             let p = Preset::from_json(o).unwrap();
             rebuilt.insert(name.clone(), Value::Object(p.to_json()));
-            migrated.insert(name.clone(), Value::Object(rename_roles(o.clone())));
+            migrated.insert(
+                name.clone(),
+                Value::Object(drop_sizes(rename_roles(o.clone()))),
+            );
         }
         let rebuilt = to_jq_string(&crate::store::data_file("presets", rebuilt));
         assert_eq!(
@@ -1312,13 +1375,14 @@ mod tests {
             share: dir.clone(),
         };
         let before = store.load("A").unwrap();
-        assert_eq!(store.migrate().unwrap(), Some(3));
+        assert_eq!(store.migrate().unwrap(), Some(4));
         assert_eq!(store.migrate().unwrap(), None, "only once");
-        assert_eq!(store.load("A").unwrap(), before);
+        assert!(store.load("A").unwrap().same_fonts(&before));
         let v: Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("fonts.json")).unwrap())
                 .unwrap();
-        assert_eq!(v["version"], 3);
+        assert_eq!(v["version"], 4);
+        assert_eq!(v["presets"]["A"]["monospace"], json!({"family": "M"}));
         assert_eq!(
             v["presets"]["A"]
                 .as_object()

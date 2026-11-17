@@ -40,7 +40,10 @@ palette=$(json_data "$themes" | jq -r --arg n "$name" '.[$n].palette // empty')
 fonts=$(json_data "$themes" | jq -r --arg n "$name" '.[$n].fonts // empty')
 [ -n "$palette" ] && [ -n "$fonts" ] || { echo "no theme '$name'" >&2; exit 1; }
 
-NO_RESTART=1 bash "$here/font-switch.sh" "$fonts" || exit 1
+# The theme's font sizes (font-switch would otherwise take the active
+# theme's, and this one only becomes active below)
+sizes=$(json_data "$themes" | jq -r --arg n "$name" '.[$n].sizes | select(.) | "\(.monospace) \(.proportional) \(.icons)"')
+FONT_SIZES="$sizes" NO_RESTART=1 bash "$here/font-switch.sh" "$fonts" || exit 1
 bash "$here/theme-switch.sh" "$palette" || exit 1
 mkdir -p "$out"
 printf '%s\n' "$name" > "$out/theme"

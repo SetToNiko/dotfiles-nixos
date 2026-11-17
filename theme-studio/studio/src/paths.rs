@@ -126,6 +126,14 @@ fn on_path(name: &str) -> bool {
 /// scripts folder, else from the old configs folder. It's told where the
 /// data and share folders are, so it reads what the studio reads.
 pub fn switch_command(name: &str, data: &Path, share: &Path) -> Command {
+    // Tests never touch the real desktop: the switch scripts write
+    // ~/.config/colors and ~/.config/fonts and restart i3, whatever data
+    // folder they're given. A test that means it sets THEME_STUDIO_REAL_SWITCH.
+    if cfg!(test) && std::env::var_os("THEME_STUDIO_REAL_SWITCH").is_none() {
+        let mut c = Command::new("sh");
+        c.args(["-c", "echo \"$0 is off in tests\" >&2; exit 1", name]);
+        return c;
+    }
     let mut cmd = if on_path(name) {
         Command::new(name)
     } else {
@@ -199,6 +207,18 @@ mod tests {
         );
         // a plain file is written in place
         assert_eq!(write_target(&d.join("new/x.json")), d.join("new/x.json"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn tests_never_run_the_switch_scripts() {
+        let d = temp("switch");
+        let out = switch_command("font-switch", &d, &d)
+            .arg("anything")
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("font-switch is off in tests"));
         std::fs::remove_dir_all(d).unwrap();
     }
 

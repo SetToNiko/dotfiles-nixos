@@ -274,6 +274,37 @@ history is under the old names (`git log -- palettes.json`).
   `THEME_STUDIO_SCRIPTS` pointing at the checkout) all give byte-for-byte
   the same output, the login font copy included.
 
+### Between steps 4 and 5: font sizes belong to the theme ✅
+
+Asked for after step 4: GeistMono gave a 12 pt bar from `$mod+Shift+t`
+(the "Geist Mono" preset, sizes 9) and a 17 pt one from the studio, which
+put GeistMono into the theme's preset "JetBrains Mono" (sizes 14 / 15 / 14)
+and kept its sizes. Decided: ✅ sizes per **theme**, ✅ applied as soon as
+they change.
+
+- `themes.json` version 2: each theme has `sizes` (Monospace, Proportional,
+  Icons). `fonts.json` version 4: presets name fonts only. The studio
+  migrates themes first (each takes its preset's sizes), then fonts.
+- `font-switch`: `$FONT_SIZES`, else the active theme's sizes, else the
+  preset's (older files), else 14 11 11; the host offsets on top.
+  `themes-switch` passes the theme's sizes; the studio passes its theme's on
+  every apply.
+- The studio: `h` / `l` on a role change the theme's size, saved and applied
+  400 ms after the last press; a size doesn't make the preset unsaved;
+  opening another preset keeps the sizes.
+- Your data: "JetBrains Mono" (both themes' preset) set to 14 / 9 / 9 and
+  applied (12 / 12 here, as the bar was with "Geist Mono"); the new
+  studio's first start moves those sizes into both themes. Rehearsed on a
+  copy of the real files.
+- **Found on the way:** since step 1, tests that pick a font or apply a
+  theme ran the real `font-switch` / `theme-switch` (found on PATH, or in
+  `configs/`) on their temporary data, writing `~/.config/fonts` with test
+  fonts (`font-size = 0`) and restarting i3. Restored with `font-switch`;
+  `paths::switch_command` now runs nothing in tests unless
+  `THEME_STUDIO_REAL_SWITCH` is set (only the opt-in end-to-end check sets
+  it), with a test for that, and a full run checked to leave
+  `~/.config/fonts` and `~/.config/colors` untouched.
+
 ### 5. The Nix modules (main repo)
 
 - `packaging/nix/home-module.nix`, options under `programs.theme-studio`:
