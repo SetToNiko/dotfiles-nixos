@@ -219,6 +219,12 @@ pub struct App {
     pub pending_keys: Vec<Key>,
     /// What the Open / Save as pop-up is for.
     pub overlay_for: For,
+    /// The palette list (For::Palette): each entry's palette, for previewing
+    /// it while it's highlighted, and the palette from before the list opened.
+    pub open_palettes: Vec<Option<Palette>>,
+    pub open_original: Option<Palette>,
+    /// Where the Palette pane was last drawn (the palette list hangs from it).
+    pub palette_pane: Option<Rect>,
     /// The theme: a name for the palette plus the font preset.
     pub themes: ThemeStore,
     pub theme: String,
@@ -311,6 +317,9 @@ impl App {
             redraw_at: None,
             sample_error: None,
             overlay_for: For::Palette,
+            open_palettes: Vec::new(),
+            open_original: None,
+            palette_pane: None,
             themes: ThemeStore {
                 dir: store.dir.clone(),
             },
@@ -417,7 +426,10 @@ impl App {
                 match event::read()? {
                     Event::Key(k) if k.kind == KeyEventKind::Press => self.on_key(k),
                     Event::Mouse(m) => self.on_mouse(m),
-                    Event::Paste(s) => self.on_paste(&s),
+                    Event::Paste(s) => {
+                        self.on_paste(&s);
+                        self.sync_palette_preview();
+                    }
                     _ => {}
                 }
                 redraw = true;
@@ -440,8 +452,10 @@ impl App {
         self.keys[self.sel]
     }
 
+    /// Unsaved palette edits (not counting a palette previewed from the
+    /// palette list).
     pub fn dirty(&self) -> bool {
-        self.is_new || self.palette != self.saved
+        self.is_new || self.open_original.as_ref().unwrap_or(&self.palette) != &self.saved
     }
 
     /// Asks for a new font sample when the fonts or colours changed, and
@@ -863,6 +877,12 @@ impl App {
                     .iter()
                     .position(|(n, _)| *n == self.name)
                     .unwrap_or(0);
+                // each palette, shown while it's highlighted
+                self.open_palettes = all
+                    .values()
+                    .map(|v| v.as_object().and_then(|o| Palette::from_json(o).ok()))
+                    .collect();
+                self.open_original = Some(self.palette.clone());
                 self.overlay = Overlay::Open {
                     filter: String::new(),
                     sel,
@@ -871,6 +891,36 @@ impl App {
             }
             Err(e) => self.error(format!("{e:#}")),
         }
+    }
+
+    /// The palette list shows the highlighted palette everywhere (the
+    /// colour list, the preview windows, the sample); closing it any way
+    /// but choosing puts back the palette from before.
+    fn sync_palette_preview(&mut self) {
+        let Some(original) = &self.open_original else {
+            return;
+        };
+        match &self.overlay {
+            Overlay::Open {
+                filter,
+                sel,
+                entries,
+            } if self.overlay_for == For::Palette => {
+                let shown = open_matches(entries, filter)
+                    .get(*sel)
+                    .and_then(|&i| self.open_palettes.get(i).cloned().flatten());
+                self.palette = shown.unwrap_or_else(|| original.clone());
+            }
+            _ => self.end_palette_preview(),
+        }
+    }
+
+    /// Back to the palette from before the palette list opened.
+    fn end_palette_preview(&mut self) {
+        if let Some(p) = self.open_original.take() {
+            self.palette = p;
+        }
+        self.open_palettes.clear();
     }
 
     // ----- input -----------------------------------------------------------
@@ -1234,6 +1284,7 @@ impl App {
 
     fn on_key(&mut self, k: KeyEvent) {
         self.handle_key(k);
+        self.sync_palette_preview();
         self.end_session_outside_picker();
     }
 
@@ -1785,6 +1836,8 @@ impl App {
                     KeyCode::Enter => match open_matches(&entries, &filter).get(sel) {
                         Some(&i) => {
                             let name = entries[i].0.clone();
+                            // the unsaved-changes check sees the real palette
+                            self.end_palette_preview();
                             self.guard(match self.overlay_for {
                                 For::Fonts => Pending::OpenFonts(name),
                                 For::Palette => Pending::Open(name),
@@ -1860,6 +1913,7 @@ impl App {
 
     fn on_mouse(&mut self, m: MouseEvent) {
         self.handle_mouse(m);
+        self.sync_palette_preview();
         self.end_session_outside_picker();
     }
 
@@ -2069,6 +2123,7 @@ impl App {
             | T::SettingsDiff
             | T::PresetRow(_) => self.settings_click(t),
             T::ThemeName => self.theme_open_overlay(),
+            T::PaletteMenu => self.open_overlay(),
             T::DlTab(_) | T::DlRow(_) | T::DlChip(_) | T::DlSearch | T::DlButton(_) => {
                 self.dl_click(t)
             }
@@ -3941,6 +3996,54 @@ mod tests {
         assert!(top.contains("F1") && !top.contains("? keys"), "{top}");
         assert!(bottom.starts_with(" Nothing to undo"), "{bottom}");
         assert!(bottom.trim_end().ends_with("? keys"), "{bottom}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn palette_list_hangs_from_the_title_and_previews() {
+        use crate::hit::Target as T;
+        let store = temp_store("palette-menu");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        let one_red = app.palette.get("red");
+        let down = |app: &mut App| app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        // the name is in the title, as a dropdown
+        assert!(render(&mut app, 160, 45).contains("Palette: One ▾"));
+        // a click on it opens the list, hanging from the pane
+        click_on(&mut app, T::PaletteMenu);
+        assert!(matches!(app.overlay, Overlay::Open { .. }));
+        render(&mut app, 160, 45);
+        let pane = app.palette_pane.unwrap();
+        assert_eq!(app.hits.rect_of(T::OverlayRow(0)).unwrap().y, pane.y + 4);
+        // moving shows the highlighted palette; it isn't an unsaved edit
+        down(&mut app);
+        assert_eq!(app.palette.get("red"), Rgb(200, 0, 0));
+        assert_eq!(app.name, "One");
+        assert!(!app.dirty());
+        assert!(render(&mut app, 160, 45).contains("Palette: One ▾ "));
+        // Esc puts it back
+        press(&mut app, "\x1b");
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.palette.get("red"), one_red);
+        assert!(app.open_original.is_none());
+        // <leader>op opens the same list; Enter keeps the highlighted one
+        press(&mut app, " op");
+        down(&mut app);
+        press(&mut app, "\n");
+        assert_eq!(app.name, "Two");
+        assert_eq!(app.palette.get("red"), Rgb(200, 0, 0));
+        assert!(!app.dirty());
+        // with unsaved edits, choosing still asks first (about the real palette)
+        press(&mut app, "#111111\n");
+        assert!(app.dirty());
+        let edited = app.palette.clone();
+        press(&mut app, " op");
+        app.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_ne!(app.palette, edited);
+        assert!(app.dirty());
+        press(&mut app, "\n");
+        assert!(matches!(app.overlay, Overlay::Confirm(Pending::Open(_))));
+        assert_eq!(app.palette, edited);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

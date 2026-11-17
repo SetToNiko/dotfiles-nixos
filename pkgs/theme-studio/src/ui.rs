@@ -241,6 +241,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits.clear();
     // images still waiting for a size to settle set this again
     app.redraw_at = None;
+    // set again if the Palette pane is drawn (the palette list hangs from it)
+    app.palette_pane = None;
     crate::hit::set_looks(app.looks(&app.settings));
     let full = f.area();
     // tabs on top: their own row; at the bottom they share the status line
@@ -497,20 +499,48 @@ fn swatch(c: Rgb, width: usize) -> Span<'static> {
 // ----- key list -----------------------------------------------------------
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
+    app.palette_pane = Some(area);
+    // "⁴Palette: CRT Amber ▾": the name opens the palette list
+    let number = panel_number(4);
+    let head_w = number.width() as u16 + "Palette: ".len() as u16;
+    let menu = format!("{} ▾", app.name);
+    let menu_rect = Rect {
+        x: area.x + 1 + head_w,
+        y: area.y,
+        width: (menu.chars().count() as u16).min(area.width.saturating_sub(2 + head_w)),
+        height: 1,
+    };
+    let over_menu = app.hits.over(menu_rect);
+    let dot = if app.dirty() {
+        Span::styled(" ●", Style::new().yellow())
+    } else {
+        "".into()
+    };
     let title = Line::from(vec![
-        panel_number(4),
-        // the palette's name is part of the theme now (in the tab row)
-        "Palette".into(),
-        if app.dirty() {
-            Span::styled(" ●", Style::new().yellow())
-        } else {
-            "".into()
-        },
+        number,
+        "Palette: ".into(),
+        menu.clone().into(),
+        dot.clone(),
         " ".into(),
     ]);
+    // the title focuses the pane (and lights up) except over the name,
+    // which lights up alone
+    let mut title = if over_menu {
+        let r = Rect {
+            width: (title.width() as u16).min(area.width.saturating_sub(2)),
+            x: area.x + 1,
+            ..menu_rect
+        };
+        app.hits.add(r, Target::PaneTitle(4));
+        title
+    } else {
+        pane_title(app, area, title, 4)
+    };
+    if app.hits.add(menu_rect, Target::PaletteMenu) {
+        title.spans[2] = Span::styled(menu, hover(Style::new()));
+    }
     let focused =
         app.side == Side::Colours && app.focus == Focus::List && app.preview.focus.is_none();
-    let title = pane_title(app, area, title, 4);
     let block = focused_block(app, area, title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1832,7 +1862,25 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             sel,
             entries,
         } => {
-            let r = centered(area, 70, area.height.saturating_sub(6).min(30));
+            // the palette list hangs from the Palette pane's title; the
+            // other lists (and this one on other pages) are centred
+            let hanging = match app.palette_pane {
+                Some(p) if app.overlay_for == crate::app::For::Palette => {
+                    let w = 70.min(area.width);
+                    let h = (entries.len() as u16 + 4)
+                        .min(30)
+                        .min(area.bottom().saturating_sub(p.y + 1));
+                    Some(Rect {
+                        x: p.x.min(area.right().saturating_sub(w)),
+                        y: p.y + 1,
+                        width: w,
+                        height: h,
+                    })
+                }
+                _ => None,
+            };
+            let r = hanging
+                .unwrap_or_else(|| centered(area, 70, area.height.saturating_sub(6).min(30)));
             let matches = open_matches(entries, filter);
             let list_h = r.height.saturating_sub(4) as usize;
             let start = sel.saturating_sub(list_h.saturating_sub(1));

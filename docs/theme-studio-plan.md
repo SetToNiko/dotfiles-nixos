@@ -926,7 +926,7 @@ download work.
   key or a click closes. Smaller notes ("Nothing to undo") stay in the bar.
 - settings.json: `"messages": {"seconds": 3, "saved": "bar" | "popup"}`.
 
-### 1. Palette dropdown in the Palette pane
+### 1. Palette dropdown in the Palette pane ✅
 
 - **What:** ✅ the pane title is the dropdown:
   `⁴Palette: CRT Amber ▾` (the name comes back into the title, removed in
@@ -1005,7 +1005,9 @@ Each step is committed separately and keeps the studio working.
    all).
 2. ✅ Images re-rendered after resizing stops (`settle.rs`): while waiting,
    an image keeps its old size where that fits, else the pane is blank.
-3. The palette dropdown in the pane title, with live preview.
+3. ✅ The palette dropdown in the pane title, with live preview. A click on
+   the name or `<leader>op` opens it (the list has no keyboard focus of its
+   own); off the Main page it's centred as before.
 4. Fuller code samples, the new languages, scrolling, the two dropdowns.
 5. Previews moved to `~/.local/share`, Nerd Fonts kept as Regular only,
    the clear button, then prefetching.

@@ -52,6 +52,9 @@ pub enum Target {
     PresetRow(usize),
     /// The theme's name in the tab row (opens the theme list).
     ThemeName,
+    /// The palette's name in the Palette pane's title (opens the palette
+    /// list under it).
+    PaletteMenu,
     /// Download fonts page: a tab, a list row, a category chip, the search
     /// box, Install ('i') / Remove ('r').
     DlTab(u8),
