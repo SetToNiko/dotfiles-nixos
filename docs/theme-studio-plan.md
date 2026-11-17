@@ -478,18 +478,104 @@ narrow
   `<leader>1`–`7` (keymaps.json version 2 migrates the old digit defaults).
   The preview frame is magenta while nvim or the shell has the keyboard.
 
-### 7. Order of work
+### 7. Additions (asked for after step 4)
+
+**Picker edits** ✅ (done): only Enter (the picker's Confirm key, or Enter in
+the hex box) keeps a change. Leaving the picker any other way puts the
+colours back: Esc, another pane or column, a preview window, a click
+elsewhere, hiding the picker, or Tab past the last control.
+
+**Status line** ✅ (done): just the page tabs, then hints and messages. The
+palette or preset name and "active:" are gone; the unsaved-changes dot is in
+the pane titles.
+
+#### Tab bar position
+
+- A setting, `layout.tabs`: `"bottom"` (default, as now) or `"top"`.
+- On top, the tabs get their own row above the columns; the hints and
+  messages stay in the bottom line. At the bottom they share that line, as
+  now.
+- Clicking a tab opens that page (see hover states below).
+
+#### Hover states for everything clickable
+
+- Every clickable thing shows that it's clickable when the mouse is over it:
+  - **Rows:** colour, group, font, role, palette and preset rows in the
+    pop-ups (a background highlight on the row).
+  - **Controls:** filter chips, page tabs, pane titles (a click focuses the
+    pane), and the picker's square, hue strip, sliders and hex box (the
+    marker or label lights up).
+  - **Preview windows:** nvim and the shell (the frame lights up in the
+    capture colour, since a click hands them the keyboard).
+  - **Borders:** pane borders that can be dragged to resize (step 6 below).
+- **How:** each draw records a map of what's clickable where. Clicks,
+  hovering and the later border dragging all use that one map, replacing
+  the separate rectangles kept now. The terminal reports mouse movement,
+  which the studio already asks for.
+- 🔸 **Pointer shape:** in Ghostty, the mouse pointer also turns into a hand
+  over clickable things (OSC 22), and back to the arrow elsewhere. Other
+  terminals ignore it.
+
+#### Versions and history for every config
+
+- **Version numbers:** keymaps.json, settings.json, palettes.json and
+  fonts.json each get `"version"`, so later format changes can be migrated
+  automatically, as keymaps.json's panes were.
+  - **New layout for the data files:** palettes.json becomes
+    `{ "version": 2, "palettes": { … } }`, and fonts.json likewise with
+    `"presets"`. A top-level `version` key would otherwise be read as a
+    palette.
+  - **Updated with it:** `theme-switch.sh`, `font-switch.sh`, their rofi
+    menus and `lib/rofi-picker.sh`, the Nix activation steps,
+    `palette-derive.jq`, and the studio. A one-time migration rewrites both
+    files; the scripts accept either layout during the switch.
+- **History:** before every save the studio makes (palette, font preset,
+  keymaps, settings), the file as it was is kept in
+  `~/.local/state/theme-studio/history/<file>/` (per machine, outside the
+  dotfiles repo). The newest 100 per file are kept. A restore takes a
+  snapshot first, so a restore can itself be undone.
+- **Saved versions:** you can save the current state of a file under a name
+  (e.g. "before trying Emacs keys"). Named versions are never pruned.
+- **History tab** (Settings page, next to Keymaps and Behaviour):
+  - Pick a file, then a named version or a snapshot (time, plus a one-line
+    summary of what changed, e.g. "novmbr: red, aqua").
+  - **Preview first:** the selected version is shown in full, with its values
+    in place. Every entry that differs from what you have now is
+    highlighted and shown as `current → selected`, so the changes are
+    visible straight away. Nothing changes until you confirm.
+  - For palettes.json, 🔸 the preview column also shows the selected
+    version's colours for the palette you're editing.
+  - Restore (with the preview's confirm key), save the current state as a
+    named version, delete a named version.
+  - 🔸 `<leader>u` undoes the last config change from anywhere (restores the
+    newest snapshot of the file the studio last saved).
+
+### 8. Order of work
 
 Each step is committed separately and keeps the studio working.
 
-1. Action names and the keymap engine (sequences, leader, popup); the Vim
-   preset reproduces today's keys, checked by the existing tests.
-2. Settings files and the `~/.config/theme-studio` link.
-3. Main page: three columns, the narrow layout, panes ¹–⁷, pages F1–F3.
-4. Collapsible colour groups, the picker's visibility, the behaviour settings.
-5. Resizing: mouse drags and resize mode.
-6. Settings page: the Behaviour tab and the Keymaps tab.
-7. The Helix, Emacs, VS Code and JetBrains presets.
+1. ✅ Action names and the keymap engine (sequences, leader, popup).
+2. ✅ Settings files and the `~/.config/theme-studio` link.
+3. ✅ Main page: three columns, the narrow layout, panes ¹–⁷, pages F1–F3.
+4. ✅ Collapsible colour groups, the picker's visibility, the behaviour
+   settings; follow-ups (picker discard, leader panes, capture colour,
+   status line).
+5. **Clickable map, hover states and tabs:** the click map, hover highlights
+   (and the pointer shape), clickable page tabs, and the tab bar position
+   setting.
+6. **Resizing:** dragging borders (they get hover states too) and
+   `<leader>r` resize mode.
+7. **Versions and history (behind the scenes):**
+   - version fields and migrations for all four files, with the new data
+     file layout and the scripts updated
+   - snapshots in `~/.local/state`, pruning to 100, and named versions
+8. **Settings page:**
+   - **Keymaps tab:** rebinding, conflicts, and presets.
+   - **Behaviour tab:** the leader, visibility defaults, tab position,
+     default pane sizes.
+   - **History tab:** browsing, the preview, restoring, named versions.
+9. **More presets:** Helix, Emacs, VS Code and JetBrains, plus Ghostty's
+   extended keyboard mode (kitty protocol) for keys like Ctrl+Shift+Z.
 
 ## Phase 6: downloading fonts
 
