@@ -576,7 +576,7 @@ Each step is committed separately and keeps the studio working.
    - **Behaviour tab:** the leader, visibility defaults, tab position,
      default pane sizes.
    - **History tab:** browsing, the preview, restoring, named versions.
-9. **More presets:** Helix, Emacs, VS Code and JetBrains, plus Ghostty's
+9. ✅ **More presets:** Helix, Emacs, VS Code and JetBrains, plus Ghostty's
    extended keyboard mode (kitty protocol) for keys like Ctrl+Shift+Z.
 
 ## Phase 6: downloading fonts

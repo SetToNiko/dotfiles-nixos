@@ -25,11 +25,19 @@ impl Key {
     pub fn from_event(k: KeyEvent) -> Key {
         let mut mods =
             k.modifiers & (KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
-        match k.code {
-            KeyCode::Char(_) | KeyCode::BackTab => mods.remove(KeyModifiers::SHIFT),
+        let mut code = k.code;
+        match code {
+            // the kitty keyboard protocol sends Ctrl+Shift+S as s + Shift
+            KeyCode::Char(c) => {
+                if mods.contains(KeyModifiers::SHIFT) {
+                    code = KeyCode::Char(c.to_ascii_uppercase());
+                }
+                mods.remove(KeyModifiers::SHIFT)
+            }
+            KeyCode::BackTab => mods.remove(KeyModifiers::SHIFT),
             _ => {}
         }
-        Key { code: k.code, mods }
+        Key { code, mods }
     }
 
     /// Parses one key sequence, e.g. `<leader>cp`, `gg`, `<C-x><C-s>`.
@@ -877,7 +885,211 @@ impl Keymap {
 
     /// The presets that ship with the studio.
     pub fn builtin() -> Vec<Keymap> {
-        vec![Keymap::vim()]
+        vec![
+            Keymap::vim(),
+            Keymap::helix(),
+            Keymap::emacs(),
+            Keymap::vscode(),
+            Keymap::jetbrains(),
+        ]
+    }
+
+    /// A preset made from Vim's: its keys with some replaced (an empty list
+    /// unbinds); `<leader>` sequences follow the new leader.
+    fn derived(name: &str, leader: &str, overrides: &[(Context, Action, &[&str])]) -> Keymap {
+        let space = Key::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let leader = Key::parse_seq(leader, space).expect("leader parses")[0];
+        let mut km = Keymap::vim().with_leader(leader);
+        km.name = name.to_string();
+        for (ctx, action, seqs) in overrides {
+            let keys = seqs
+                .iter()
+                .map(|s| Key::parse_seq(s, leader).unwrap_or_else(|e| panic!("{name}: {s}: {e}")))
+                .collect();
+            km.set_keys(*ctx, *action, keys);
+        }
+        km
+    }
+
+    /// Movement without letters (h/j/k/l, g/G, H/J/K/L): arrows and the
+    /// like stay, and every context that moves gets the keys in `add`.
+    fn moves_without_letters(mut self, add: &[(Action, &[&str])]) -> Keymap {
+        use Action as A;
+        const MOVES: [Action; 12] = [
+            A::Up,
+            A::Down,
+            A::Left,
+            A::Right,
+            A::Top,
+            A::Bottom,
+            A::UpBig,
+            A::DownBig,
+            A::LeftBig,
+            A::RightBig,
+            A::PageUp,
+            A::PageDown,
+        ];
+        let moving: Vec<(Context, Action)> = self
+            .bindings
+            .iter()
+            .filter(|b| MOVES.contains(&b.action))
+            .map(|b| (b.context, b.action))
+            .collect();
+        let letter = |k: &[Key]| {
+            k.len() == 1 && matches!(k[0].code, KeyCode::Char(_)) && k[0].mods.is_empty()
+        };
+        self.bindings
+            .retain(|b| !(MOVES.contains(&b.action) && letter(&b.keys)));
+        for (ctx, action) in moving {
+            for (a, seqs) in add.iter().filter(|(a, _)| *a == action) {
+                for s in *seqs {
+                    let keys = Key::parse_seq(s, self.leader).expect("move keys parse");
+                    if !self
+                        .bindings
+                        .iter()
+                        .any(|b| b.context == ctx && b.action == *a && b.keys == keys)
+                    {
+                        self.bindings.push(Binding {
+                            context: ctx,
+                            keys,
+                            action: *a,
+                        });
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// Helix: Vim's keys with Helix's differences (U redo, gg / ge, :w / :q,
+    /// Space ? for the key list).
+    pub fn helix() -> Keymap {
+        use Action as A;
+        use Context as C;
+        let mut rows: Vec<(Context, Action, &[&str])> = vec![
+            (C::Global, A::Quit, &["q", ":q"]),
+            (C::Global, A::Save, &["s", ":w"]),
+            (C::Global, A::Help, &["?", "<leader>?"]),
+            (C::Colours, A::Redo, &["U"]),
+        ];
+        for ctx in [C::ColourList, C::FontList, C::Settings] {
+            rows.push((ctx, A::Top, &["gg", "<Home>"]));
+            rows.push((ctx, A::Bottom, &["ge", "<End>"]));
+        }
+        Keymap::derived("Helix", "<Space>", &rows)
+    }
+
+    /// Emacs: C-n / C-p / C-f / C-b to move, C-x prefixes for files, C-g to
+    /// back out, C-/ to undo; the leader is C-c.
+    pub fn emacs() -> Keymap {
+        use Action as A;
+        use Context as C;
+        let rows: Vec<(Context, Action, &[&str])> = vec![
+            (C::Global, A::Quit, &["<C-x><C-c>"]),
+            (C::Global, A::Help, &["?", "<C-h>b"]),
+            (C::Global, A::Save, &["<C-x><C-s>"]),
+            (C::Global, A::SaveAs, &["<C-x><C-w>"]),
+            (C::Global, A::Apply, &["<leader><C-c>"]),
+            (C::Global, A::Open, &["<C-x><C-f>"]),
+            (C::Global, A::New, &["<C-x>b"]),
+            (C::Global, A::PaneLeft, &["<C-x><Left>"]),
+            (C::Global, A::PaneRight, &["<C-x><Right>", "<C-x>o"]),
+            (C::Global, A::PaneUp, &["<C-x><Up>"]),
+            (C::Global, A::PaneDown, &["<C-x><Down>"]),
+            (C::Colours, A::Undo, &["<C-/>", "<C-x>u"]),
+            (C::Colours, A::Redo, &["<C-x>U"]),
+            (C::Colours, A::CopyHex, &["y", "<leader>w"]),
+            (C::Colours, A::Back, &["<Esc>", "<C-g>"]),
+            (C::FontList, A::Back, &["<Esc>", "<C-g>"]),
+            (C::FontList, A::Search, &["<C-s>", "/"]),
+            (C::Resize, A::Back, &["<Esc>", "<CR>", "<C-g>"]),
+            (C::Settings, A::Back, &["<Esc>", "<C-g>"]),
+        ];
+        Keymap::derived("Emacs", "<C-c>", &rows).moves_without_letters(&[
+            (A::Up, &["<C-p>"]),
+            (A::Down, &["<C-n>"]),
+            (A::Left, &["<C-b>"]),
+            (A::Right, &["<C-f>"]),
+            (A::Top, &["<C-Home>"]),
+            (A::Bottom, &["<C-End>"]),
+            (A::PageDown, &["<C-v>"]),
+            (A::UpBig, &["<S-Up>"]),
+            (A::DownBig, &["<S-Down>"]),
+            (A::LeftBig, &["<S-Left>"]),
+            (A::RightBig, &["<S-Right>"]),
+        ])
+    }
+
+    /// Arrows and the Ctrl keys VS Code and JetBrains share.
+    fn arrows(km: Keymap) -> Keymap {
+        use Action as A;
+        km.moves_without_letters(&[
+            (A::Top, &["<C-Home>"]),
+            (A::Bottom, &["<C-End>"]),
+            (A::UpBig, &["<S-Up>"]),
+            (A::DownBig, &["<S-Down>"]),
+            (A::LeftBig, &["<S-Left>"]),
+            (A::RightBig, &["<S-Right>"]),
+        ])
+    }
+
+    /// VS Code: Ctrl+S / Ctrl+O / Ctrl+N, Ctrl+Z / Ctrl+Y, F5 to apply,
+    /// Ctrl+1…7 for panes (with the kitty keyboard protocol), arrows to
+    /// move; the leader is Ctrl+K (its chord key).
+    pub fn vscode() -> Keymap {
+        use Action as A;
+        use Context as C;
+        let rows: Vec<(Context, Action, &[&str])> = vec![
+            (C::Global, A::Quit, &["<C-q>"]),
+            (C::Global, A::Help, &["?", "<leader><C-s>"]),
+            (C::Global, A::Save, &["<C-s>"]),
+            (C::Global, A::SaveAs, &["<C-S-s>"]),
+            (C::Global, A::Apply, &["<F5>"]),
+            (C::Global, A::Open, &["<C-o>"]),
+            (C::Global, A::New, &["<C-n>"]),
+            (C::Global, A::PaneLeft, &["<leader><Left>"]),
+            (C::Global, A::PaneRight, &["<leader><Right>"]),
+            (C::Global, A::PaneUp, &["<leader><Up>"]),
+            (C::Global, A::PaneDown, &["<leader><Down>"]),
+            (C::Global, A::Panel(1), &["<C-1>", "<leader>1"]),
+            (C::Global, A::Panel(2), &["<C-2>", "<leader>2"]),
+            (C::Global, A::Panel(3), &["<C-3>", "<leader>3"]),
+            (C::Global, A::Panel(4), &["<C-4>", "<leader>4"]),
+            (C::Global, A::Panel(5), &["<C-5>", "<leader>5"]),
+            (C::Global, A::Panel(6), &["<C-6>", "<leader>6"]),
+            (C::Global, A::Panel(7), &["<C-7>", "<leader>7"]),
+            (C::Colours, A::Undo, &["<C-z>"]),
+            (C::Colours, A::Redo, &["<C-y>", "<C-S-z>"]),
+            (C::Colours, A::CopyHex, &["<C-c>"]),
+            (C::FontList, A::Search, &["<C-f>", "/"]),
+        ];
+        Keymap::arrows(Keymap::derived("VS Code", "<C-k>", &rows))
+    }
+
+    /// JetBrains: Ctrl+S, Ctrl+E (recent files) to open, Ctrl+Z /
+    /// Ctrl+Shift+Z, Shift+F10 (run) to apply, arrows to move. Its
+    /// Alt+number tool windows would clash with i3, so panes stay on
+    /// Space 1…7.
+    pub fn jetbrains() -> Keymap {
+        use Action as A;
+        use Context as C;
+        let rows: Vec<(Context, Action, &[&str])> = vec![
+            (C::Global, A::Quit, &["<C-q>"]),
+            (C::Global, A::Save, &["<C-s>"]),
+            (C::Global, A::SaveAs, &["<C-S-s>"]),
+            (C::Global, A::Apply, &["<S-F10>"]),
+            (C::Global, A::Open, &["<C-e>", "<C-o>"]),
+            (C::Global, A::New, &["<C-n>"]),
+            (C::Global, A::PaneLeft, &["<leader><Left>"]),
+            (C::Global, A::PaneRight, &["<leader><Right>"]),
+            (C::Global, A::PaneUp, &["<leader><Up>"]),
+            (C::Global, A::PaneDown, &["<leader><Down>"]),
+            (C::Colours, A::Undo, &["<C-z>"]),
+            (C::Colours, A::Redo, &["<C-S-z>"]),
+            (C::Colours, A::CopyHex, &["<C-c>"]),
+            (C::FontList, A::Search, &["<C-f>", "/"]),
+        ];
+        Keymap::arrows(Keymap::derived("JetBrains", "<Space>", &rows))
     }
 
     /// The shipped Vim preset: the studio's original keys, plus leader
@@ -1184,5 +1396,115 @@ mod edit_tests {
         km.set_keys(Context::Global, Action::PreviewCycle, vec![]);
         km.set_keys(Context::Global, Action::Help, vec![seq("<M-h>", l)]);
         assert_eq!(km.warnings().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+
+    #[test]
+    fn shipped_presets_are_clash_free_and_round_trip() {
+        let all = Keymap::builtin();
+        let names: Vec<&str> = all.iter().map(|k| k.name.as_str()).collect();
+        assert_eq!(names, ["Vim", "Helix", "Emacs", "VS Code", "JetBrains"]);
+        for km in &all {
+            for b in &km.bindings {
+                assert!(
+                    km.conflicts(b.context, b.action, &b.keys).is_empty(),
+                    "{}: {} {:?}: {:?}",
+                    km.name,
+                    display_seq(&b.keys, km.leader),
+                    b.action,
+                    km.conflicts(b.context, b.action, &b.keys)
+                );
+                // no Alt (i3), no keys Ghostty keeps for itself
+                assert!(
+                    !b.keys.iter().any(|k| k.mods.contains(KeyModifiers::ALT)),
+                    "{}",
+                    km.name
+                );
+            }
+            assert!(km.warnings().is_empty(), "{}: {:?}", km.name, km.warnings());
+            // every action the Vim preset has keys for has keys here too
+            for b in &Keymap::vim().bindings {
+                assert!(
+                    !km.keys_of(b.context, b.action).is_empty(),
+                    "{}: {:?} in {:?} has no keys",
+                    km.name,
+                    b.action,
+                    b.context
+                );
+            }
+            let (back, w) = Keymap::from_json(&km.name, &km.to_json(), Some(km));
+            assert!(w.is_empty(), "{w:?}");
+            assert_eq!(back.to_json(), km.to_json());
+        }
+        let key = |km: &Keymap, s: &str| Key::parse_seq(s, km.leader).unwrap();
+        let emacs = Keymap::emacs();
+        assert_eq!(
+            emacs.leader,
+            Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        );
+        assert_eq!(
+            emacs.lookup(
+                &[Context::ColourList, Context::Colours, Context::Global],
+                &key(&emacs, "<C-n>")
+            ),
+            Lookup::Run(Action::Down)
+        );
+        assert!(
+            emacs
+                .keys_of(Context::ColourList, Action::Down)
+                .iter()
+                .all(|k| k[0].code != KeyCode::Char('j'))
+        );
+        assert_eq!(
+            emacs.lookup(&[Context::Global], &key(&emacs, "<C-c>sp")),
+            Lookup::Run(Action::SavePalette),
+            "leader sequences follow the leader"
+        );
+        let vs = Keymap::vscode();
+        assert_eq!(
+            vs.lookup(&[Context::Global], &key(&vs, "<C-S-s>")),
+            Lookup::Run(Action::SaveAs)
+        );
+        assert_eq!(
+            vs.lookup(&[Context::Global], &key(&vs, "<C-3>")),
+            Lookup::Run(Action::Panel(3))
+        );
+        let hx = Keymap::helix();
+        assert_eq!(
+            hx.lookup(&[Context::Colours], &key(&hx, "U")),
+            Lookup::Run(Action::Redo)
+        );
+        assert_eq!(
+            hx.lookup(&[Context::FontList], &key(&hx, "ge")),
+            Lookup::Run(Action::Bottom)
+        );
+    }
+
+    #[test]
+    fn kitty_protocol_keys_match_their_notation() {
+        let l = Key::new(KeyCode::Char(' '), KeyModifiers::NONE);
+        let ev = |c, m| Key::from_event(KeyEvent::new(c, m));
+        let cs = KeyModifiers::CONTROL | KeyModifiers::SHIFT;
+        // kitty: s + Ctrl + Shift; legacy-style: S + Ctrl + Shift
+        assert_eq!(
+            vec![ev(KeyCode::Char('s'), cs)],
+            Key::parse_seq("<C-S-s>", l).unwrap()
+        );
+        assert_eq!(
+            vec![ev(KeyCode::Char('S'), cs)],
+            Key::parse_seq("<C-S-s>", l).unwrap()
+        );
+        assert_eq!(
+            vec![ev(KeyCode::Char('1'), KeyModifiers::CONTROL)],
+            Key::parse_seq("<C-1>", l).unwrap()
+        );
+        assert_eq!(
+            vec![ev(KeyCode::Char('A'), KeyModifiers::SHIFT)],
+            Key::parse_seq("A", l).unwrap()
+        );
     }
 }

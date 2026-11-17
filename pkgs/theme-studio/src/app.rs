@@ -1122,8 +1122,14 @@ impl App {
             }
             return;
         }
-        // Ctrl+C always quits (asking first about unsaved changes)
-        if key == Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL) {
+        // Ctrl+C quits (asking first about unsaved changes), unless the
+        // keymap uses it here (Emacs's leader, copying in VS Code)
+        if key == Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+            && self.pending_keys.is_empty()
+            && !matches!(self.overlay, Overlay::Capture { .. })
+            && (!matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. })
+                || self.keymap.lookup(&self.contexts(), &[key]) == Lookup::None)
+        {
             self.pending_keys.clear();
             self.guard(Pending::Quit);
             return;
@@ -2887,5 +2893,32 @@ mod tests {
         assert!(app.versions().is_empty());
         assert!(render(&mut app, 160, 45).contains("No earlier versions yet"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ctrl_c_quits_unless_the_keymap_uses_it() {
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let mut app = test_app(temp_store("ctrl-c"), Start::Named("One".into()));
+        app.palette.set("red", Rgb(1, 2, 3));
+        app.on_key(ctrl_c);
+        assert!(
+            matches!(app.overlay, Overlay::Confirm(Pending::Quit)),
+            "Vim: asks, then quits"
+        );
+        app.overlay = Overlay::None;
+        // Emacs: C-c is the leader; C-c C-c applies
+        app.keymap = Keymap::emacs();
+        app.on_key(ctrl_c);
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.pending_keys.len(), 1);
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        app.pending_keys.clear();
+        // VS Code: Ctrl+C copies the colour in the colours pane
+        app.keymap = Keymap::vscode();
+        app.side = Side::Colours;
+        app.focus = Focus::List;
+        app.on_key(ctrl_c);
+        assert!(matches!(app.overlay, Overlay::None), "copied, not quit");
+        std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
     }
 }

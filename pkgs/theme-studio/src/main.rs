@@ -22,6 +22,7 @@ use std::io::stdout;
 use anyhow::Result;
 use ratatui::crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 
@@ -91,6 +92,15 @@ fn main() -> Result<()> {
 
     let mut terminal = ratatui::init();
     execute!(stdout(), EnableMouseCapture, EnableBracketedPaste)?;
+    // The kitty keyboard protocol (Ghostty, kitty, foot, WezTerm…), so keys
+    // like Ctrl+Shift+Z, Ctrl+1 or Ctrl+I (not Tab) arrive as themselves.
+    let enhanced = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    if enhanced {
+        let _ = execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     // Which image protocol the terminal speaks (kitty graphics in Ghostty);
     // asked now, before key events are read. Half blocks if it won't say.
     app.picker = Some(
@@ -99,6 +109,9 @@ fn main() -> Result<()> {
     );
     let result = app.run(&mut terminal);
     app::set_pointer("default");
+    if enhanced {
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    }
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
