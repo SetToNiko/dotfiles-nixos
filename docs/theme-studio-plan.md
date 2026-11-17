@@ -17,17 +17,17 @@ are marked 🔸; say if you want any of them changed.
 
 ## Decisions so far
 
-| | Choice |
-|---|---|
-| ✅ Stack | Rust + ratatui (crossterm backend) |
-| ✅ Font roles | Three roles: **mono** (terminal, nvim, lock screen), **ui** (rofi, GTK) and **bar** (i3 titles and bar; added after Phase 4, falls back to ui) |
-| ✅ Font install | Into `~/.local/share/fonts/theme-studio/` straight away, and recorded in a list that Nix installs on the next rebuild |
-| ✅ Font preview | Sample text rendered to an image (ImageMagick + Pango) and shown inline using the kitty graphics protocol |
-| ✅ Palette keys | All 34 keys can be edited. Derived keys follow their base colours until you edit one by hand, which **pins** it |
-| ✅ Picker | HSV square, hue strip, H/S/L sliders, hex input; mouse and keyboard |
-| ✅ Font sources | Google Fonts (search via Fontsource) and Nerd Fonts releases |
-| ✅ Preview extras | Rofi menu overlay and a yazi file-browser view |
-| ✅ Window | Opens as a floating i3 window (its own Ghostty window class) |
+|                   | Choice                                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅ Stack          | Rust + ratatui (crossterm backend)                                                                                                             |
+| ✅ Font roles     | Three roles: **mono** (terminal, nvim, lock screen), **ui** (rofi, GTK) and **bar** (i3 titles and bar; added after Phase 4, falls back to ui) |
+| ✅ Font install   | Into `~/.local/share/fonts/theme-studio/` straight away, and recorded in a list that Nix installs on the next rebuild                          |
+| ✅ Font preview   | Sample text rendered to an image (ImageMagick + Pango) and shown inline using the kitty graphics protocol                                      |
+| ✅ Palette keys   | All 34 keys can be edited. Derived keys follow their base colours until you edit one by hand, which **pins** it                                |
+| ✅ Picker         | HSV square, hue strip, H/S/L sliders, hex input; mouse and keyboard                                                                            |
+| ✅ Font sources   | Google Fonts (search via Fontsource) and Nerd Fonts releases                                                                                   |
+| ✅ Preview extras | Rofi menu overlay and a yazi file-browser view                                                                                                 |
+| ✅ Window         | Opens as a floating i3 window (its own Ghostty window class)                                                                                   |
 
 ---
 
@@ -76,23 +76,23 @@ configs/font-switch.sh        <name> | no argument for a rofi picker
 {
   "JetBrains + Inter": {
     "mono": { "family": "JetBrainsMono Nerd Font", "size": 11 },
-    "ui":   { "family": "Inter", "size": 10 },
-    "bar":  { "family": "Inter", "size": 9 }
+    "ui": { "family": "Inter", "size": 10 },
+    "bar": { "family": "Inter", "size": 9 }
   }
 }
 ```
 
 **Generated files and where each is used:**
 
-| App | Generated file | Change needed in the existing config | When it updates |
-|---|---|---|---|
-| Ghostty | `fonts/ghostty` (`font-family`, `font-size`) | `config-file = ?~/.config/fonts/ghostty` | Immediately (SIGUSR2) |
-| i3 titles + bar (i3blocks) | `fonts/i3` (`font pango:<bar> <size>`) | `include ~/.config/fonts/i3`; remove the `font` line from `hosts/*/i3.conf` | Immediately (`i3-msg restart`) |
-| rofi | `fonts/rofi.rasi` (`* { font: "<ui> <size>"; }`) | `@import` in `rofi/config.rasi` | Next time rofi opens |
-| Lock screen | `fonts/lock.sh` (`XSECURELOCK_FONT=<mono>:size=N`) | `lock-screen.sh` sources it instead of hard-coding GeistMono | Next lock |
-| GTK 3/4 (blueman, Firefox UI, …) | `gtk-3.0/settings.ini`, `gtk-4.0/settings.ini` (`gtk-font-name`) | none; home-manager doesn't manage GTK yet | When each app is restarted |
-| Everything that asks for "monospace" or "sans-serif" (Firefox page text, Electron apps, …) | `fontconfig/conf.d/60-theme-fonts.conf` (aliases to the mono and ui fonts) | none | When each app is restarted |
-| nvim, yazi, starship | follow Ghostty | | |
+| App                                                                                        | Generated file                                                             | Change needed in the existing config                                        | When it updates                |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------ |
+| Ghostty                                                                                    | `fonts/ghostty` (`font-family`, `font-size`)                               | `config-file = ?~/.config/fonts/ghostty`                                    | Immediately (SIGUSR2)          |
+| i3 titles + bar (i3blocks)                                                                 | `fonts/i3` (`font pango:<bar> <size>`)                                     | `include ~/.config/fonts/i3`; remove the `font` line from `hosts/*/i3.conf` | Immediately (`i3-msg restart`) |
+| rofi                                                                                       | `fonts/rofi.rasi` (`* { font: "<ui> <size>"; }`)                           | `@import` in `rofi/config.rasi`                                             | Next time rofi opens           |
+| Lock screen                                                                                | `fonts/lock.sh` (`XSECURELOCK_FONT=<mono>:size=N`)                         | `lock-screen.sh` sources it instead of hard-coding GeistMono                | Next lock                      |
+| GTK 3/4 (blueman, Firefox UI, …)                                                           | `gtk-3.0/settings.ini`, `gtk-4.0/settings.ini` (`gtk-font-name`)           | none; home-manager doesn't manage GTK yet                                   | When each app is restarted     |
+| Everything that asks for "monospace" or "sans-serif" (Firefox page text, Electron apps, …) | `fontconfig/conf.d/60-theme-fonts.conf` (aliases to the mono and ui fonts) | none                                                                        | When each app is restarted     |
+| nvim, yazi, starship                                                                       | follow Ghostty                                                             |                                                                             |                                |
 
 Not covered: Discord's own UI font (hard-coded in its CSS), and the boot
 splash in `modules/ascii-boot.nix` (only changes on rebuild; it could read
@@ -187,9 +187,9 @@ A small desktop drawn in terminal cells. i3's 2-pixel borders become
 
 ```
 ┌─────────────────────┐┌──────────────────┐
-│ nvim (real config)  ││ terminal          │   focused window: client.focused
-│                     ││ $ ls  git log …   │   other window: client.unfocused
-│                     ││                   │
+│ nvim (real config)  ││ terminal         │   focused window: client.focused
+│                     ││ $ ls  git log …  │   other window: client.unfocused
+│                     ││                  │
 └─────────────────────┘└──────────────────┘
  1  2  3                     vol 40%  wifi  bt  bat 80%  17:42
 ```
@@ -227,6 +227,7 @@ A small desktop drawn in terminal cells. i3's 2-pixel borders become
   the minimum size the "too small" message asks for.
 
 **Built as (differences from the above):**
+
 - **Keyboard into the preview:** `F12` or a click, not `Ctrl+w` (nvim uses
   `Ctrl+w` for its own windows). F12 again moves to the next preview
   window, then back to the editor; while a window has the keyboard, every
@@ -295,6 +296,7 @@ to whatever size it gets.
   it with `font-switch.sh`.
 
 **Built as (differences from the above):**
+
 - **Panels:** ¹ the three roles (j/k role, h/l size, H/L by 4, Enter or `f`
   opens the list), ² installed fonts (`/` search, `m` monospaced only,
   Enter uses the font, Esc back). `3`/`4` switch to the Colours tab and its
@@ -324,18 +326,18 @@ to whatever size it gets.
 
 ### Decisions
 
-| | Choice |
-|---|---|
-| ✅ Layout | One main page, three columns: fonts, colours, preview |
-| ✅ Narrow windows | Fonts and colours side by side on top; the preview becomes a full-width row underneath |
-| ✅ Pages | Main, Download fonts (Phase 6), Settings (Keymaps + Behaviour) |
-| ✅ Colour groups | Collapsible like the font groups; only Base open at start |
-| ✅ Picker | Hidden at start; opens when you edit a colour; hides on Esc; `<leader>cp` toggles it |
-| ✅ Visibility defaults | All of them adjustable on the Settings page |
-| ✅ Leader | Space, changeable; a popup after it lists what can follow |
-| ✅ Keymaps | Every action rebindable on the Settings page; presets Vim (current keys), Helix, Emacs, VS Code, JetBrains; editable, save your own |
-| ✅ Storage | `$XDG_CONFIG_HOME/theme-studio/` (default `~/.config/theme-studio/`); on this system linked to `configs/theme-studio/` in the dotfiles |
-| ✅ On start | Always from the Settings defaults (sizes, open groups, picker); nothing remembered between runs |
+|                        | Choice                                                                                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅ Layout              | One main page, three columns: fonts, colours, preview                                                                                  |
+| ✅ Narrow windows      | Fonts and colours side by side on top; the preview becomes a full-width row underneath                                                 |
+| ✅ Pages               | Main, Download fonts (Phase 6), Settings (Keymaps + Behaviour)                                                                         |
+| ✅ Colour groups       | Collapsible like the font groups; only Base open at start                                                                              |
+| ✅ Picker              | Hidden at start; opens when you edit a colour; hides on Esc; `<leader>cp` toggles it                                                   |
+| ✅ Visibility defaults | All of them adjustable on the Settings page                                                                                            |
+| ✅ Leader              | Space, changeable; a popup after it lists what can follow                                                                              |
+| ✅ Keymaps             | Every action rebindable on the Settings page; presets Vim (current keys), Helix, Emacs, VS Code, JetBrains; editable, save your own    |
+| ✅ Storage             | `$XDG_CONFIG_HOME/theme-studio/` (default `~/.config/theme-studio/`); on this system linked to `configs/theme-studio/` in the dotfiles |
+| ✅ On start            | Always from the Settings defaults (sizes, open groups, picker); nothing remembered between runs                                        |
 
 Smaller defaults I picked are marked 🔸.
 
@@ -448,6 +450,14 @@ narrow
   that folder, like nvim, i3 and the rest. I check the link after `nrs`.
 - palettes.json and fonts.json stay where they are (`THEME_STUDIO_CONFIGS`).
 
+### Progress
+
+- **Step 1 ✅** keymap engine. Notes: Space was "open group" in the font
+  list and is now the leader (`l`, Enter and clicks still open groups);
+  hints show friendly names (`Enter`, `Space s p`) while the help screen
+  and settings use Vim notation; Ctrl+C always quits; text fields (hex,
+  search, names) and the pop-ups' y/s/Esc keys aren't rebindable.
+
 ### 7. Order of work
 
 Each step is committed separately and keeps the studio working.
@@ -486,6 +496,7 @@ Each step is committed separately and keeps the studio working.
   After a rebuild, the studio's own copy in `~/.local/share/fonts` is no
   longer needed; activation removes copies that Nix now provides, so there
   are no duplicate families.
+
 - 🔸 **Unused fonts:** an "uninstall" action for studio-installed fonts
   removes the files and the list entry.
 
