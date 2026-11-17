@@ -78,7 +78,7 @@ impl FontPreview {
 }
 
 impl App {
-    fn pv(&mut self) -> &mut FontPreview {
+    pub(crate) fn pv(&mut self) -> &mut FontPreview {
         if self.dl.preview.is_none() {
             self.dl.preview = Some(FontPreview::new(
                 self.preview.draft_dir(),

@@ -240,10 +240,10 @@ impl App {
                     self.info(format!("Downloading {family}: {pct}"));
                 }
                 Msg::Preview { id, result } => {
-                    if let Some(pv) = self.dl.preview.as_mut() {
-                        pv.fetching.remove(&id);
-                        pv.families.insert(id, result);
-                    }
+                    self.prefetch.finished(&id);
+                    let pv = self.pv();
+                    pv.fetching.remove(&id);
+                    pv.families.insert(id, result);
                 }
                 Msg::Installed { id, result } => {
                     let family = self.dl.jobs.remove(&id).map_or(id, |j| j.0);

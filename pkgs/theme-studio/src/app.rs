@@ -209,6 +209,8 @@ pub struct App {
     pub sample_image: Option<StatefulProtocol>,
     /// The sample's size while resizing (re-encoded once it holds still).
     pub sample_settle: crate::settle::Settle,
+    /// Previews fetched ahead of time (settings: fonts-page.prefetch).
+    pub prefetch: crate::prefetch::Prefetch,
     /// When an image's size settles and the screen should be drawn again.
     pub redraw_at: Option<Instant>,
     pub sample_error: Option<String>,
@@ -321,6 +323,7 @@ impl App {
             picker: None,
             sample_image: None,
             sample_settle: Default::default(),
+            prefetch: Default::default(),
             redraw_at: None,
             sample_error: None,
             overlay_for: For::Palette,
@@ -414,6 +417,9 @@ impl App {
             }
             // downloads: the catalogue, progress, finished installs
             if self.poll_downloads() {
+                redraw = true;
+            }
+            if self.poll_prefetch() {
                 redraw = true;
             }
             if self.expire_message() {
@@ -4115,6 +4121,76 @@ mod tests {
         press(&mut app, "\n");
         assert!(matches!(app.overlay, Overlay::Confirm(Pending::Open(_))));
         assert_eq!(app.palette, edited);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn behaviour_tab_sets_up_prefetching() {
+        use crate::behaviour::{BhRow, behaviour_rows};
+        let store = temp_store("prefetch-rows");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.settings_page.bh_closed.clear();
+        let at = |r: BhRow| behaviour_rows().iter().position(|x| *x == r).unwrap();
+        let run = |app: &mut App, r: BhRow| {
+            app.with_draft(|a| {
+                a.settings_page.bh_sel = at(r);
+                a.run_behaviour_tab(Action::Confirm);
+            })
+        };
+        // prefetching: off by default, monospace chosen; edits wait for Save
+        assert!(!app.settings.fonts_page.prefetch);
+        run(&mut app, BhRow::Prefetch);
+        run(&mut app, BhRow::PrefetchCategory(5));
+        assert!(!app.settings.fonts_page.prefetch, "not live before Save");
+        app.settings_save();
+        assert!(app.settings.fonts_page.prefetch);
+        assert_eq!(
+            app.settings.fonts_page.prefetch_categories,
+            ["monospace", "nerd font"]
+        );
+        // with the catalogue, each category shows what it takes
+        let nerd = crate::download::Source::Nerd {
+            asset: "Hack".into(),
+            url: String::new(),
+            size: 40_000_000,
+        };
+        let mut hack = crate::download::Entry {
+            id: "hack".into(),
+            family: "Hack".into(),
+            category: "nerd font".into(),
+            license: String::new(),
+            weights: vec![400],
+            italic: false,
+            variable: false,
+            source: nerd,
+            subset: "latin".into(),
+        };
+        app.dl.catalogue = Some(crate::download::Catalogue {
+            nerd: vec![hack.clone()],
+            ..Default::default()
+        });
+        assert_eq!(
+            app.behaviour_value(BhRow::PrefetchCategory(5)),
+            "yes  (1 font: 40.0 MB to fetch, about 2.5 MB kept)"
+        );
+        hack.category = "monospace".into();
+        hack.source = crate::download::Source::Google;
+        app.dl.catalogue.as_mut().unwrap().google = vec![hack];
+        assert_eq!(
+            app.behaviour_value(BhRow::PrefetchCategory(0)),
+            "yes  (1 font, about 100 KB)"
+        );
+        // Clear asks first (the answer isn't given here: it would delete
+        // the real folder)
+        run(&mut app, BhRow::ClearPreviews);
+        assert!(matches!(
+            app.overlay,
+            Overlay::Ask {
+                then: crate::settings::Deferred::ClearPreviews,
+                ..
+            }
+        ));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

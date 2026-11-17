@@ -146,6 +146,42 @@ impl Default for FontSettings {
     }
 }
 
+/// The Fonts (download) page: fetching previews ahead of time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct FontsPageSettings {
+    /// Fetch previews in the background (a few at a time).
+    pub prefetch: bool,
+    /// Which: "monospace", "sans-serif", "serif", "display", "handwriting",
+    /// "nerd font".
+    pub prefetch_categories: Vec<String>,
+}
+
+impl Default for FontsPageSettings {
+    fn default() -> Self {
+        FontsPageSettings {
+            prefetch: false,
+            prefetch_categories: vec!["monospace".into()],
+        }
+    }
+}
+
+/// The categories previews can be prefetched for: (catalogue category, label).
+pub const PREFETCH_CATEGORIES: [(&str, &str); 6] = [
+    ("monospace", "Google monospace"),
+    ("sans-serif", "Google sans-serif"),
+    ("serif", "Google serif"),
+    ("display", "Google display"),
+    ("handwriting", "Google handwriting"),
+    ("nerd font", "Nerd Fonts"),
+];
+
+impl FontsPageSettings {
+    pub fn prefetches(&self, category: &str) -> bool {
+        self.prefetch_categories.iter().any(|c| c == category)
+    }
+}
+
 /// Pane sizes, as shares of the space they divide (minimum sizes still
 /// apply). Resizing changes them while the studio runs; these are where it
 /// starts and what `=` in resize mode goes back to.
@@ -226,6 +262,7 @@ pub struct Settings {
     pub font_list: FontListSettings,
     pub hover: HoverSettings,
     pub messages: MessageSettings,
+    pub fonts_page: FontsPageSettings,
 }
 
 /// How messages show.
@@ -359,6 +396,7 @@ impl Default for Settings {
             font_list: FontListSettings::default(),
             hover: HoverSettings::default(),
             messages: MessageSettings::default(),
+            fonts_page: FontsPageSettings::default(),
         }
     }
 }

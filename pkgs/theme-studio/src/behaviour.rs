@@ -57,6 +57,12 @@ pub enum BhRow {
     HideSpecial,
     Spacing,
     NerdFont,
+    /// Fetch Fonts page previews ahead of time.
+    Prefetch,
+    /// Whether a category (config::PREFETCH_CATEGORIES) is prefetched.
+    PrefetchCategory(usize),
+    /// Delete the preview fonts.
+    ClearPreviews,
 }
 
 impl BhRow {
@@ -78,7 +84,10 @@ impl BhRow {
 
     /// A button rather than a value.
     pub fn is_button(self) -> bool {
-        matches!(self, BhRow::SaveSizes | BhRow::ResetSizes)
+        matches!(
+            self,
+            BhRow::SaveSizes | BhRow::ResetSizes | BhRow::ClearPreviews
+        )
     }
 }
 
@@ -128,6 +137,10 @@ pub fn behaviour_rows() -> Vec<BhRow> {
         R::Spacing,
         R::NerdFont,
     ]);
+    v.push(R::Header("Fonts page previews (fetched ahead of time)"));
+    v.push(R::Prefetch);
+    v.extend((0..crate::config::PREFETCH_CATEGORIES.len()).map(R::PrefetchCategory));
+    v.push(R::ClearPreviews);
     // a blank line before each group's title but the first
     let mut out = Vec::new();
     for r in v {
@@ -330,6 +343,32 @@ impl App {
             BhRow::HideSpecial => yes(s.font_list.hide_cjk_emoji_math),
             BhRow::Spacing => s.font_list.spacing.clone(),
             BhRow::NerdFont => s.font_list.nerd_font.clone(),
+            BhRow::Prefetch => yes(s.fonts_page.prefetch),
+            BhRow::PrefetchCategory(i) => {
+                let (cat, _) = crate::config::PREFETCH_CATEGORIES[i];
+                let on = yes(s.fonts_page.prefetches(cat));
+                match &self.dl.catalogue {
+                    Some(c) => {
+                        let (n, get, keep) = crate::prefetch::estimate(c, cat);
+                        let fonts = if n == 1 { "font" } else { "fonts" };
+                        let size = crate::prefetch::size;
+                        if get == keep {
+                            format!("{on}  ({n} {fonts}, about {})", size(get))
+                        } else {
+                            format!(
+                                "{on}  ({n} {fonts}: {} to fetch, about {} kept)",
+                                size(get),
+                                size(keep)
+                            )
+                        }
+                    }
+                    None => on,
+                }
+            }
+            BhRow::ClearPreviews => format!(
+                "Enter  ({} used)",
+                crate::prefetch::size(crate::download::previews_size())
+            ),
         }
     }
 
@@ -364,6 +403,9 @@ impl App {
             BhRow::HideSpecial => "Hide CJK / emoji / math fonts at start".into(),
             BhRow::Spacing => "Spacing filter at start".into(),
             BhRow::NerdFont => "Nerd Font filter at start".into(),
+            BhRow::Prefetch => "Fetch previews ahead of time, a few at a time".into(),
+            BhRow::PrefetchCategory(i) => format!("  {}", crate::config::PREFETCH_CATEGORIES[i].1),
+            BhRow::ClearPreviews => "Delete the preview fonts (fetched again when needed)".into(),
         }
     }
 
@@ -445,6 +487,13 @@ impl App {
                 self.settings.layout.sizes = self.sizes.clone();
                 self.info("The current pane sizes become the default (when saved)");
             }
+            BhRow::ClearPreviews => {
+                let used = crate::prefetch::size(crate::download::previews_size());
+                self.overlay = Overlay::Ask {
+                    question: format!("Delete the preview fonts ({used})?"),
+                    then: crate::settings::Deferred::ClearPreviews,
+                };
+            }
             BhRow::ResetSizes => {
                 self.settings.layout.sizes = crate::config::Sizes::default();
                 self.info("Default pane sizes back to the shipped ones (applied when saved)");
@@ -506,6 +555,17 @@ impl App {
                     }
                     BhRow::ListOpensToCurrent => {
                         s.fonts.list_opens_to_current_font = !s.fonts.list_opens_to_current_font
+                    }
+                    BhRow::Prefetch => s.fonts_page.prefetch = !s.fonts_page.prefetch,
+                    BhRow::PrefetchCategory(i) => {
+                        let cat = crate::config::PREFETCH_CATEGORIES[i].0;
+                        let on = s.fonts_page.prefetches(cat);
+                        let cats = &mut s.fonts_page.prefetch_categories;
+                        if on {
+                            cats.retain(|c| c != cat);
+                        } else {
+                            cats.push(cat.to_string());
+                        }
                     }
                     BhRow::HideBitmap => s.font_list.hide_bitmap = !s.font_list.hide_bitmap,
                     BhRow::HideSpecial => {

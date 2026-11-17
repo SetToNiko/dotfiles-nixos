@@ -85,6 +85,8 @@ pub enum Deferred {
     DeleteVersion(PathBuf),
     DeletePreset(String),
     ResetPreset(String),
+    /// Deletes the preview fonts (Behaviour tab).
+    ClearPreviews,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -934,6 +936,16 @@ impl App {
             }
             Deferred::DeletePreset(name) => self.delete_preset(&name),
             Deferred::ResetPreset(name) => self.reset_preset(&name),
+            Deferred::ClearPreviews => match crate::download::clear_previews() {
+                Ok(()) => {
+                    let pv = self.pv();
+                    pv.families.clear();
+                    pv.image = None;
+                    self.prefetch.reset();
+                    self.info("Deleted the preview fonts");
+                }
+                Err(e) => self.error(format!("{e:#}")),
+            },
         }
     }
 

@@ -483,29 +483,100 @@ pub fn install(e: Entry, root: PathBuf, tx: Sender<Msg>) {
 
 // ----- previews ---------------------------------------------------------------------
 
-/// Fonts fetched only to preview them: `~/.cache/theme-studio/preview/<id>/`.
+/// Fonts fetched only to preview them:
+/// `~/.local/share/theme-studio/previews/<id>/` (not the cache, so cleanup
+/// tools don't undo a prefetch or a tournament's downloads).
 pub fn preview_dir() -> PathBuf {
-    cache_dir().join("preview")
+    xdg("XDG_DATA_HOME", ".local/share").join("theme-studio/previews")
+}
+
+/// Moves previews from where older versions kept them
+/// (`~/.cache/theme-studio/preview/`), keeping only each font's Regular.
+pub fn migrate_previews() {
+    let (old, new) = (cache_dir().join("preview"), preview_dir());
+    if !old.is_dir() || new.exists() {
+        return;
+    }
+    if let Some(parent) = new.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // on another file system the old ones stay (and are fetched again)
+    if std::fs::rename(&old, &new).is_ok()
+        && let Ok(dirs) = std::fs::read_dir(&new)
+    {
+        for d in dirs.flatten() {
+            keep_regular_only(&d.path());
+        }
+    }
 }
 
 /// A fontconfig setup that adds the preview fonts to the system's, so they
 /// can be drawn without installing them.
 pub fn preview_fontconfig() -> PathBuf {
     let path = cache_dir().join("preview-fonts.conf");
-    if !path.exists() {
+    let conf = format!(
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  \
+         <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n  <dir>{}</dir>\n  \
+         <cachedir>{}</cachedir>\n</fontconfig>\n",
+        preview_dir().display(),
+        cache_dir().join("fontconfig").display()
+    );
+    // written again when the folders change (they moved once)
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(conf.as_str()) {
         let _ = std::fs::create_dir_all(cache_dir());
-        let _ = std::fs::write(
-            &path,
-            format!(
-                "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  \
-                 <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n  <dir>{}</dir>\n  \
-                 <cachedir>{}</cachedir>\n</fontconfig>\n",
-                preview_dir().display(),
-                cache_dir().join("fontconfig").display()
-            ),
-        );
+        let _ = std::fs::write(&path, conf);
     }
     path
+}
+
+/// Whether a font's preview file is already here.
+pub fn has_preview(id: &str) -> bool {
+    preview_file(&preview_dir().join(id)).is_some()
+}
+
+/// The space the preview fonts take, in bytes.
+pub fn previews_size() -> u64 {
+    fn walk(p: &Path) -> u64 {
+        std::fs::read_dir(p).map_or(0, |entries| {
+            entries
+                .flatten()
+                .map(|e| match e.file_type() {
+                    Ok(t) if t.is_dir() => walk(&e.path()),
+                    _ => e.metadata().map_or(0, |m| m.len()),
+                })
+                .sum()
+        })
+    }
+    walk(&preview_dir())
+}
+
+/// Deletes every preview font (they're fetched again when needed).
+pub fn clear_previews() -> Result<()> {
+    let dir = preview_dir();
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
+    }
+    Ok(())
+}
+
+/// Leaves only the face a preview draws with (a Nerd Font archive unpacks
+/// to dozens).
+fn keep_regular_only(dir: &Path) {
+    let Some(keep) = preview_file(dir) else {
+        return;
+    };
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p != keep {
+                let _ = if p.is_dir() {
+                    std::fs::remove_dir_all(&p)
+                } else {
+                    std::fs::remove_file(&p)
+                };
+            }
+        }
+    }
 }
 
 /// The family name inside a font file (fc-scan).
@@ -542,7 +613,8 @@ fn preview_file(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Fetches a font for its preview in the background (Google / Fontsource:
-/// one file of the regular weight; Nerd Fonts: the archive), unless cached.
+/// one file of the regular weight; Nerd Fonts: the archive, of which only
+/// the Regular is kept), unless already here.
 pub fn fetch_preview(e: Entry, tx: Sender<Msg>) {
     std::thread::spawn(move || {
         let dir = preview_dir().join(&e.id);
@@ -554,6 +626,7 @@ pub fn fetch_preview(e: Entry, tx: Sender<Msg>) {
             match &e.source {
                 Source::Nerd { .. } => {
                     install_nerd(&e, &dir, &tx)?;
+                    keep_regular_only(&dir);
                 }
                 _ => {
                     // the regular weight, else the nearest
@@ -617,6 +690,29 @@ pub fn channel_pair() -> (Sender<Msg>, Receiver<Msg>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn previews_keep_only_the_regular() {
+        let dir = std::env::temp_dir().join(format!("theme-studio-keep-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for f in [
+            "HackNerdFont-Regular.ttf",
+            "HackNerdFontMono-Regular.ttf",
+            "HackNerdFont-Bold.ttf",
+            "LICENSE.md",
+            "sub/x.ttf",
+        ] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        keep_regular_only(&dir);
+        let left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into())
+            .collect();
+        assert_eq!(left, ["HackNerdFont-Regular.ttf"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn catalogues_parse() {

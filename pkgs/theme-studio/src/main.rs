@@ -19,6 +19,7 @@ mod hit;
 mod keymap;
 mod out;
 mod palette;
+mod prefetch;
 mod presets;
 mod preview;
 mod samples;
@@ -117,6 +118,8 @@ fn main() -> Result<()> {
         Some(name) => Start::Named(name.to_string()),
         None => Start::Active,
     };
+    // preview fonts moved from ~/.cache to ~/.local/share
+    download::migrate_previews();
     // Load before taking over the terminal, so errors print normally.
     let mut app = App::new(Store::locate(), start)?;
     if fonts_tab {

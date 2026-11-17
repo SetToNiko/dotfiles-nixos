@@ -967,7 +967,7 @@ download work.
   top of Rust, Python, TypeScript, Go, C, Lua and shell. (Nix wasn't
   picked.)
 
-### 4. Prefetching previews
+### 4. Prefetching previews ✅
 
 - **A setting** (Behaviour tab, Fonts page group): prefetch previews on or
   off, and which categories (monospace, sans-serif, serif, display,
@@ -1011,8 +1011,11 @@ Each step is committed separately and keeps the studio working.
 4. ✅ Fuller code samples (51–66 lines, in `src/samples/code/`), the new
    languages, scrolling (`<` / `>` a page, the wheel three lines), the two
    dropdowns (opened with a click; `t` and `L` still cycle).
-5. Previews moved to `~/.local/share`, Nerd Fonts kept as Regular only,
-   the clear button, then prefetching.
+5. ✅ Previews moved to `~/.local/share` (moved over at start, each pruned
+   to its Regular), Nerd Fonts kept as Regular only, the clear button
+   (asks first), then prefetching (`prefetch.rs`: three at a time,
+   "fetching previews 12/72" in the status line when no message shows;
+   off by default). The Behaviour tab group is "Fonts page previews".
 6. Then the tournament (Phase 7 step 4).
 
 ## Phase 8: polish

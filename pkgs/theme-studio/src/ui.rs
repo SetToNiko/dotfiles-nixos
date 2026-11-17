@@ -1239,16 +1239,29 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
     let app = &*app;
     let fonts = app.side == Side::Fonts;
     // the message at the left (after the tabs), the key hints at the right
-    let message = app.message.as_ref().map(|(msg, err)| {
-        Span::styled(
-            truncate(&format!(" {msg} "), area.width as usize),
-            if *err {
-                Style::new().red().bold()
-            } else {
-                Style::new().green()
-            },
-        )
-    });
+    let message = app
+        .message
+        .as_ref()
+        .map(|(msg, err)| {
+            Span::styled(
+                truncate(&format!(" {msg} "), area.width as usize),
+                if *err {
+                    Style::new().red().bold()
+                } else {
+                    Style::new().green()
+                },
+            )
+        })
+        // otherwise, previews being fetched ahead of time
+        .or_else(|| {
+            let p = &app.prefetch;
+            p.active().then(|| {
+                Span::styled(
+                    format!(" fetching previews {}/{} ", p.done, p.total),
+                    Style::new().dark_gray(),
+                )
+            })
+        });
     let msg_w = message.as_ref().map_or(0, |s| s.width());
     let hints = {
         use Action as A;
