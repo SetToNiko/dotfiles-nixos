@@ -112,69 +112,34 @@ impl Border {
     }
 }
 
-/// Underline styles (Ghostty and other modern terminals draw them all).
+/// Underline styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Underline {
     Single,
     Double,
-    Curly,
-    Dotted,
-    Dashed,
 }
 
 impl Underline {
     pub fn parse(s: &str) -> Option<Underline> {
-        Some(match s {
-            "single" => Underline::Single,
-            "double" => Underline::Double,
-            "curly" => Underline::Curly,
-            "dotted" => Underline::Dotted,
-            "dashed" => Underline::Dashed,
-            _ => return None,
-        })
-    }
-
-    /// The SGR code that turns it on.
-    pub fn sgr(self) -> &'static str {
-        match self {
-            Underline::Single => "4",
-            Underline::Double => "4:2",
-            Underline::Curly => "4:3",
-            Underline::Dotted => "4:4",
-            Underline::Dashed => "4:5",
+        match s {
+            "single" => Some(Underline::Single),
+            "double" => Some(Underline::Double),
+            _ => None,
         }
     }
 }
 
-/// The hover look as colours (settings.json's `hover`, with the theme's
-/// keys looked up).
+/// A highlight look as colours (settings with the theme's keys looked up).
 #[derive(Clone, Debug, PartialEq)]
-pub struct HoverLook {
+pub struct Look {
     pub bg: Option<Color>,
     pub underline: Option<(Underline, Color)>,
     pub fg: Option<Color>,
     /// BOLD, DIM or nothing (with `fg`).
     pub weight: Modifier,
-    /// Pane borders under the mouse.
-    pub pane: Color,
-    /// Preview window frames under the mouse.
-    pub preview: Color,
 }
 
-impl Default for HoverLook {
-    fn default() -> Self {
-        HoverLook {
-            bg: None,
-            underline: Some((Underline::Single, Color::Yellow)),
-            fg: Some(Color::Yellow),
-            weight: Modifier::empty(),
-            pane: Color::Cyan,
-            preview: Color::Magenta,
-        }
-    }
-}
-
-impl HoverLook {
+impl Look {
     pub fn apply(&self, style: Style) -> Style {
         let mut s = style;
         if let Some(bg) = self.bg {
@@ -185,30 +150,71 @@ impl HoverLook {
         }
         match self.underline {
             Some((Underline::Single, c)) => s.add_modifier(Modifier::UNDERLINED).underline_color(c),
-            // ratatui only knows plain underlines: rapid blink (never used
-            // otherwise) marks the cell, and out::Out swaps it for the style
-            Some((_, c)) => s.add_modifier(Modifier::RAPID_BLINK).underline_color(c),
+            // ratatui only knows single underlines: rapid blink (never used
+            // otherwise) marks the cell, and out::Out makes it a double one
+            Some((Underline::Double, c)) => {
+                s.add_modifier(Modifier::RAPID_BLINK).underline_color(c)
+            }
             None => s,
         }
     }
 }
 
+/// Every highlight look, and the hover border colours.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Looks {
+    /// Clickable things under the mouse.
+    pub hover: Look,
+    /// The Palette pane: the selected colour's derivation relatives.
+    pub derived: Look,
+    /// Pane borders under the mouse.
+    pub pane: Color,
+    /// Preview window frames under the mouse.
+    pub preview: Color,
+}
+
+impl Default for Looks {
+    fn default() -> Self {
+        Looks {
+            hover: Look {
+                bg: None,
+                underline: Some((Underline::Single, Color::Yellow)),
+                fg: Some(Color::Yellow),
+                weight: Modifier::empty(),
+            },
+            derived: Look {
+                bg: Some(Color::DarkGray),
+                underline: None,
+                fg: None,
+                weight: Modifier::empty(),
+            },
+            pane: Color::Cyan,
+            preview: Color::Magenta,
+        }
+    }
+}
+
 thread_local! {
-    static LOOK: std::cell::RefCell<HoverLook> = std::cell::RefCell::new(HoverLook::default());
+    static LOOKS: std::cell::RefCell<Looks> = std::cell::RefCell::new(Looks::default());
 }
 
-/// Sets the hover look (each draw, from the settings).
-pub fn set_look(l: HoverLook) {
-    LOOK.with(|x| *x.borrow_mut() = l);
+/// Sets the looks (each draw, from the settings).
+pub fn set_looks(l: Looks) {
+    LOOKS.with(|x| *x.borrow_mut() = l);
 }
 
-pub fn look() -> HoverLook {
-    LOOK.with(|x| x.borrow().clone())
+pub fn looks() -> Looks {
+    LOOKS.with(|x| x.borrow().clone())
 }
 
 /// The hover look for rows and labels (configurable on the Settings page).
 pub fn hover(style: Style) -> Style {
-    LOOK.with(|x| x.borrow().apply(style))
+    LOOKS.with(|x| x.borrow().hover.apply(style))
+}
+
+/// The look of the selected colour's derivation relatives (Palette pane).
+pub fn derived(style: Style) -> Style {
+    LOOKS.with(|x| x.borrow().derived.apply(style))
 }
 
 #[derive(Default, Debug)]

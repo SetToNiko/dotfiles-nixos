@@ -8,10 +8,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 
 use crate::app::App;
+use crate::behaviour::{BhRow, LookId, behaviour_rows};
 use crate::color::Rgb;
 use crate::hit::{Target, hover};
 use crate::keymap::{Keymap, display_seq};
-use crate::settings::{BhRow, DiffLine, FILES, HistFocus, KmRow, TABS, Tab, behaviour_rows};
+use crate::settings::{DiffLine, FILES, HistFocus, KmRow, TABS, Tab};
 
 /// Keeps `sel` on screen in a list `height` rows tall.
 fn follow(scroll: &mut usize, sel: usize, height: usize) {
@@ -66,12 +67,25 @@ pub fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
     if inner.height < 3 {
         return;
     }
-    let [tabs, _, body] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .areas(inner);
+    // the page's tabs: on top or at the bottom (a setting)
+    let (tabs, body) = if app.settings.layout.inner_tabs_on_top() {
+        let [t, _, b] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(inner);
+        (t, b)
+    } else {
+        let [b, _, t] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(inner);
+        (t, b)
+    };
+    let tabs_focused = app.settings_page.tabs_focused;
     // tab strip
     let mut x = tabs.x + 1;
     for (i, (tab, name)) in TABS.iter().enumerate() {
@@ -83,10 +97,11 @@ pub fn draw_settings(f: &mut Frame, app: &mut App, area: Rect) {
             width: w.min(tabs.right().saturating_sub(x)),
             height: 1,
         };
-        let mut style = if *tab == app.settings_page.tab {
-            Style::new().reversed().bold()
-        } else {
-            Style::new().dark_gray()
+        // with the keyboard on the tabs, the current one is yellow
+        let mut style = match (*tab == app.settings_page.tab, tabs_focused) {
+            (true, true) => Style::new().black().on_yellow().bold(),
+            (true, false) => Style::new().reversed().bold(),
+            _ => Style::new().dark_gray(),
         };
         if app.hits.add(r, Target::SettingsTab(i as u8)) {
             style = hover(style);
@@ -273,17 +288,30 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = behaviour_rows();
+    // the cursor never rests on a group title or a sample
+    if !rows[app.settings_page.bh_sel.min(rows.len() - 1)].selectable() {
+        app.settings_page.bh_sel = crate::behaviour::selectable_ends(&rows).0;
+    }
     let sel = app.settings_page.bh_sel.min(rows.len() - 1);
-    // the list scrolls; the sample and notes stay below it
+    // the list scrolls; a note stays below it
     let [list, _, note] = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(1),
-        Constraint::Length(4),
+        Constraint::Length(1),
     ])
     .areas(area);
     let mut scroll = app.settings_page.bh_scroll;
     follow(&mut scroll, sel, list.height as usize);
+    // show a group's title when its first row is at the top
+    if scroll > 0
+        && matches!(rows.get(scroll - 1), Some(BhRow::Header(_)))
+        && sel < scroll + list.height as usize - 1
+    {
+        scroll -= 1;
+    }
     app.settings_page.bh_scroll = scroll;
+    let looks = crate::hit::looks();
+    let focused = !app.settings_page.tabs_focused;
     for (i, row) in rows
         .iter()
         .enumerate()
@@ -291,56 +319,71 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
         .take(list.height as usize)
     {
         let r = row_rect(list, i - scroll);
-        let value = app.behaviour_value(*row);
-        let label = App::behaviour_label(*row);
-        let button = matches!(row, BhRow::SaveSizes | BhRow::ResetSizes);
-        let line = if button {
-            Line::from(vec![
-                Span::raw(format!(" {label:<52} ")),
-                Span::styled("[ Enter ]", Style::new().cyan()),
-            ])
-        } else if row.is_colour() {
-            Line::from(vec![
-                Span::raw(format!(" {label:<52} ")),
-                Span::styled("██ ", Style::new().fg(app.theme_colour(&value))),
-                Span::styled(format!("‹ {value} ›"), Style::new().yellow()),
-                Span::styled("  Enter: list", Style::new().dark_gray()),
-            ])
-        } else {
-            Line::from(vec![
-                Span::raw(format!(" {label:<52} ")),
-                Span::styled(format!("‹ {value} ›"), Style::new().yellow()),
-            ])
+        let line = match *row {
+            BhRow::Header(h) => Line::styled(format!(" {h}"), Style::new().bold().cyan()),
+            BhRow::Sample(LookId::Hover) => Line::from(vec![
+                Span::styled("   Sample:  ", Style::new().dark_gray()),
+                Span::styled(" a clickable row ", looks.hover.apply(Style::new())),
+                Span::styled("   pane ", Style::new().dark_gray()),
+                Span::styled("──────", Style::new().fg(looks.pane)),
+                Span::styled("   preview window ", Style::new().dark_gray()),
+                Span::styled("──────", Style::new().fg(looks.preview)),
+            ]),
+            BhRow::Sample(LookId::Derived) => {
+                let mut spans = vec![Span::styled("   Sample:  ", Style::new().dark_gray())];
+                for (key, lit) in [
+                    ("bg_visual_red", false),
+                    ("bg0", true),
+                    ("red", true),
+                    ("green", false),
+                ] {
+                    let st = if lit {
+                        looks.derived.apply(Style::new())
+                    } else {
+                        Style::new()
+                    };
+                    spans.push(Span::styled(format!(" {key:<14}"), st));
+                    spans.push(Span::raw(" "));
+                }
+                spans.push(Span::styled(
+                    " (bg_visual_red selected)",
+                    Style::new().dark_gray(),
+                ));
+                Line::from(spans)
+            }
+            _ => {
+                let label = App::behaviour_label(*row);
+                let value = app.behaviour_value(*row);
+                let mut spans = vec![Span::raw(format!("   {label:<50} "))];
+                if row.is_button() {
+                    spans.push(Span::styled("[ Enter ]", Style::new().cyan()));
+                } else if row.is_colour() {
+                    spans.push(Span::styled(
+                        "██ ",
+                        Style::new().fg(app.theme_colour(&value)),
+                    ));
+                    spans.push(Span::styled(format!("‹ {value} ›"), Style::new().yellow()));
+                    spans.push(Span::styled("  Enter: list", Style::new().dark_gray()));
+                } else {
+                    spans.push(Span::styled(format!("‹ {value} ›"), Style::new().yellow()));
+                }
+                Line::from(spans)
+            }
         };
         let on = i == sel;
-        let mut style = selected_style(on, true);
-        if app.hits.add(r, Target::SettingsRow(i)) && !on {
+        let mut style = selected_style(on, focused);
+        if row.selectable() && app.hits.add(r, Target::SettingsRow(i)) && !on {
             style = hover(style);
         }
         f.render_widget(Paragraph::new(line).style(style), r);
     }
-    // the hover look as set, on a sample
-    let look = crate::hit::look();
-    let text = vec![
-        Line::from(vec![
-            Span::raw(" Hover sample: "),
-            Span::styled(" a clickable row ", hover(Style::new())),
-            Span::raw("   pane "),
-            Span::styled("──────", Style::new().fg(look.pane)),
-            Span::raw("   preview window "),
-            Span::styled("──────", Style::new().fg(look.preview)),
-        ]),
-        Line::raw(""),
-        Line::styled(
+    f.render_widget(
+        Paragraph::new(Line::styled(
             " ←/→ or Enter changes a value; click a selected row to change it.",
             Style::new().dark_gray(),
-        ),
-        Line::styled(
-            " The leader and tab position apply now; the rest are how the studio starts.",
-            Style::new().dark_gray(),
-        ),
-    ];
-    f.render_widget(Paragraph::new(text), note);
+        )),
+        note,
+    );
 }
 
 // ----- History ---------------------------------------------------------------

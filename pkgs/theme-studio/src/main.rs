@@ -1,6 +1,7 @@
 //! Theme Studio: edit palettes.json palettes with a live preview.
 
 mod app;
+mod behaviour;
 mod color;
 mod config;
 mod desktop;

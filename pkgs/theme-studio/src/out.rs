@@ -1,11 +1,9 @@
 //! The terminal output. Each frame is collected and, before it goes out,
-//! the hover marker (rapid blink, which the studio never uses otherwise)
-//! becomes the chosen underline style: ratatui itself only knows plain
+//! the double-underline marker (rapid blink, which the studio never uses
+//! otherwise) becomes a double underline: ratatui itself only knows single
 //! underlines.
 
 use std::io::{Stdout, Write, stdout};
-
-use crate::hit::Underline;
 
 pub struct Out {
     buf: Vec<u8>,
@@ -37,19 +35,11 @@ fn replace(buf: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The frame with the marker turned into `style`'s underline.
-pub fn rewrite(buf: &[u8], style: Option<Underline>) -> Vec<u8> {
-    let on = match style {
-        Some(u) if u != Underline::Single => format!("\x1b[{}m", u.sgr()),
-        // nothing to swap: drop the marker
-        _ => String::new(),
-    };
-    let b = replace(buf, b"\x1b[6m", on.as_bytes());
-    replace(
-        &b,
-        b"\x1b[25m",
-        if on.is_empty() { b"" } else { b"\x1b[24m" },
-    )
+/// The frame with the marker (on: SGR 6, off: SGR 25) turned into a double
+/// underline (SGR 4:2, off: SGR 24).
+pub fn rewrite(buf: &[u8]) -> Vec<u8> {
+    let b = replace(buf, b"\x1b[6m", b"\x1b[4:2m");
+    replace(&b, b"\x1b[25m", b"\x1b[24m")
 }
 
 impl Write for Out {
@@ -60,13 +50,12 @@ impl Write for Out {
 
     fn flush(&mut self) -> std::io::Result<()> {
         if !self.buf.is_empty() {
-            let style = crate::hit::look().underline.map(|(u, _)| u);
             let frame = if self
                 .buf
                 .windows(4)
                 .any(|w| w == b"\x1b[6m" || w == b"\x1b[25")
             {
-                rewrite(&self.buf, style)
+                rewrite(&self.buf)
             } else {
                 std::mem::take(&mut self.buf)
             };
@@ -82,20 +71,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn marker_becomes_the_underline_style() {
-        let frame = b"a\x1b[6mbc\x1b[25md";
-        assert_eq!(
-            rewrite(frame, Some(Underline::Curly)),
-            b"a\x1b[4:3mbc\x1b[24md"
-        );
-        assert_eq!(
-            rewrite(frame, Some(Underline::Dashed)),
-            b"a\x1b[4:5mbc\x1b[24md"
-        );
-        assert_eq!(rewrite(frame, None), b"abcd");
-        assert_eq!(
-            rewrite(b"\x1b[4mx\x1b[24m", Some(Underline::Curly)),
-            b"\x1b[4mx\x1b[24m"
-        );
+    fn marker_becomes_a_double_underline() {
+        assert_eq!(rewrite(b"a\x1b[6mbc\x1b[25md"), b"a\x1b[4:2mbc\x1b[24md");
+        assert_eq!(rewrite(b"\x1b[4mx\x1b[24m"), b"\x1b[4mx\x1b[24m");
     }
 }

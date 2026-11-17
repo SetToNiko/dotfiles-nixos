@@ -112,7 +112,7 @@ pub enum Overlay {
     },
     /// Settings page: choosing a palette key for a hover colour.
     ChooseKey {
-        row: crate::settings::BhRow,
+        row: crate::behaviour::BhRow,
         sel: usize,
     },
     /// Settings page: a yes / no question.
@@ -1829,7 +1829,7 @@ impl App {
                 if let Overlay::ChooseKey { row, sel } = self.overlay {
                     if sel == i {
                         self.overlay = Overlay::None;
-                        self.set_colour_setting(row, crate::settings::theme_keys()[i]);
+                        self.set_colour_setting(row, crate::behaviour::theme_keys()[i]);
                     } else {
                         self.overlay = Overlay::ChooseKey { row, sel: i };
                     }
@@ -2812,7 +2812,7 @@ mod tests {
 
     #[test]
     fn settings_behaviour_tab_saves_settings() {
-        use crate::settings::{BhRow, behaviour_rows};
+        use crate::behaviour::{BhRow, behaviour_rows};
         let store = temp_store("settings-behaviour");
         let dir = store.dir.clone();
         crate::history::init_for_test(dir.join("history"));
@@ -2955,8 +2955,8 @@ mod tests {
 
     #[test]
     fn hover_look_is_configurable_and_pane_borders_light_up() {
+        use crate::behaviour::{BhRow, LookId, behaviour_rows};
         use crate::hit::{Target as T, Underline};
-        use crate::settings::{BhRow, behaviour_rows};
         use ratatui::style::{Color, Modifier};
         let store = temp_store("hover-look");
         let dir = store.dir.clone();
@@ -2988,15 +2988,15 @@ mod tests {
         app.settings_page.tab = crate::settings::Tab::Behaviour;
         let rows = behaviour_rows();
         let at = |r: BhRow| rows.iter().position(|x| *x == r).unwrap();
-        app.settings_page.bh_sel = at(BhRow::HoverHighlight);
+        app.settings_page.bh_sel = at(BhRow::Highlight(LookId::Hover));
         press(&mut app, "l");
-        app.settings_page.bh_sel = at(BhRow::HoverHighlightColour);
+        app.settings_page.bh_sel = at(BhRow::HighlightColour(LookId::Hover));
         press(&mut app, "\n");
         assert!(matches!(app.overlay, Overlay::ChooseKey { .. }));
         let screen = render(&mut app, 160, 45);
         assert!(screen.contains("Colour from the active theme"), "{screen}");
         // the list: move to bg3 and choose it
-        let target = crate::settings::theme_keys()
+        let target = crate::behaviour::theme_keys()
             .iter()
             .position(|k| *k == "bg3")
             .unwrap();
@@ -3004,28 +3004,40 @@ mod tests {
             app.overlay = Overlay::ChooseKey { row, sel: target };
         }
         press(&mut app, "\n");
-        assert_eq!(app.settings.hover.highlight_colour, "bg3");
-        app.settings_page.bh_sel = at(BhRow::HoverUnderline);
-        press(&mut app, "ll"); // single → double → curly
-        app.settings_page.bh_sel = at(BhRow::HoverTextWeight);
+        assert_eq!(app.settings.hover.look.highlight_colour, "bg3");
+        app.settings_page.bh_sel = at(BhRow::Underline(LookId::Hover));
+        press(&mut app, "l"); // single → double
+        app.settings_page.bh_sel = at(BhRow::TextWeight(LookId::Hover));
         press(&mut app, "l");
-        let look = app.hover_look(&app.settings.hover);
-        assert_eq!(look.bg, Some(Color::Rgb(4, 5, 6)));
-        assert_eq!(look.underline.map(|u| u.0), Some(Underline::Curly));
-        assert_eq!(look.weight, Modifier::BOLD);
-        assert_eq!(look.preview, Color::Rgb(7, 8, 9));
-        // drawn: the marker that out::Out turns into a curly underline
-        crate::hit::set_look(look);
+        // the derived-colour highlight is its own look
+        app.settings_page.bh_sel = at(BhRow::Underline(LookId::Derived));
+        press(&mut app, "l"); // off → single
+        let looks = app.looks(&app.settings);
+        assert_eq!(looks.hover.bg, Some(Color::Rgb(4, 5, 6)));
+        assert_eq!(looks.hover.underline.map(|u| u.0), Some(Underline::Double));
+        assert_eq!(looks.hover.weight, Modifier::BOLD);
+        assert_eq!(
+            looks.derived.underline.map(|u| u.0),
+            Some(Underline::Single)
+        );
+        assert_eq!(looks.preview, Color::Rgb(7, 8, 9));
+        // drawn: the marker that out::Out turns into a double underline
+        crate::hit::set_looks(looks);
         let s = crate::hit::hover(ratatui::style::Style::new());
         assert!(
             s.add_modifier
                 .contains(Modifier::RAPID_BLINK | Modifier::BOLD)
         );
-        assert!(render(&mut app, 160, 45).contains("Hover sample"));
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Sample:") && screen.contains("Derived colours"),
+            "{screen}"
+        );
         // saved
         let saved = crate::config::load(&dir.join("studio-config"), false);
-        assert_eq!(saved.settings.hover.underline, "curly");
-        crate::hit::set_look(Default::default());
+        assert_eq!(saved.settings.hover.look.underline, "double");
+        assert_eq!(saved.settings.colours.derived_highlight.underline, "single");
+        crate::hit::set_looks(Default::default());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -3046,9 +3058,7 @@ mod tests {
             };
             let r = app.hits.rect_of(T::ColourRow(row)).unwrap();
             let buf = t.backend().buffer().clone();
-            buf[(r.x + 5, r.y)]
-                .modifier
-                .contains(ratatui::style::Modifier::UNDERLINED)
+            buf[(r.x + 5, r.y)].bg == app.looks(&app.settings).derived.bg.unwrap()
         };
         let group_lit = |app: &mut App, name: &str| -> bool {
             let mut t = Terminal::new(TestBackend::new(200, 60)).unwrap();
@@ -3061,9 +3071,7 @@ mod tests {
                 .unwrap();
             let r = app.hits.rect_of(T::ColourRow(row)).unwrap();
             let buf = t.backend().buffer().clone();
-            buf[(r.x + 4, r.y)]
-                .modifier
-                .contains(ratatui::style::Modifier::UNDERLINED)
+            buf[(r.x + 4, r.y)].bg == app.looks(&app.settings).derived.bg.unwrap()
         };
         let select = |app: &mut App, key: &str| {
             let i = app.keys.iter().position(|k| *k == key).unwrap();
@@ -3085,6 +3093,66 @@ mod tests {
         // pinned (setting a derived key by hand pins it): nothing lights up
         app.palette.set("bg_visual_red", Rgb(9, 9, 9));
         assert!(!lit(&mut app, "red"));
+        std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
+    }
+
+    #[test]
+    fn settings_tabs_take_the_keyboard_at_the_list_edge() {
+        let store = temp_store("tab-focus");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.page = Page::Settings;
+        // top (the default): up from the first row reaches the tabs
+        press(&mut app, "k");
+        assert!(app.settings_page.tabs_focused);
+        press(&mut app, "l");
+        assert_eq!(app.settings_page.tab, crate::settings::Tab::Behaviour);
+        assert!(render(&mut app, 160, 45).contains("back to the list"));
+        press(&mut app, "j");
+        assert!(!app.settings_page.tabs_focused);
+        // the cursor never rests on a group title: the first row is Leader
+        assert_eq!(
+            crate::behaviour::behaviour_rows()[app.settings_page.bh_sel],
+            crate::behaviour::BhRow::Leader
+        );
+        press(&mut app, "jk");
+        assert!(!app.settings_page.tabs_focused);
+        // tabs at the bottom: down from the last row reaches them
+        app.settings.layout.inner_tabs = "bottom".into();
+        press(&mut app, "G");
+        assert!(!app.settings_page.tabs_focused);
+        press(&mut app, "j");
+        assert!(app.settings_page.tabs_focused);
+        press(&mut app, "l");
+        assert_eq!(app.settings_page.tab, crate::settings::Tab::History);
+        press(&mut app, "k");
+        assert!(!app.settings_page.tabs_focused);
+        let screen = render(&mut app, 160, 45);
+        let lines: Vec<&str> = screen.lines().collect();
+        assert!(
+            lines[lines.len() - 3].contains("Keymaps"),
+            "tabs at the bottom:\n{screen}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn editing_a_base_colour_moves_its_unpinned_derived_colours_live() {
+        let mut app = test_app(temp_store("live-derive"), Start::Named("One".into()));
+        let i = app.keys.iter().position(|k| *k == "red").unwrap();
+        app.select_key(i);
+        app.open_picker();
+        let before = app.palette.get("bg_visual_red");
+        app.palette.set("bg_diff_red", Rgb(1, 1, 1)); // pinned now
+        press(&mut app, "lll"); // in the picker, before Enter
+        assert!(app.edit_session.is_some(), "not kept yet");
+        assert_ne!(
+            app.palette.get("bg_visual_red"),
+            before,
+            "derived follows live"
+        );
+        assert_eq!(app.palette.get("bg_diff_red"), Rgb(1, 1, 1), "pinned stays");
         std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
     }
 }

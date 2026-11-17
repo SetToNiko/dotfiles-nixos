@@ -239,7 +239,7 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits.clear();
-    crate::hit::set_look(app.hover_look(&app.settings.hover));
+    crate::hit::set_looks(app.looks(&app.settings));
     let full = f.area();
     // tabs on top: their own row; at the bottom they share the status line
     let top = app.settings.layout.tabs_on_top();
@@ -408,7 +408,7 @@ pub fn pane_border(app: &App, area: Rect, focused: bool) -> Style {
     if focused {
         Style::new().yellow()
     } else if app.pane_hovered(area) {
-        Style::new().fg(crate::hit::look().pane)
+        Style::new().fg(crate::hit::looks().pane)
     } else {
         Style::new().dark_gray()
     }
@@ -467,7 +467,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let rows = app.colour_rows();
     // the selected colour's relatives by derivation (pinned keys are set by
-    // hand, so they're left out) get the hover look
+    // hand, so they're left out) get the derived-colour highlight
     let selected = app.keys[app.sel];
     let related: Vec<&str> = if app.palette.is_pinned(selected) {
         Vec::new()
@@ -497,7 +497,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                     ]);
                     // a closed group stands in for its related keys
                     if !expanded && keys.iter().any(|k| related.contains(k)) {
-                        line.patch_style(hover(Style::new()))
+                        line.patch_style(crate::hit::derived(Style::new()))
                     } else {
                         line
                     }
@@ -550,7 +550,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                         spans.push(Span::styled(format!("{ratio:>4.1}:1"), style));
                     }
                     if related.contains(&key) {
-                        Line::from(spans).patch_style(hover(Style::new()))
+                        Line::from(spans).patch_style(crate::hit::derived(Style::new()))
                     } else {
                         Line::from(spans)
                     }
@@ -885,7 +885,7 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
     let rects = app.preview.rects.clone();
     for (id, r) in rects {
         if app.hits.add(r, Target::Preview(id)) && app.preview.focus != Some(id) {
-            let frame = crate::hit::look().preview;
+            let frame = crate::hit::looks().preview;
             let buf = f.buffer_mut();
             for x in r.x..r.x + r.width {
                 for y in [r.y, r.y + r.height.saturating_sub(1)] {
@@ -1188,6 +1188,19 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("{} reset", k(A::ResetSizes)),
                 format!("{} done", k(A::Back)),
             ]
+        } else if app.page == Page::Settings && app.settings_page.tabs_focused {
+            let back = if app.settings.layout.inner_tabs_on_top() {
+                A::Down
+            } else {
+                A::Up
+            };
+            [
+                hint(&[A::Left, A::Right], "tabs"),
+                hint(&[back], "back to the list"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
         } else if app.page == Page::Settings {
             use crate::settings::Tab;
             let rows: Vec<(&[Action], &str)> = match app.settings_page.tab {
@@ -1605,7 +1618,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             );
         }
         Overlay::ChooseKey { row, sel } => {
-            let keys = crate::settings::theme_keys();
+            let keys = crate::behaviour::theme_keys();
             let r = centered(
                 area,
                 40,

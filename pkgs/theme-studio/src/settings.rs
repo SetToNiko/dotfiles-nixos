@@ -9,10 +9,7 @@ use serde_json::Value;
 use crate::app::{App, Overlay};
 use crate::color::Rgb;
 use crate::history::{History, SnapshotInfo};
-use crate::hit::{HoverLook, Underline};
 use crate::keymap::{Action, Context, Key, Keymap, all_actions, display_seq};
-use crate::palette::GROUPS;
-use ratatui::style::{Color, Modifier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -34,86 +31,6 @@ pub enum KmRow {
     Preset,
     Header(Context),
     Binding(Context, Action),
-}
-
-/// A row of the Behaviour tab.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BhRow {
-    Leader,
-    Tabs,
-    GroupOpen(usize),
-    PickerAtStart,
-    PickerAfterEditing,
-    SampleAtStart,
-    ListOpensToCurrent,
-    HideBitmap,
-    HideSpecial,
-    Spacing,
-    NerdFont,
-    SaveSizes,
-    ResetSizes,
-    HoverHighlight,
-    HoverHighlightColour,
-    HoverUnderline,
-    HoverUnderlineColour,
-    HoverText,
-    HoverTextColour,
-    HoverTextWeight,
-    PaneBorder,
-    PreviewBorder,
-}
-
-impl BhRow {
-    /// Rows whose value is a key of the system palette.
-    pub fn is_colour(self) -> bool {
-        matches!(
-            self,
-            BhRow::HoverHighlightColour
-                | BhRow::HoverUnderlineColour
-                | BhRow::HoverTextColour
-                | BhRow::PaneBorder
-                | BhRow::PreviewBorder
-        )
-    }
-}
-
-/// Every palette key, in the colour list's order (the choices for hover
-/// colours).
-pub fn theme_keys() -> Vec<&'static str> {
-    GROUPS
-        .iter()
-        .flat_map(|(_, keys)| keys.iter().copied())
-        .collect()
-}
-
-pub fn behaviour_rows() -> Vec<BhRow> {
-    let mut v = vec![
-        BhRow::Leader,
-        BhRow::Tabs,
-        BhRow::HoverHighlight,
-        BhRow::HoverHighlightColour,
-        BhRow::HoverUnderline,
-        BhRow::HoverUnderlineColour,
-        BhRow::HoverText,
-        BhRow::HoverTextColour,
-        BhRow::HoverTextWeight,
-        BhRow::PaneBorder,
-        BhRow::PreviewBorder,
-    ];
-    v.extend((0..GROUPS.len()).map(BhRow::GroupOpen));
-    v.extend([
-        BhRow::PickerAtStart,
-        BhRow::PickerAfterEditing,
-        BhRow::SampleAtStart,
-        BhRow::ListOpensToCurrent,
-        BhRow::HideBitmap,
-        BhRow::HideSpecial,
-        BhRow::Spacing,
-        BhRow::NerdFont,
-        BhRow::SaveSizes,
-        BhRow::ResetSizes,
-    ]);
-    v
 }
 
 /// The files with a history, as the History tab lists them.
@@ -180,6 +97,8 @@ pub struct SettingsPage {
     pub hist_focus: HistFocus,
     pub hist_sel: usize,
     pub hist_scroll: usize,
+    /// The keyboard is on the tab strip (left/right change tabs).
+    pub tabs_focused: bool,
     /// The difference view shows everything, not just what differs.
     pub show_all: bool,
     pub diff_scroll: usize,
@@ -216,6 +135,7 @@ impl Default for SettingsPage {
             hist_focus: HistFocus::Versions,
             hist_sel: 0,
             hist_scroll: 0,
+            tabs_focused: false,
             show_all: false,
             diff_scroll: 0,
             versions: None,
@@ -328,7 +248,7 @@ pub fn diff_lines(now: &Value, then: &Value, all: bool) -> Vec<DiffLine> {
     out
 }
 
-fn wrap(i: usize, d: i32, n: usize) -> usize {
+pub(crate) fn wrap(i: usize, d: i32, n: usize) -> usize {
     if n == 0 {
         0
     } else {
@@ -337,96 +257,6 @@ fn wrap(i: usize, d: i32, n: usize) -> usize {
 }
 
 impl App {
-    // ----- hover look --------------------------------------------------------
-
-    /// A key of the active system palette as a colour (the terminal's own
-    /// colours when the palette can't be read).
-    pub fn theme_colour(&self, key: &str) -> Color {
-        if let Some(p) = &self.system_palette
-            && theme_keys().contains(&key)
-        {
-            let c = p.get(key);
-            return Color::Rgb(c.0, c.1, c.2);
-        }
-        match key {
-            "red" | "bg_red" => Color::Red,
-            "green" | "bg_green" => Color::Green,
-            "yellow" | "bg_yellow" | "orange" => Color::Yellow,
-            "blue" => Color::Blue,
-            "purple" => Color::Magenta,
-            "aqua" => Color::Cyan,
-            "fg0" | "fg1" => Color::White,
-            k if k.starts_with("grey") => Color::Gray,
-            _ => Color::DarkGray,
-        }
-    }
-
-    /// The hover settings as colours.
-    pub fn hover_look(&self, h: &crate::config::HoverSettings) -> HoverLook {
-        HoverLook {
-            bg: h.highlight.then(|| self.theme_colour(&h.highlight_colour)),
-            underline: Underline::parse(&h.underline)
-                .map(|u| (u, self.theme_colour(&h.underline_colour))),
-            fg: h.text.then(|| self.theme_colour(&h.text_colour)),
-            weight: match h.text_weight.as_str() {
-                "bold" => Modifier::BOLD,
-                "dim" => Modifier::DIM,
-                _ => Modifier::empty(),
-            },
-            pane: self.theme_colour(&h.pane_border),
-            preview: self.theme_colour(&h.preview_border),
-        }
-    }
-
-    /// The key a colour row holds.
-    fn colour_setting(&mut self, row: BhRow) -> Option<&mut String> {
-        let h = &mut self.settings.hover;
-        Some(match row {
-            BhRow::HoverHighlightColour => &mut h.highlight_colour,
-            BhRow::HoverUnderlineColour => &mut h.underline_colour,
-            BhRow::HoverTextColour => &mut h.text_colour,
-            BhRow::PaneBorder => &mut h.pane_border,
-            BhRow::PreviewBorder => &mut h.preview_border,
-            _ => return None,
-        })
-    }
-
-    /// Sets a colour row to a palette key (from the key list).
-    pub fn set_colour_setting(&mut self, row: BhRow, key: &str) {
-        if let Some(v) = self.colour_setting(row) {
-            *v = key.to_string();
-            self.save_settings();
-        }
-    }
-
-    /// Keys while the list of palette keys is open.
-    pub fn choose_key_key(
-        &mut self,
-        row: BhRow,
-        mut sel: usize,
-        k: ratatui::crossterm::event::KeyEvent,
-    ) {
-        use ratatui::crossterm::event::KeyCode;
-        let keys = theme_keys();
-        match k.code {
-            KeyCode::Esc => self.overlay = Overlay::None,
-            KeyCode::Enter => {
-                self.overlay = Overlay::None;
-                self.set_colour_setting(row, keys[sel]);
-            }
-            KeyCode::Up | KeyCode::Char('k') => sel = sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => sel = (sel + 1).min(keys.len() - 1),
-            KeyCode::PageUp => sel = sel.saturating_sub(10),
-            KeyCode::PageDown => sel = (sel + 10).min(keys.len() - 1),
-            KeyCode::Home | KeyCode::Char('g') => sel = 0,
-            KeyCode::End | KeyCode::Char('G') => sel = keys.len() - 1,
-            _ => {}
-        }
-        if matches!(self.overlay, Overlay::ChooseKey { .. }) {
-            self.overlay = Overlay::ChooseKey { row, sel };
-        }
-    }
-
     // ----- shared ----------------------------------------------------------
 
     pub fn history(&self) -> Option<History> {
@@ -453,7 +283,7 @@ impl App {
         }
     }
 
-    fn save_settings(&mut self) {
+    pub(crate) fn save_settings(&mut self) {
         if let Err(e) = crate::config::save_settings(&self.config_dir, &self.settings) {
             self.error(format!("Saving settings.json: {e:#}"));
         }
@@ -515,6 +345,9 @@ impl App {
     pub fn settings_click(&mut self, t: crate::hit::Target) {
         use crate::hit::Target as T;
         let p = &mut self.settings_page;
+        if !matches!(t, T::SettingsTab(_)) {
+            p.tabs_focused = false;
+        }
         match t {
             T::SettingsTab(i) => p.tab = TABS[i as usize].0,
             T::HistFile(i) => {
@@ -564,19 +397,44 @@ impl App {
     // ----- keys ------------------------------------------------------------
 
     pub fn run_settings(&mut self, a: Action) {
+        let top = self.settings.layout.inner_tabs_on_top();
+        let switch = |p: &mut SettingsPage, d: i32| {
+            let i = TABS.iter().position(|(t, _)| *t == p.tab).unwrap_or(0);
+            p.tab = TABS[wrap(i, d, TABS.len())].0;
+        };
+        // the keyboard on the tab strip: left/right change tabs; moving back
+        // towards the page, Enter or Esc return to it
+        if self.settings_page.tabs_focused {
+            match a {
+                Action::Left | Action::TabPrev => switch(&mut self.settings_page, -1),
+                Action::Right | Action::TabNext => switch(&mut self.settings_page, 1),
+                Action::Down if top => self.settings_page.tabs_focused = false,
+                Action::Up if !top => self.settings_page.tabs_focused = false,
+                Action::Confirm | Action::Back => self.settings_page.tabs_focused = false,
+                _ => {}
+            }
+            return;
+        }
         match a {
             Action::TabNext | Action::TabPrev => {
-                let i = TABS
-                    .iter()
-                    .position(|(t, _)| *t == self.settings_page.tab)
-                    .unwrap_or(0);
-                let d = if a == Action::TabNext { 1 } else { -1 };
-                self.settings_page.tab = TABS[wrap(i, d, TABS.len())].0;
+                switch(
+                    &mut self.settings_page,
+                    if a == Action::TabNext { 1 } else { -1 },
+                );
                 return;
             }
             // Esc leaves the page
             Action::Back => {
                 self.page = crate::app::Page::Main;
+                return;
+            }
+            // past the edge of the list next to the tabs: onto the tabs
+            Action::Up if top && self.settings_at_edge(true) => {
+                self.settings_page.tabs_focused = true;
+                return;
+            }
+            Action::Down if !top && self.settings_at_edge(false) => {
+                self.settings_page.tabs_focused = true;
                 return;
             }
             _ => {}
@@ -585,6 +443,22 @@ impl App {
             Tab::Keymaps => self.run_keymaps_tab(a),
             Tab::Behaviour => self.run_behaviour_tab(a),
             Tab::History => self.run_history_tab(a),
+        }
+    }
+
+    /// The cursor is on the first (`up`) or last row of the tab's list.
+    fn settings_at_edge(&mut self, up: bool) -> bool {
+        let at = |sel: usize, n: usize| if up { sel == 0 } else { sel + 1 >= n };
+        match self.settings_page.tab {
+            Tab::Keymaps => at(self.settings_page.km_sel, self.keymap_rows().len()),
+            Tab::Behaviour => self.behaviour_at_edge(up),
+            Tab::History => match self.settings_page.hist_focus {
+                HistFocus::Files => at(self.settings_page.hist_file, FILES.len()),
+                HistFocus::Versions => {
+                    let n = self.versions().len();
+                    at(self.settings_page.hist_sel, n)
+                }
+            },
         }
     }
 
@@ -749,189 +623,6 @@ impl App {
 
     fn ask(&mut self, question: String, then: Deferred) {
         self.overlay = Overlay::Ask { question, then };
-    }
-
-    /// The value shown for a Behaviour row.
-    pub fn behaviour_value(&self, row: BhRow) -> String {
-        let s = &self.settings;
-        let yes = |b: bool| if b { "yes" } else { "no" }.to_string();
-        match row {
-            BhRow::Leader => display_seq(
-                &[self.keymap.leader],
-                Key::new(
-                    ratatui::crossterm::event::KeyCode::Null,
-                    ratatui::crossterm::event::KeyModifiers::NONE,
-                ),
-            ),
-            BhRow::Tabs => s.layout.tabs.clone(),
-            BhRow::GroupOpen(i) => yes(s
-                .colours
-                .open_groups
-                .iter()
-                .any(|g| g.eq_ignore_ascii_case(GROUPS[i].0))),
-            BhRow::PickerAtStart => s.colours.picker_at_start.clone(),
-            BhRow::PickerAfterEditing => s.colours.picker_after_editing.clone(),
-            BhRow::SampleAtStart => s.fonts.sample_at_start.clone(),
-            BhRow::ListOpensToCurrent => yes(s.fonts.list_opens_to_current_font),
-            BhRow::HideBitmap => yes(s.font_list.hide_bitmap),
-            BhRow::HideSpecial => yes(s.font_list.hide_cjk_emoji_math),
-            BhRow::Spacing => s.font_list.spacing.clone(),
-            BhRow::NerdFont => s.font_list.nerd_font.clone(),
-            BhRow::SaveSizes => "Enter".into(),
-            BhRow::ResetSizes => "Enter".into(),
-            BhRow::HoverHighlight => yes(s.hover.highlight),
-            BhRow::HoverUnderline => s.hover.underline.clone(),
-            BhRow::HoverText => yes(s.hover.text),
-            BhRow::HoverTextWeight => s.hover.text_weight.clone(),
-            BhRow::HoverHighlightColour => s.hover.highlight_colour.clone(),
-            BhRow::HoverUnderlineColour => s.hover.underline_colour.clone(),
-            BhRow::HoverTextColour => s.hover.text_colour.clone(),
-            BhRow::PaneBorder => s.hover.pane_border.clone(),
-            BhRow::PreviewBorder => s.hover.preview_border.clone(),
-        }
-    }
-
-    pub fn behaviour_label(row: BhRow) -> String {
-        match row {
-            BhRow::Leader => "Leader key (of the active keymap preset)".into(),
-            BhRow::Tabs => "Page tabs".into(),
-            BhRow::GroupOpen(i) => format!("Colour group \"{}\" open at start", GROUPS[i].0),
-            BhRow::PickerAtStart => "Colour picker at start".into(),
-            BhRow::PickerAfterEditing => "Colour picker after editing".into(),
-            BhRow::SampleAtStart => "Font sample at start".into(),
-            BhRow::ListOpensToCurrent => "Font list opens at the role's current font".into(),
-            BhRow::HideBitmap => "Font list hides bitmap fonts at start".into(),
-            BhRow::HideSpecial => "Font list hides CJK / emoji / math fonts at start".into(),
-            BhRow::Spacing => "Font list spacing filter at start".into(),
-            BhRow::NerdFont => "Font list Nerd Font filter at start".into(),
-            BhRow::SaveSizes => "Save the current pane sizes as the default".into(),
-            BhRow::ResetSizes => "Pane sizes back to the shipped defaults".into(),
-            BhRow::HoverHighlight => "Hover: highlight the background".into(),
-            BhRow::HoverHighlightColour => "Hover: highlight colour".into(),
-            BhRow::HoverUnderline => "Hover: underline".into(),
-            BhRow::HoverUnderlineColour => "Hover: underline colour".into(),
-            BhRow::HoverText => "Hover: change the text".into(),
-            BhRow::HoverTextColour => "Hover: text colour".into(),
-            BhRow::HoverTextWeight => "Hover: text weight".into(),
-            BhRow::PaneBorder => "Hover: pane border colour".into(),
-            BhRow::PreviewBorder => "Hover: preview window frame colour".into(),
-        }
-    }
-
-    fn run_behaviour_tab(&mut self, a: Action) {
-        let rows = behaviour_rows();
-        if Self::move_sel(&mut self.settings_page.bh_sel, rows.len(), a) {
-            return;
-        }
-        let d = match a {
-            Action::Left => -1,
-            Action::Right | Action::Confirm => 1,
-            _ => return,
-        };
-        let cycle = |cur: &str, opts: &[&str]| -> String {
-            let i = opts.iter().position(|o| *o == cur).unwrap_or(0);
-            opts[wrap(i, d, opts.len())].to_string()
-        };
-        let row = rows[self.settings_page.bh_sel];
-        // colours: Enter opens the list of keys; left/right steps through it
-        if row.is_colour() {
-            let keys = theme_keys();
-            let cur = self.colour_setting(row).cloned().unwrap_or_default();
-            let i = keys.iter().position(|k| *k == cur).unwrap_or(0);
-            if a == Action::Confirm {
-                self.overlay = Overlay::ChooseKey { row, sel: i };
-            } else {
-                self.set_colour_setting(row, keys[wrap(i, d, keys.len())]);
-            }
-            return;
-        }
-        let s = &mut self.settings;
-        match row {
-            BhRow::Leader => {
-                self.overlay = Overlay::Capture {
-                    what: Capture::Leader,
-                    keys: Vec::new(),
-                };
-                return;
-            }
-            BhRow::Tabs => s.layout.tabs = cycle(&s.layout.tabs, &["bottom", "top"]),
-            BhRow::GroupOpen(i) => {
-                let name = GROUPS[i].0;
-                let open = s
-                    .colours
-                    .open_groups
-                    .iter()
-                    .any(|g| g.eq_ignore_ascii_case(name));
-                if open {
-                    s.colours
-                        .open_groups
-                        .retain(|g| !g.eq_ignore_ascii_case(name));
-                } else {
-                    s.colours.open_groups.push(name.to_string());
-                }
-            }
-            BhRow::PickerAtStart => {
-                s.colours.picker_at_start = cycle(&s.colours.picker_at_start, &["hidden", "shown"])
-            }
-            BhRow::PickerAfterEditing => {
-                s.colours.picker_after_editing = cycle(
-                    &s.colours.picker_after_editing,
-                    &["hide-on-esc", "stay-open"],
-                )
-            }
-            BhRow::SampleAtStart => {
-                s.fonts.sample_at_start = cycle(&s.fonts.sample_at_start, &["shown", "hidden"])
-            }
-            BhRow::ListOpensToCurrent => {
-                s.fonts.list_opens_to_current_font = !s.fonts.list_opens_to_current_font
-            }
-            BhRow::HideBitmap => s.font_list.hide_bitmap = !s.font_list.hide_bitmap,
-            BhRow::HideSpecial => {
-                s.font_list.hide_cjk_emoji_math = !s.font_list.hide_cjk_emoji_math
-            }
-            BhRow::Spacing => {
-                s.font_list.spacing = cycle(&s.font_list.spacing, &["any", "mono", "propo"])
-            }
-            BhRow::NerdFont => {
-                s.font_list.nerd_font = cycle(
-                    &s.font_list.nerd_font,
-                    &[
-                        "any",
-                        "nerd-font",
-                        "nerd-font-mono",
-                        "nerd-font-propo",
-                        "no-nerd-font",
-                    ],
-                )
-            }
-            BhRow::SaveSizes => {
-                s.layout.sizes = self.sizes.clone();
-                self.info("Saved the current pane sizes as the default");
-            }
-            BhRow::ResetSizes => {
-                s.layout.sizes = crate::config::Sizes::default();
-                self.sizes = s.layout.sizes.clone();
-                self.info("Pane sizes back to the shipped defaults");
-            }
-            BhRow::HoverHighlight => s.hover.highlight = !s.hover.highlight,
-            BhRow::HoverUnderline => {
-                s.hover.underline = cycle(
-                    &s.hover.underline,
-                    &["off", "single", "double", "curly", "dotted", "dashed"],
-                )
-            }
-            BhRow::HoverText => s.hover.text = !s.hover.text,
-            BhRow::HoverTextWeight => {
-                s.hover.text_weight = cycle(&s.hover.text_weight, &["normal", "bold", "dim"])
-            }
-            // handled above
-            BhRow::HoverHighlightColour
-            | BhRow::HoverUnderlineColour
-            | BhRow::HoverTextColour
-            | BhRow::PaneBorder
-            | BhRow::PreviewBorder => {}
-        }
-        self.save_settings();
     }
 
     /// The selected file's versions (named first, then newest first);

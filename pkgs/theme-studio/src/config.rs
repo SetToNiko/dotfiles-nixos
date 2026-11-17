@@ -80,6 +80,8 @@ pub struct ColourSettings {
     pub picker_at_start: String,
     /// "hide-on-esc" or "stay-open"
     pub picker_after_editing: String,
+    /// How the selected colour's derivation relatives are marked.
+    pub derived_highlight: LookSettings,
 }
 
 impl Default for ColourSettings {
@@ -88,6 +90,7 @@ impl Default for ColourSettings {
             open_groups: vec!["Base".into()],
             picker_at_start: "hidden".into(),
             picker_after_editing: "hide-on-esc".into(),
+            derived_highlight: LookSettings::derived_default(),
         }
     }
 }
@@ -164,6 +167,8 @@ impl Default for Sizes {
 pub struct LayoutSettings {
     /// The page tabs: "bottom" (in the status line) or "top" (their own row).
     pub tabs: String,
+    /// Tabs inside a page (the Settings page's): "top" or "bottom".
+    pub inner_tabs: String,
     pub sizes: Sizes,
 }
 
@@ -171,6 +176,7 @@ impl Default for LayoutSettings {
     fn default() -> Self {
         LayoutSettings {
             tabs: "bottom".into(),
+            inner_tabs: "top".into(),
             sizes: Sizes::default(),
         }
     }
@@ -179,6 +185,10 @@ impl Default for LayoutSettings {
 impl LayoutSettings {
     pub fn tabs_on_top(&self) -> bool {
         self.tabs == "top"
+    }
+
+    pub fn inner_tabs_on_top(&self) -> bool {
+        self.inner_tabs != "bottom"
     }
 }
 
@@ -195,15 +205,15 @@ pub struct Settings {
     pub hover: HoverSettings,
 }
 
-/// How clickable things look under the mouse. Colours are keys of the
-/// active system palette ("yellow", "bg3", …).
+/// A highlight look: any mix of a background, an underline and a text
+/// colour. Colours are keys of the active system palette ("yellow", "bg3").
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
-pub struct HoverSettings {
+pub struct LookSettings {
     /// A background colour.
     pub highlight: bool,
     pub highlight_colour: String,
-    /// "off", "single", "double", "curly", "dotted" or "dashed"
+    /// "off", "single" or "double"
     pub underline: String,
     pub underline_colour: String,
     /// A text colour and weight.
@@ -211,6 +221,48 @@ pub struct HoverSettings {
     pub text_colour: String,
     /// "normal", "bold" or "dim"
     pub text_weight: String,
+}
+
+impl Default for LookSettings {
+    fn default() -> Self {
+        LookSettings {
+            highlight: false,
+            highlight_colour: "bg3".into(),
+            underline: "single".into(),
+            underline_colour: "yellow".into(),
+            text: true,
+            text_colour: "yellow".into(),
+            text_weight: "normal".into(),
+        }
+    }
+}
+
+impl LookSettings {
+    /// The derived-colour highlight's default: a background only.
+    pub fn derived_default() -> Self {
+        LookSettings {
+            highlight: true,
+            highlight_colour: "bg_visual_blue".into(),
+            underline: "off".into(),
+            text: false,
+            ..Default::default()
+        }
+    }
+
+    /// Underline styles that are no longer offered become single.
+    fn normalise(&mut self) {
+        if !["off", "single", "double"].contains(&self.underline.as_str()) {
+            self.underline = "single".into();
+        }
+    }
+}
+
+/// How clickable things look under the mouse.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct HoverSettings {
+    #[serde(flatten)]
+    pub look: LookSettings,
     /// The border of a pane under the mouse.
     pub pane_border: String,
     /// The frame of a preview window (nvim, the shell) under the mouse.
@@ -220,15 +272,20 @@ pub struct HoverSettings {
 impl Default for HoverSettings {
     fn default() -> Self {
         HoverSettings {
-            highlight: false,
-            highlight_colour: "bg3".into(),
-            underline: "single".into(),
-            underline_colour: "yellow".into(),
-            text: true,
-            text_colour: "yellow".into(),
-            text_weight: "normal".into(),
+            look: LookSettings::default(),
             pane_border: "aqua".into(),
             preview_border: "purple".into(),
+        }
+    }
+}
+
+impl Settings {
+    /// Values from older versions that are no longer offered.
+    pub fn normalise(&mut self) {
+        self.hover.look.normalise();
+        self.colours.derived_highlight.normalise();
+        if !["top", "bottom"].contains(&self.layout.inner_tabs.as_str()) {
+            self.layout.inner_tabs = "top".into();
         }
     }
 }
@@ -410,8 +467,11 @@ pub fn load(dir: &Path, write: bool) -> Loaded {
 
     let settings = match read_json(&settings_path) {
         Ok(found) => {
-            let s: Settings = match found.clone().map(serde_json::from_value) {
-                Some(Ok(s)) => s,
+            let s: Settings = match found.clone().map(serde_json::from_value::<Settings>) {
+                Some(Ok(mut s)) => {
+                    s.normalise();
+                    s
+                }
                 Some(Err(e)) => {
                     warnings.push(format!("settings.json: {e} (using defaults)"));
                     Settings::default()

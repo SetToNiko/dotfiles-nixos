@@ -589,9 +589,8 @@ Asked for after phase 5b; the decisions are settled.
   underline when the mouse is over it.
 - **Becomes:** a Hover section on the Behaviour tab. Any combination of:
   - **Highlight:** on/off, and a background colour.
-  - **Underline:** off, single, double, curly, dotted or dashed (terminals
-    can't make a line thicker, so the styles stand in for weight; double
-    is the heavier line), and a colour.
+  - **Underline:** off, single or double (changed from five styles after
+    trying them), and a colour.
   - **Text:** on/off, a colour, and a weight: normal, bold or dim (the
     weights terminals have).
 - **Colours:** each is a key of the active system palette (e.g.
@@ -601,9 +600,9 @@ Asked for after phase 5b; the decisions are settled.
   (underline in `yellow` too).
 - **Live sample:** a sample row on the Behaviour tab shows the look as set,
   before it's saved.
-- **How:** ratatui only knows "underlined", so the underline style and
-  colour are added to the terminal output (SGR 4:n and 58) when a hovered
-  cell is drawn. Terminals without them show a plain underline.
+- **How:** ratatui only knows single underlines, so a double one is marked
+  in the cell and the terminal output turns the mark into SGR 4:2;
+  underline colours use SGR 58.
 
 ### 2. Pane borders light up on hover
 
@@ -639,10 +638,16 @@ Asked for after phase 5b; the decisions are settled.
 ### 5. Palette: show what a colour is derived from, and what from it
 
 - **Derived colour selected** (e.g. `bg_visual_red`): the rows it comes
-  from (`bg0`, `red`) get the hover look.
+  from (`bg0`, `red`) get the derived-colour highlight.
 - **Base colour selected** (e.g. `red`): the colours derived from it
-  (`bg_visual_red`, `bg_diff_red`, `bg_red`, …) get the hover look, so
-  you can see what editing it changes.
+  (`bg_visual_red`, `bg_diff_red`, `bg_red`, …) get it too, so you can
+  see what editing it changes.
+- **Its own look:** the derived-colour highlight is configured separately
+  from hover (the same choices: highlight, underline, text colour and
+  weight), in its own group on the Behaviour tab. Default: a
+  `bg_visual_blue` background.
+- **Live:** editing a base colour in the picker moves every unpinned
+  derived colour (and the preview) as you go, before Enter keeps it.
 - **Pinned colours:** a pinned (hand-set) key isn't derived, so it's left
   out both ways.
 - **Closed groups:** a related colour in a closed group lights up the
@@ -690,6 +695,21 @@ Asked for after phase 5b; the decisions are settled.
 - No "F1: back to the main page" at the bottom of the frame: the status
   line already shows the key next to Main.
 
+### 8a. Behaviour tab groups and in-page tabs (asked for after step 3)
+
+- **Groups:** the Behaviour tab's rows sit under titles, like the Keymaps
+  tab's contexts: Keys, Layout, Hover, Palette pane, Derived colours,
+  Fonts pane. The two looks end with a sample row. The cursor skips
+  titles and samples.
+- **In-page tabs position:** a Layout setting puts a page's own tabs
+  (the Settings page's Keymaps / Behaviour / History) at the top or the
+  bottom of the page. Default: top.
+- **Tabs take the keyboard at the edge:** moving past the end of a tab's
+  list towards the tabs (up from the first row when they're on top, down
+  from the last when at the bottom) puts the keyboard on the tab strip.
+  There, left/right change tabs; moving back, Enter or Esc return to the
+  list.
+
 ### 9. Order of work
 
 1. ✅ Small fixes: the page frames' "back" note, the sample's title and labels,
@@ -697,6 +717,8 @@ Asked for after phase 5b; the decisions are settled.
 2. ✅ Hover settings and their output (styles, colours, weights), pane border
    hover colours, and the Behaviour tab's Hover section with its sample.
 3. ✅ Derived-colour highlights in the Palette.
+3a. ✅ Their own configurable look; Behaviour tab groups; single/double
+   underlines only; in-page tabs position and keyboard focus.
 4. Settings pending changes: the Save / Discard buttons, the ● on the tab,
    and the quit prompt.
 5. The preset browser with its difference view, delete and new-from.
