@@ -781,8 +781,15 @@ move to Phase 8.)
   "⁴Palette"). The theme's name and its dot sit in the page tab row:
   " F1 Main  F2 Fonts  F3 Settings   Theme: Work ●", wherever the tabs
   are (top or bottom).
-- **Parts stay reusable:** in the Fonts pane, Open swaps in another font
-  preset; in the Palette pane, another palette.
+- **Parts stay reusable:** `<leader>op` / `<leader>of` swap another
+  palette / font preset into the theme; `<leader>np` / `<leader>nf` start
+  new ones. (Built this way rather than per pane: `o` opens a theme
+  everywhere.)
+- **Saving:** `s` saves edited parts in place and the theme; a new part
+  takes the theme's name. **Save as** under a new name forks: edited parts
+  are saved under the new name (other themes using them keep theirs),
+  unedited parts stay shared. (Added while building: without it there was
+  no way left to copy a palette.)
 - **Apply:** applies both parts (theme-switch.sh and font-switch.sh) and
   records the active theme in `~/.config/colors/theme`.
 - **The rofi picker:** a new `themes-switch` picker on the current key
@@ -885,6 +892,14 @@ move to Phase 8.)
 - **Results are kept** in `~/.local/state/theme-studio/tournaments/`, so a
   past result can be reopened.
 
+### Progress
+
+- ✅ Steps 1–3 (commits 1bc5ccf, 76a9954, ec48d38; configs cb22e1f and
+  the keymaps / settings commits after it). Your first theme, "CRT
+  Amber", was made from the active palette and fonts; `$mod+t` opens
+  themes, `$mod+p` palettes.
+- ⏳ Step 4, the tournament, is next.
+
 ### 6. Order of work
 
 1. ✅ Themes: the data, migration, the studio's titles and Save / Open, the
@@ -892,6 +907,76 @@ move to Phase 8.)
 2. ✅ Role picking with filters and applying at once; filling from a family.
 3. ✅ Preview fetching and rendering, the texts, the preview pane.
 4. The tournament.
+
+## Phase 7b: next session (asked for after Phase 7 step 3)
+
+To plan and settle at the start of the next session. ❓ marks what to
+decide then.
+
+### 1. Palette dropdown in the Palette pane
+
+- **What:** the Palette pane gets a dropdown at its top, showing the
+  palette in use (`Palette: CRT Amber ▾`). Enter or a click opens it:
+  every palette in palettes.json, with swatches and type-to-search, in a
+  list hanging from the pane (not a centred pop-up).
+- **Choosing** swaps that palette into the theme, as `<leader>op` does
+  (asks first if the current palette has unsaved edits).
+- ❓ Whether moving through the list previews each palette live (preview
+  windows and colour list) before Enter, the way the colour list previews
+  hover colours.
+- ❓ Whether the name goes back into the pane title (removed in Phase 7
+  step 1) or only in the dropdown row.
+
+### 2. Draw resized windows after resizing stops
+
+- **Now:** every resize step redraws everything, including the font
+  sample and preview images (ImageMagick renders), so dragging a border
+  or resizing the terminal stutters.
+- **Becomes:** while the size is changing (terminal resize events, border
+  drags, resize mode keys) the frame and text redraw, but images and the
+  embedded terminals (nvim, shell) are resized only once the size has
+  stayed the same for a short time (~150 ms); meanwhile the old image is
+  shown cropped, or a placeholder.
+- ❓ The delay, and whether the embedded terminals follow at once or also
+  wait.
+
+### 3. Fuller code previews, and dropdowns
+
+- **More content:** each language's sample grows to a realistic file
+  (~40–60 lines: imports, a type, a few functions, comments, strings,
+  numbers, error handling), so a font is seen on real code.
+- **Scrolling:** `<` / `>` (or the wheel over the preview) page through
+  code as they do through prose.
+- **Language dropdown:** the preview's title row gets a language
+  dropdown (`Rust ▾`); Enter or a click lists the languages. ❓ Whether
+  the text kind (code / icons / prose / README) becomes a dropdown too.
+- ❓ More languages (e.g. Nix, Java, Kotlin, Ruby, Haskell, SQL, HTML/CSS).
+
+### 4. Prefetching previews
+
+- **A setting** (Behaviour tab, Fonts page group): prefetch previews on or
+  off, and which categories (monospace, sans-serif, serif, display,
+  handwriting, Nerd Fonts), each shown with its count and estimated size
+  (e.g. monospace 72 fonts ≈ 7 MB; Nerd Fonts 72 archives ≈ 1.5 GB).
+- **How:** in the background, a few downloads at a time, with progress in
+  the status line; already-fetched fonts are skipped; it resumes after a
+  restart.
+- **Kept on the system:** fetched preview fonts already persist between
+  runs in `~/.cache/theme-studio/preview/`. ❓ Whether to move them to
+  `~/.local/share/theme-studio/previews/` (caches can be cleared by
+  cleanup tools), and whether to offer a "clear previews" button with the
+  space used.
+- ❓ Whether Nerd Font previews keep the whole archive or only the one
+  Regular file (much smaller once unpacked).
+- **Ties in with the tournament,** whose pool needs the same files.
+
+### 5. Key hints at the other end of the tab bar
+
+- **Now:** the status line runs page tabs, theme name, then the hints.
+- **Becomes:** tabs and theme name at the left, the key hints
+  right-aligned at the right end; messages take the middle.
+- ❓ When the tab bar is on top: whether the hints move up with it, or
+  stay in the bottom line.
 
 ## Phase 8: polish
 
