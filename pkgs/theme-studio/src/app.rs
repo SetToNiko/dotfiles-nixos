@@ -3028,4 +3028,63 @@ mod tests {
         crate::hit::set_look(Default::default());
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn selecting_a_colour_lights_up_its_derivation_relatives() {
+        use crate::hit::Target as T;
+        let mut app = test_app(temp_store("related"), Start::Named("One".into()));
+        let lit = |app: &mut App, key: &str| -> bool {
+            let mut t = Terminal::new(TestBackend::new(200, 60)).unwrap();
+            t.draw(|f| crate::ui::draw(f, app)).unwrap();
+            let i = app.keys.iter().position(|k| *k == key).unwrap();
+            let Some(row) = app
+                .colour_rows()
+                .iter()
+                .position(|r| *r == ColourRow::Key(i))
+            else {
+                return false;
+            };
+            let r = app.hits.rect_of(T::ColourRow(row)).unwrap();
+            let buf = t.backend().buffer().clone();
+            buf[(r.x + 5, r.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        };
+        let group_lit = |app: &mut App, name: &str| -> bool {
+            let mut t = Terminal::new(TestBackend::new(200, 60)).unwrap();
+            t.draw(|f| crate::ui::draw(f, app)).unwrap();
+            let g = GROUPS.iter().position(|(n, _)| *n == name).unwrap();
+            let row = app
+                .colour_rows()
+                .iter()
+                .position(|r| matches!(r, ColourRow::Group { index, .. } if *index == g))
+                .unwrap();
+            let r = app.hits.rect_of(T::ColourRow(row)).unwrap();
+            let buf = t.backend().buffer().clone();
+            buf[(r.x + 4, r.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        };
+        let select = |app: &mut App, key: &str| {
+            let i = app.keys.iter().position(|k| *k == key).unwrap();
+            app.select_key(i);
+        };
+        // a base colour: what's derived from it lights up (its closed group)
+        select(&mut app, "red");
+        assert!(group_lit(&mut app, "Tinted backgrounds"));
+        assert!(!lit(&mut app, "green"));
+        // a derived colour: its sources light up
+        let g = GROUPS
+            .iter()
+            .position(|(n, _)| *n == "Tinted backgrounds")
+            .unwrap();
+        app.set_group_open(g, true);
+        select(&mut app, "bg_visual_red");
+        assert!(lit(&mut app, "bg0") && lit(&mut app, "red"));
+        assert!(!lit(&mut app, "green"));
+        // pinned (setting a derived key by hand pins it): nothing lights up
+        app.palette.set("bg_visual_red", Rgb(9, 9, 9));
+        assert!(!lit(&mut app, "red"));
+        std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
+    }
 }

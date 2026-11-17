@@ -466,6 +466,17 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
         _ => None,
     };
     let rows = app.colour_rows();
+    // the selected colour's relatives by derivation (pinned keys are set by
+    // hand, so they're left out) get the hover look
+    let selected = app.keys[app.sel];
+    let related: Vec<&str> = if app.palette.is_pinned(selected) {
+        Vec::new()
+    } else {
+        palette::related(selected)
+            .into_iter()
+            .filter(|k| palette::is_base(k) || !app.palette.is_pinned(k))
+            .collect()
+    };
     let lines: Vec<Line> = rows
         .iter()
         .enumerate()
@@ -479,11 +490,17 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
             match *row {
                 ColourRow::Group { index, expanded } => {
                     let (name, keys) = GROUPS[index];
-                    Line::from(vec![
+                    let line = Line::from(vec![
                         Span::styled(if expanded { " ▾ " } else { " ▸ " }, Style::new().yellow()),
                         Span::styled(name, cursor_style.bold()),
                         Span::styled(format!("  {}", keys.len()), Style::new().dark_gray()),
-                    ])
+                    ]);
+                    // a closed group stands in for its related keys
+                    if !expanded && keys.iter().any(|k| related.contains(k)) {
+                        line.patch_style(hover(Style::new()))
+                    } else {
+                        line
+                    }
                 }
                 ColourRow::Key(i) => {
                     let key = app.keys[i];
@@ -532,7 +549,11 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                         };
                         spans.push(Span::styled(format!("{ratio:>4.1}:1"), style));
                     }
-                    Line::from(spans)
+                    if related.contains(&key) {
+                        Line::from(spans).patch_style(hover(Style::new()))
+                    } else {
+                        Line::from(spans)
+                    }
                 }
             }
         })

@@ -692,11 +692,11 @@ Asked for after phase 5b; the decisions are settled.
 
 ### 9. Order of work
 
-1. Small fixes: the page frames' "back" note, the sample's title and labels,
+1. ✅ Small fixes: the page frames' "back" note, the sample's title and labels,
    and the roles' size placement.
-2. Hover settings and their output (styles, colours, weights), pane border
+2. ✅ Hover settings and their output (styles, colours, weights), pane border
    hover colours, and the Behaviour tab's Hover section with its sample.
-3. Derived-colour highlights in the Palette.
+3. ✅ Derived-colour highlights in the Palette.
 4. Settings pending changes: the Save / Discard buttons, the ● on the tab,
    and the quit prompt.
 5. The preset browser with its difference view, delete and new-from.

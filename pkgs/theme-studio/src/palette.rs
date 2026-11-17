@@ -123,6 +123,20 @@ pub fn sources(key: &str) -> &'static str {
     }
 }
 
+/// The keys tied to `key` by derivation: the base colours a derived key is
+/// computed from, or the keys computed from a base colour.
+pub fn related(key: &str) -> Vec<&'static str> {
+    if is_base(key) {
+        GROUPS
+            .iter()
+            .flat_map(|(_, keys)| keys.iter().copied())
+            .filter(|k| !is_base(k) && sources(k).split('+').any(|s| s == key))
+            .collect()
+    } else {
+        sources(key).split('+').filter(|s| !s.is_empty()).collect()
+    }
+}
+
 /// Blends colour `a` towards `b` by `t`, rounding like palette-derive.jq.
 fn mix(a: Rgb, b: Rgb, t: f64) -> Rgb {
     let ch = |x: u8, y: u8| {
@@ -430,5 +444,38 @@ mod tests {
         assert_eq!(p.get("grey1"), Rgb(1, 2, 3));
         p.unpin("grey1");
         assert_eq!(p.get("grey1"), mix(Rgb(10, 10, 10), p.get("fg0"), 0.55));
+    }
+}
+
+#[cfg(test)]
+mod related_tests {
+    use super::*;
+
+    #[test]
+    fn related_keys_match_derive() {
+        // a dark palette; nudging a base colour must only move the keys that
+        // name it as a source
+        let mut base: HashMap<&'static str, Rgb> = HashMap::new();
+        for (i, k) in BASE.iter().enumerate() {
+            base.insert(k, Rgb(20 + 25 * i as u8, 60, 90));
+        }
+        base.insert("bg0", Rgb(20, 20, 24));
+        base.insert("fg0", Rgb(220, 220, 210));
+        let before = derive(&base);
+        for b in BASE {
+            let mut nudged = base.clone();
+            let c = nudged[b];
+            nudged.insert(b, Rgb(c.0.wrapping_add(40), c.1.wrapping_add(40), c.2));
+            let after = derive(&nudged);
+            for (k, v) in &after {
+                if !is_base(k) && before[k] != *v {
+                    assert!(related(k).contains(&b), "{k} changes with {b}");
+                    assert!(related(b).contains(k), "{b} lists {k}");
+                }
+            }
+        }
+        assert_eq!(related("bg_visual_red"), ["bg0", "red"]);
+        assert!(related("red").contains(&"orange") && related("red").contains(&"bg_diff_red"));
+        assert!(!related("red").contains(&"bg3"));
     }
 }
