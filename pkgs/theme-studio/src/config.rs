@@ -166,14 +166,45 @@ fn default_keymaps() -> Value {
         presets.insert(km.name.clone(), km.to_json());
     }
     let mut m = Map::new();
+    m.insert("version".into(), Value::from(KEYMAPS_VERSION));
     m.insert("active".into(), Value::String("Vim".into()));
     m.insert("presets".into(), Value::Object(presets));
     Value::Object(m)
 }
 
+/// keymaps.json's format version. 2: panes are `<leader>1`…`<leader>7`.
+const KEYMAPS_VERSION: u64 = 2;
+
+/// Updates an older keymaps.json. Version 1 (no "version") had panes on the
+/// plain digits; bindings still exactly like that move to the leader, so
+/// your own changes are left alone.
+fn migrate(mut v: Value) -> Value {
+    let version = v.get("version").and_then(Value::as_u64).unwrap_or(1);
+    if version < 2
+        && let Some(presets) = v.get_mut("presets").and_then(Value::as_object_mut)
+    {
+        for preset in presets.values_mut() {
+            let Some(global) = preset
+                .pointer_mut("/bindings/global")
+                .and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            for n in 1..=9 {
+                let id = format!("panel-{n}");
+                if global.get(&id) == Some(&serde_json::json!([n.to_string()])) {
+                    global.insert(id, serde_json::json!([format!("<leader>{n}")]));
+                }
+            }
+        }
+    }
+    v
+}
+
 /// Reads keymaps.json: every preset (shipped ones topped up with actions the
 /// file doesn't mention), and the active one.
 fn load_keymaps(v: &Value, warnings: &mut Vec<String>) -> (Keymap, Vec<Keymap>, Value) {
+    let v = &migrate(v.clone());
     let builtin = Keymap::builtin();
     let mut presets: Vec<Keymap> = Vec::new();
     if let Some(obj) = v.get("presets").and_then(Value::as_object) {
@@ -210,6 +241,7 @@ fn load_keymaps(v: &Value, warnings: &mut Vec<String>) -> (Keymap, Vec<Keymap>, 
     };
     // what the file should contain now (adds anything missing)
     let mut out = Map::new();
+    out.insert("version".into(), Value::from(KEYMAPS_VERSION));
     out.insert("active".into(), Value::String(active.name.clone()));
     let mut obj = Map::new();
     for p in &presets {
@@ -428,5 +460,46 @@ mod tests {
         // only checks the path rule; doesn't change the environment
         let d = dir();
         assert!(d.ends_with("theme-studio"));
+    }
+}
+
+#[cfg(test)]
+mod migrate_tests {
+    use super::*;
+
+    #[test]
+    fn version_1_panes_move_to_the_leader_but_edits_stay() {
+        let old = serde_json::json!({"active": "Vim", "presets": {"Vim": {"leader": "<Space>", "bindings": {"global": {
+            "panel-1": ["1"], "panel-2": ["9"], "panel-4": ["4", "x"]
+        }}}}});
+        let mut w = Vec::new();
+        let (km, _, full) = load_keymaps(&old, &mut w);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(full["version"], 2);
+        let g = &full["presets"]["Vim"]["bindings"]["global"];
+        assert_eq!(
+            g["panel-1"],
+            serde_json::json!(["<leader>1"]),
+            "old default moves"
+        );
+        assert_eq!(
+            g["panel-2"],
+            serde_json::json!(["9"]),
+            "your own binding stays"
+        );
+        assert_eq!(
+            g["panel-4"],
+            serde_json::json!(["4", "x"]),
+            "changed lists stay"
+        );
+        assert_eq!(
+            g["panel-7"],
+            serde_json::json!(["<leader>7"]),
+            "missing ones come from the preset"
+        );
+        // version 2 files aren't touched again
+        let (_, _, again) = load_keymaps(&full, &mut w);
+        assert_eq!(again, full);
+        let _ = km;
     }
 }

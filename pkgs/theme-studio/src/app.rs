@@ -147,6 +147,11 @@ pub struct App {
     pub preview: Preview,
     pub side: Side,
     pub page: Page,
+    /// The palette (and undo depth) before the picker's first change, for
+    /// Esc to put back. Dropped once the keyboard is back in the list.
+    edit_session: Option<(Palette, usize)>,
+    /// Three columns (false: the preview is a row underneath; no font sample).
+    pub wide: bool,
     /// The colour picker (pane 5) is on screen.
     pub picker_visible: bool,
     /// The font sample (pane 3) is on screen.
@@ -212,6 +217,8 @@ impl App {
             picker_visible: config.settings.colours.picker_shown(),
             sample_visible: config.settings.fonts.sample_at_start != "hidden",
             row_sel: 0,
+            edit_session: None,
+            wide: true,
             expanded_groups: GROUPS
                 .iter()
                 .enumerate()
@@ -432,6 +439,11 @@ impl App {
         let key = self.key();
         if self.palette.get(key) == c {
             return;
+        }
+        // the first change while in the picker: remember the palette, so
+        // Esc can put it back
+        if self.edit_session.is_none() && self.focus != Focus::List {
+            self.edit_session = Some((self.palette.clone(), self.undo.len()));
         }
         if self.last_edit != Some(key) {
             self.push_undo();
@@ -698,6 +710,9 @@ impl App {
                 match n {
                     1 => self.fonts.focus = FontFocus::Slots,
                     2 => self.fonts.open_list(),
+                    _ if !self.wide => self.info(
+                        "The font sample is left out at this window width (too small to read)",
+                    ),
                     _ => {
                         self.sample_visible = true;
                         self.fonts.focus = FontFocus::Sample;
@@ -708,7 +723,7 @@ impl App {
                 self.preview.focus = None;
                 self.side = Side::Colours;
                 if self.focus != Focus::List {
-                    self.leave_picker();
+                    self.leave_picker(false);
                 }
             }
             5 => {
@@ -761,7 +776,7 @@ impl App {
         let columns: [Vec<u8>; 2] = [
             [1, 2, 3]
                 .into_iter()
-                .filter(|&p| p != 3 || self.sample_visible)
+                .filter(|&p| p != 3 || (self.sample_visible && self.wide))
                 .collect(),
             [4, 5]
                 .into_iter()
@@ -798,9 +813,23 @@ impl App {
         }
     }
 
-    /// Back to the colour list from the picker; the picker hides again
+    /// Back to the colour list from the picker: Esc (`discard`) puts back what
+    /// the colours were when you started changing them, Enter keeps them. The
+    /// picker hides again
     /// unless Settings says it stays open.
-    fn leave_picker(&mut self) {
+    fn leave_picker(&mut self, discard: bool) {
+        if discard
+            && let Some((before, undo_len)) = self.edit_session.take()
+            && before != self.palette
+        {
+            self.palette = before;
+            self.undo.truncate(undo_len);
+            self.redo.clear();
+            self.last_edit = None;
+            self.load_picker();
+            self.info(format!("Discarded the change to {}", self.key()));
+        }
+        self.edit_session = None;
         self.focus = Focus::List;
         if self.settings.colours.picker_hides_on_esc() {
             self.picker_visible = false;
@@ -932,6 +961,18 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
+        self.handle_key(k);
+        self.end_session_outside_picker();
+    }
+
+    /// Leaving the picker other than with Esc keeps the change.
+    fn end_session_outside_picker(&mut self) {
+        if self.focus == Focus::List {
+            self.edit_session = None;
+        }
+    }
+
+    fn handle_key(&mut self, k: KeyEvent) {
         use crate::fonts::FontFocus;
         let key = Key::from_event(k);
         // A preview window has the keyboard: everything but the key bound to
@@ -1056,7 +1097,7 @@ impl App {
             Action::FocusNext | Action::FocusPrev if fonts => {
                 let order: Vec<u8> = [1, 2, 3]
                     .into_iter()
-                    .filter(|&p| p != 3 || self.sample_visible)
+                    .filter(|&p| p != 3 || (self.sample_visible && self.wide))
                     .collect();
                 let i = order
                     .iter()
@@ -1096,7 +1137,8 @@ impl App {
             }
             Action::FocusNext => self.cycle_focus(1),
             Action::FocusPrev => self.cycle_focus(-1),
-            Action::Back if self.focus != Focus::List => self.leave_picker(),
+            Action::Back if self.focus != Focus::List => self.leave_picker(true),
+            Action::Confirm if self.focus != Focus::List => self.leave_picker(false),
             Action::ToggleYazi => {
                 self.preview.mode = PreviewMode::Desktop;
                 self.preview.toggle_yazi();
@@ -1207,13 +1249,13 @@ impl App {
                     self.last_edit = None;
                     self.edit(c);
                     self.load_picker();
-                    self.leave_picker();
+                    self.leave_picker(false);
                 }
                 None => self.error(format!("Not a colour: {} (use #rrggbb)", self.hex_input)),
             },
             KeyCode::Esc => {
                 self.load_picker();
-                self.leave_picker();
+                self.leave_picker(true);
             }
             KeyCode::Tab => self.cycle_focus(1),
             KeyCode::BackTab => self.cycle_focus(-1),
@@ -1403,6 +1445,11 @@ impl App {
     }
 
     fn on_mouse(&mut self, m: MouseEvent) {
+        self.handle_mouse(m);
+        self.end_session_outside_picker();
+    }
+
+    fn handle_mouse(&mut self, m: MouseEvent) {
         if self.page != Page::Main {
             return;
         }
@@ -1780,9 +1827,9 @@ mod tests {
         assert!(app.picker_visible);
         press(&mut app, " cp");
         assert!(!app.picker_visible);
-        press(&mut app, "1 fs");
+        press(&mut app, " 1 fs");
         assert!(!app.sample_visible);
-        press(&mut app, "4");
+        press(&mut app, " 4");
         // too small: what's needed
         press(&mut app, "o?");
         let small = render(&mut app, 80, 20);
@@ -1806,22 +1853,22 @@ mod tests {
         let mut app = test_app(temp_store("panels"), Start::Named("One".into()));
         render(&mut app, 200, 50); // lays out the preview windows
         assert!(!app.picker_visible, "the picker starts hidden");
-        press(&mut app, "5");
+        press(&mut app, " 5");
         assert_eq!((app.side, app.focus), (Side::Colours, Focus::Square));
         assert!(app.picker_visible, "5 shows it");
-        press(&mut app, "4");
+        press(&mut app, " 4");
         assert_eq!(app.focus, Focus::List);
         assert!(!app.picker_visible, "leaving it hides it again");
-        press(&mut app, "1");
+        press(&mut app, " 1");
         assert_eq!(
             (app.side, app.fonts.focus),
             (Side::Fonts, crate::fonts::FontFocus::Slots)
         );
-        press(&mut app, "2");
+        press(&mut app, " 2");
         assert_eq!(app.fonts.focus, crate::fonts::FontFocus::List);
-        press(&mut app, "3");
+        press(&mut app, " 3");
         assert_eq!(app.fonts.focus, crate::fonts::FontFocus::Sample);
-        press(&mut app, "6");
+        press(&mut app, " 6");
         assert_eq!(app.preview.focus, Some(PaneId::Nvim));
         // inside a preview window digits are typed into it, F12 comes back out
         press(&mut app, "1");
@@ -1829,11 +1876,11 @@ mod tests {
         while app.preview.focus.is_some() {
             app.on_key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
         }
-        press(&mut app, "4Y7");
+        press(&mut app, " 4Y 7");
         assert_eq!(app.preview.focus, Some(PaneId::Yazi));
         app.on_key(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
         // <C-w>: across and down between the fonts and colour columns
-        press(&mut app, "1");
+        press(&mut app, " 1");
         app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
         press(&mut app, "l");
         assert_eq!(app.current_pane(), 4);
@@ -1843,10 +1890,10 @@ mod tests {
         press(&mut app, "j");
         assert_eq!(app.current_pane(), 2);
         // digits still type into the hex box
-        press(&mut app, "4#123456\n");
+        press(&mut app, " 4#123456\n");
         assert_eq!(app.palette.get("bg0"), Rgb(0x12, 0x34, 0x56));
         // titles carry the numbers
-        press(&mut app, "5");
+        press(&mut app, " 5");
         let screen = render(&mut app, 200, 50);
         for t in [
             "¹Fonts",
@@ -1873,7 +1920,7 @@ mod tests {
         let mut app = test_app(store, Start::Named("One".into()));
         app.fonts.store.dir = dir.clone();
         app.fonts.open("Base").unwrap();
-        press(&mut app, "1"); // the font roles
+        press(&mut app, " 1"); // the font roles
         assert_eq!(app.side, Side::Fonts);
         app.fonts.set_installed(vec![
             crate::fonts::Installed {
@@ -1903,9 +1950,9 @@ mod tests {
         assert_eq!(app.fonts.preset.fonts[2].family, "C Mono");
         assert_eq!(app.fonts.preset.fonts[2].size, 11);
         // number keys: 2 opens the list, 1 goes back
-        press(&mut app, "2");
+        press(&mut app, " 2");
         assert_eq!(app.fonts.focus, crate::fonts::FontFocus::List);
-        press(&mut app, "1");
+        press(&mut app, " 1");
         // unsaved: opening another preset asks first
         press(&mut app, "oBase\n");
         assert!(matches!(
@@ -1926,7 +1973,7 @@ mod tests {
         assert_eq!(text, to_jq_string(&v));
         // the palette tab didn't change, and its keys still work after F1
         assert!(!app.dirty());
-        press(&mut app, "5");
+        press(&mut app, " 5");
         assert_eq!((app.side, app.focus), (Side::Colours, Focus::Square));
         assert!(app.picker_visible);
         // the Fonts tab draws at every size (no image support in tests)
@@ -1974,7 +2021,7 @@ mod tests {
         // <leader>sp saves the palette from anywhere
         press(&mut app, "#abcdef\n");
         assert!(app.dirty());
-        press(&mut app, "1"); // the fonts column
+        press(&mut app, " 1"); // the fonts column
         press(&mut app, " sp");
         assert!(!app.dirty(), "saved from the Fonts tab");
         assert_eq!(
@@ -1992,6 +2039,80 @@ mod tests {
             "{screen}"
         );
         assert!(screen.contains("Vim preset"));
+    }
+
+    #[test]
+    fn esc_discards_picker_changes_enter_keeps_them() {
+        let mut app = test_app(temp_store("discard"), Start::Named("One".into()));
+        let before = app.palette.clone();
+        // edit bg0 in the square, then Esc: everything as it was, nothing to undo
+        press(&mut app, "\nKK");
+        assert_ne!(app.palette, before);
+        assert_ne!(
+            app.palette.get("grey1"),
+            before.get("grey1"),
+            "derived keys followed"
+        );
+        press(&mut app, "\x1b");
+        assert_eq!(app.palette, before);
+        assert!(!app.dirty() && !app.picker_visible);
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, _)| m.contains("Discarded"))
+        );
+        press(&mut app, "u");
+        assert_eq!(app.palette, before, "the discarded steps aren't undoable");
+        // the same edit, then Enter: kept (and undoable)
+        press(&mut app, "\nKK\n");
+        assert_ne!(app.palette, before);
+        assert!(app.dirty() && app.focus == Focus::List);
+        let kept = app.palette.clone();
+        // the hex box: Esc discards whatever the session changed
+        press(&mut app, "\nJ#abcdef");
+        press(&mut app, "\x1b");
+        assert_eq!(app.palette, kept);
+        // leaving another way (to the list with <leader>4) keeps the change
+        press(&mut app, "\nJ 4");
+        assert_ne!(app.palette, kept);
+        press(&mut app, "\x1b");
+        assert_ne!(
+            app.palette, kept,
+            "Esc in the list doesn't undo a kept change"
+        );
+    }
+
+    #[test]
+    fn narrow_layout_drops_the_font_sample_and_preview_capture_is_magenta() {
+        let mut app = test_app(temp_store("narrow"), Start::Named("One".into()));
+        let wide = render(&mut app, 200, 50);
+        assert!(wide.contains("Sample"));
+        let narrow = render(&mut app, 137, 50);
+        assert!(
+            !narrow.contains("Sample"),
+            "no sample under the narrow layout"
+        );
+        press(&mut app, " 3");
+        assert_ne!(app.current_pane(), 3);
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, _)| m.contains("font sample"))
+        );
+        // while nvim has the keyboard, the preview frame is magenta
+        press(&mut app, " 6");
+        let mut t = Terminal::new(TestBackend::new(200, 50)).unwrap();
+        t.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = t.backend().buffer().clone();
+        let magenta = (0..200)
+            .flat_map(|x| (0..50).map(move |y| (x, y)))
+            .any(|(x, y)| {
+                buf[(x, y)].symbol() == "─" && buf[(x, y)].fg == ratatui::style::Color::Magenta
+            });
+        assert!(
+            magenta,
+            "preview frame drawn in magenta while capturing keys"
+        );
     }
 
     #[test]
@@ -2042,7 +2163,7 @@ mod tests {
             arrange(r(137, 20), Page::Main, true, true),
             Arrangement::TooSmall {
                 need_w: 98,
-                need_h: 36
+                need_h: 35
             }
         );
         assert_eq!(

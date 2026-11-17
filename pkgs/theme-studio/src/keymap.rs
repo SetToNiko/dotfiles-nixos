@@ -464,8 +464,8 @@ impl Action {
             Action::Panel(n) => format!("panel {n}"),
             Action::FocusNext => "next control".into(),
             Action::FocusPrev => "previous control".into(),
-            Action::Back => "back".into(),
-            Action::Confirm => "edit / use / open".into(),
+            Action::Back => "back (in the picker: discard the change)".into(),
+            Action::Confirm => "edit / use / open / keep".into(),
             Action::Up => "up".into(),
             Action::Down => "down".into(),
             Action::Left => "left / smaller / close".into(),
@@ -595,6 +595,8 @@ impl Keymap {
                 }
             }
         }
+        // digits, then letters, then named keys: easy to scan
+        out.sort_by(|a, b| (a.0.starts_with('<'), &a.0).cmp(&(b.0.starts_with('<'), &b.0)));
         out
     }
 
@@ -735,9 +737,9 @@ impl Keymap {
             (C::Global, A::PaneRight, &["<C-w>l"]),
             (C::Global, A::PaneUp, &["<C-w>k"]),
             (C::Global, A::PaneDown, &["<C-w>j"]),
-            (C::Global, A::Panel(5), &["5"]),
-            (C::Global, A::Panel(6), &["6"]),
-            (C::Global, A::Panel(7), &["7"]),
+            (C::Global, A::Panel(5), &["<leader>5"]),
+            (C::Global, A::Panel(6), &["<leader>6"]),
+            (C::Global, A::Panel(7), &["<leader>7"]),
             (C::Colours, A::TogglePicker, &["<leader>cp"]),
             (C::Fonts, A::ToggleSample, &["<leader>fs"]),
             (C::Global, A::PreviewCycle, &["<F12>"]),
@@ -750,10 +752,10 @@ impl Keymap {
             (C::Global, A::Apply, &["a"]),
             (C::Global, A::Open, &["o"]),
             (C::Global, A::New, &["n"]),
-            (C::Global, A::Panel(1), &["1"]),
-            (C::Global, A::Panel(2), &["2"]),
-            (C::Global, A::Panel(3), &["3"]),
-            (C::Global, A::Panel(4), &["4"]),
+            (C::Global, A::Panel(1), &["<leader>1"]),
+            (C::Global, A::Panel(2), &["<leader>2"]),
+            (C::Global, A::Panel(3), &["<leader>3"]),
+            (C::Global, A::Panel(4), &["<leader>4"]),
             (C::Colours, A::Undo, &["u"]),
             (C::Colours, A::Redo, &["<C-r>"]),
             (C::Colours, A::Pin, &["p"]),
@@ -774,6 +776,7 @@ impl Keymap {
             (C::ColourList, A::Bottom, &["G", "<End>"]),
             (C::ColourList, A::PageUp, &["<PageUp>"]),
             (C::ColourList, A::PageDown, &["<PageDown>"]),
+            (C::Picker, A::Confirm, &["<CR>"]),
             (C::Picker, A::Up, &["k", "<Up>"]),
             (C::Picker, A::Down, &["j", "<Down>"]),
             (C::Picker, A::Left, &["h", "<Left>"]),
@@ -904,7 +907,7 @@ mod tests {
             .into_iter()
             .map(|(k, _)| k)
             .collect();
-        assert_eq!(next, ["f", "s", "a"]);
+        assert_eq!(next, ["1", "2", "3", "4", "5", "6", "7", "a", "f", "s"]);
         assert_eq!(
             km.key_for(&roles, Action::SaveFonts).as_deref(),
             Some("<leader>sf")

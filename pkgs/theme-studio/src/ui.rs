@@ -77,6 +77,8 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool) -> Arrangemen
         return Arrangement::Page { body, status };
     }
     let wide = area.width >= FONTS_W + COLOURS_W + PREVIEW_MIN_W;
+    // the sample is too small to read under the narrow layout: left out there
+    let sample = sample && wide;
     let fonts_need = ROLES_H + FONT_LIST_MIN + if sample { SAMPLE_MIN } else { 0 };
     let colours_need = LIST_MIN + if picker { PICKER_MIN } else { 0 };
     let columns_need = fonts_need.max(colours_need);
@@ -160,6 +162,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_pending(f, app, area);
         }
         Arrangement::Main(l) => {
+            app.wide = l.wide;
             app.areas.fonts_column = l
                 .roles
                 .union(l.font_list)
@@ -596,17 +599,39 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
     if app.preview.mode == PreviewMode::Swatches {
         return draw_swatches(f, app, area);
     }
+    let key = |a: Action| {
+        app.keymap
+            .key_for(&[Context::Global], a)
+            .map(|k| friendly(&k))
+            .unwrap_or_default()
+    };
+    // While nvim or the shell has the keyboard the frame turns magenta (your
+    // palette's purple, as the terminal shows it): keys go there, not to the
+    // studio, until F12 hands them back.
+    let capture = Style::new().magenta();
     let title = match app.preview.focus {
         Some(id) => Line::from(vec![
-            " Preview: typing into ".into(),
-            Span::styled(format!("{id:?}"), Style::new().bold()),
-            "  F12 next window / back to the editor ".into(),
+            Span::styled(" Preview: typing into ", capture),
+            Span::styled(format!("{id:?}"), capture.bold()),
+            Span::styled(
+                format!(
+                    "  {} next window / back to the studio ",
+                    key(Action::PreviewCycle)
+                ),
+                capture,
+            ),
         ]),
-        None => {
-            Line::raw(" Preview  6 7, F12 or click: use a window   Y yazi   R rofi   V swatches ")
-        }
+        None => Line::raw(format!(
+            " Preview  {} / {}, {} or click: use a window   Y yazi   R rofi   V swatches ",
+            key(Action::Panel(6)),
+            key(Action::Panel(7)),
+            key(Action::PreviewCycle)
+        )),
     };
-    let block = focused_block(title, app.preview.focus.is_some());
+    let block = match app.preview.focus {
+        Some(_) => Block::bordered().title(title).border_style(capture.bold()),
+        None => focused_block(title, false),
+    };
     let inner = block.inner(area);
     f.render_widget(block, area);
     app.preview.draw_desktop(
@@ -981,7 +1006,16 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             rows.into_iter().filter_map(|(a, l)| hint(a, l)).collect()
         };
         let panels = match (hint(&[A::Panel(1)], ""), hint(&[A::Panel(7)], "")) {
-            (Some(a), Some(b)) => Some(format!("{}-{}panels", a.trim(), b)),
+            // "Space 1-7 panels" rather than "Space 1-Space 7 panels"
+            (Some(a), Some(b)) => {
+                let (a, b) = (a.trim(), b.trim());
+                let shared = a.len().saturating_sub(1);
+                Some(if a.len() == b.len() && a[..shared] == b[..shared] {
+                    format!("{a}-{} panels", &b[shared..])
+                } else {
+                    format!("{a}-{b} panels")
+                })
+            }
             _ => None,
         };
         let general: Vec<String> = [
