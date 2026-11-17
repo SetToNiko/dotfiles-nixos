@@ -71,6 +71,8 @@ pub struct DlPage {
     pub jobs: HashMap<String, (String, u64, u64)>,
     /// The installed-fonts list as last read (None: read it again).
     listed: Option<serde_json::Map<String, Value>>,
+    /// The preview pane (made on first use).
+    pub preview: Option<crate::fonts_preview::FontPreview>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
@@ -91,6 +93,7 @@ impl Default for DlPage {
             load_error: None,
             jobs: HashMap::new(),
             listed: None,
+            preview: None,
             tx,
             rx,
         }
@@ -236,6 +239,12 @@ impl App {
                     let family = job.0.clone();
                     self.info(format!("Downloading {family}: {pct}"));
                 }
+                Msg::Preview { id, result } => {
+                    if let Some(pv) = self.dl.preview.as_mut() {
+                        pv.fetching.remove(&id);
+                        pv.families.insert(id, result);
+                    }
+                }
                 Msg::Installed { id, result } => {
                     let family = self.dl.jobs.remove(&id).map_or(id, |j| j.0);
                     match result {
@@ -245,7 +254,13 @@ impl App {
                 }
             }
         }
-        changed
+        // the preview: fetch, draw, pick up a finished image
+        self.poll_preview() || changed
+    }
+
+    /// Where background work reports back.
+    pub fn dl_sender(&self) -> Sender<Msg> {
+        self.dl.tx.clone()
     }
 
     fn record_install(&mut self, name: &str, entry: Value) {
@@ -333,6 +348,10 @@ impl App {
                 Action::Confirm | Action::Back => self.dl.tabs_focused = false,
                 _ => {}
             }
+            return;
+        }
+        // the preview's keys (text, language, size, pages, fetch)
+        if self.preview_action(a) {
             return;
         }
         let n = self.dl_rows().len();

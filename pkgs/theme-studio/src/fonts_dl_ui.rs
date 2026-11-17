@@ -61,15 +61,85 @@ pub fn draw_downloads(f: &mut Frame, app: &mut App, area: Rect) {
         (t, b)
     };
     draw_tabs(f, app, tabs);
-    let (list, details) = if body.width >= 100 {
-        let [l, d] = Layout::horizontal([Constraint::Min(50), Constraint::Length(46)]).areas(body);
-        (l, d)
+    // wide: the list, then a column of details over the preview; narrow:
+    // all three stacked
+    let (list, details, preview) = if body.width >= 100 {
+        let [l, r] =
+            Layout::horizontal([Constraint::Min(44), Constraint::Percentage(55)]).areas(body);
+        let [d, p] = Layout::vertical([Constraint::Length(12), Constraint::Min(4)]).areas(r);
+        (l, d, p)
     } else {
-        let [l, d] = Layout::vertical([Constraint::Min(5), Constraint::Length(10)]).areas(body);
-        (l, d)
+        let [l, d, p] = Layout::vertical([
+            Constraint::Min(5),
+            Constraint::Length(9),
+            Constraint::Min(6),
+        ])
+        .areas(body);
+        (l, d, p)
     };
     draw_list(f, app, list);
     draw_details(f, app, details);
+    draw_preview(f, app, preview);
+}
+
+/// The highlighted font drawn with a sample text (fonts_preview.rs).
+fn draw_preview(f: &mut Frame, app: &mut App, area: Rect) {
+    use crate::samples::{KINDS, Kind, LANGS};
+    let selected = app.dl_selected();
+    let (title, kind) = match (&selected, app.dl.preview.as_ref()) {
+        (Some(e), Some(pv)) => {
+            let kind = pv.kind_for(e);
+            let label = KINDS
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map_or("", |(_, l)| *l);
+            let lang = if kind == Kind::Code {
+                format!(" ({})", LANGS[pv.lang].0)
+            } else {
+                String::new()
+            };
+            (
+                format!(" Preview · {label}{lang} · {}pt ", pv.size),
+                Some(kind),
+            )
+        }
+        _ => (" Preview ".to_string(), None),
+    };
+    let mut hints = String::from(" t text  +/- size ");
+    if kind == Some(Kind::Code) {
+        hints += " L language ";
+    }
+    if kind == Some(Kind::Prose) {
+        hints += " </> page ";
+    }
+    let block = Block::new()
+        .borders(Borders::LEFT | Borders::TOP)
+        .title(title)
+        .title_bottom(Line::styled(hints, Style::new().dark_gray()))
+        .border_style(Style::new().dark_gray());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if selected.is_none() {
+        let text = if app.dl.tab == DlTab::Installed {
+            " Installed: the main page's sample shows it."
+        } else {
+            ""
+        };
+        f.render_widget(Paragraph::new(text).dark_gray(), inner);
+        return;
+    }
+    if let Some(pv) = app.dl.preview.as_mut() {
+        pv.area = (inner.width, inner.height);
+    }
+    let note = app.preview_note();
+    match app.dl.preview.as_mut().and_then(|pv| pv.image.as_mut()) {
+        Some(img) => f.render_stateful_widget(
+            ratatui_image::StatefulImage::default().resize(ratatui_image::Resize::Crop(None)),
+            inner,
+            img,
+        ),
+        None => f.render_widget(Paragraph::new(format!(" {note}")).dark_gray(), inner),
+    }
 }
 
 fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) {

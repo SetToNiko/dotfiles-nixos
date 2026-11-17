@@ -3626,6 +3626,7 @@ mod tests {
             italic: false,
             variable: false,
             source,
+            subset: "latin".into(),
         };
         app.dl.catalogue = Some(Catalogue {
             google: vec![
@@ -3663,6 +3664,21 @@ mod tests {
         press(&mut app, "/mono\n");
         assert_eq!(app.dl_rows(), vec![DlRow::Entry(1)]);
         assert!(render(&mut app, 160, 45).contains("Install"));
+        // the preview: Roboto Mono shows code; t / L / + change it
+        let screen = render(&mut app, 160, 45);
+        assert!(screen.contains("Preview · code (Rust) · 12pt"), "{screen}");
+        press(&mut app, "L+");
+        assert!(render(&mut app, 160, 45).contains("Preview · code (Python) · 13pt"));
+        press(&mut app, "t");
+        assert!(render(&mut app, 160, 45).contains("Preview · icons"));
+        // a failed fetch says so
+        app.dl
+            .preview
+            .as_mut()
+            .unwrap()
+            .families
+            .insert("roboto-mono".into(), Err("offline".into()));
+        assert!(render(&mut app, 160, 45).contains("Couldn't fetch it: offline"));
         app.dl.search.clear();
         // something in the list counts as installed and can be removed
         let list = app.installed_list_path();

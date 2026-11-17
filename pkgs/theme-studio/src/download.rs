@@ -42,6 +42,8 @@ pub struct Entry {
     pub italic: bool,
     pub variable: bool,
     pub source: Source,
+    /// Fontsource's default subset ("latin"; the preview file's).
+    pub subset: String,
 }
 
 /// The two catalogues.
@@ -66,6 +68,11 @@ pub enum Msg {
     Installed {
         id: String,
         result: Result<(String, Value), String>,
+    },
+    /// A preview font is ready: the family name to draw it with.
+    Preview {
+        id: String,
+        result: Result<String, String>,
     },
 }
 
@@ -203,6 +210,9 @@ pub fn parse_fontsource(v: &Value) -> Vec<Entry> {
                 } else {
                     Source::Fontsource
                 },
+                subset: Some(s("defSubset"))
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| "latin".into()),
             })
         })
         .collect()
@@ -239,6 +249,7 @@ pub fn parse_nerd(v: &Value) -> (String, Vec<Entry>) {
                             size: x.get("size").and_then(Value::as_u64).unwrap_or(0),
                             asset: name,
                         },
+                        subset: String::new(),
                     })
                 })
                 .collect()
@@ -470,6 +481,108 @@ pub fn install(e: Entry, root: PathBuf, tx: Sender<Msg>) {
     });
 }
 
+// ----- previews ---------------------------------------------------------------------
+
+/// Fonts fetched only to preview them: `~/.cache/theme-studio/preview/<id>/`.
+pub fn preview_dir() -> PathBuf {
+    cache_dir().join("preview")
+}
+
+/// A fontconfig setup that adds the preview fonts to the system's, so they
+/// can be drawn without installing them.
+pub fn preview_fontconfig() -> PathBuf {
+    let path = cache_dir().join("preview-fonts.conf");
+    if !path.exists() {
+        let _ = std::fs::create_dir_all(cache_dir());
+        let _ = std::fs::write(
+            &path,
+            format!(
+                "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  \
+                 <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n  <dir>{}</dir>\n  \
+                 <cachedir>{}</cachedir>\n</fontconfig>\n",
+                preview_dir().display(),
+                cache_dir().join("fontconfig").display()
+            ),
+        );
+    }
+    path
+}
+
+/// The family name inside a font file (fc-scan).
+fn family_of(file: &Path) -> Option<String> {
+    let out = Command::new("fc-scan")
+        .args(["--format", "%{family[0]}"])
+        .arg(file)
+        .output()
+        .ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// The font file to read the family from: a Regular, not a Mono / Propo
+/// variant, when there's a choice.
+fn preview_file(dir: &Path) -> Option<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|f| f.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ttf" || x == "otf"))
+        .collect();
+    files.sort_by_key(|p| {
+        let n = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        (
+            n.contains("Mono-") || n.contains("Propo-"),
+            !n.contains("Regular"),
+            n.len(),
+        )
+    });
+    files.into_iter().next()
+}
+
+/// Fetches a font for its preview in the background (Google / Fontsource:
+/// one file of the regular weight; Nerd Fonts: the archive), unless cached.
+pub fn fetch_preview(e: Entry, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let dir = preview_dir().join(&e.id);
+        let result = (|| -> Result<String> {
+            if let Some(f) = preview_file(&dir) {
+                return family_of(&f).ok_or_else(|| anyhow!("no family name in {}", f.display()));
+            }
+            std::fs::create_dir_all(&dir)?;
+            match &e.source {
+                Source::Nerd { .. } => {
+                    install_nerd(&e, &dir, &tx)?;
+                }
+                _ => {
+                    // the regular weight, else the nearest
+                    let w = e
+                        .weights
+                        .iter()
+                        .min_by_key(|w| (**w as i64 - 400).abs())
+                        .copied()
+                        .unwrap_or(400);
+                    let url = format!(
+                        "https://cdn.jsdelivr.net/fontsource/fonts/{}@latest/{}-{w}-normal.ttf",
+                        e.id, e.subset
+                    );
+                    fetch(&url, &dir.join(format!("{}-{w}.ttf", e.id)), |_| {})?;
+                }
+            }
+            let f = preview_file(&dir).ok_or_else(|| anyhow!("no font file came with it"))?;
+            family_of(&f).ok_or_else(|| anyhow!("no family name in {}", f.display()))
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        let _ = tx.send(Msg::Preview {
+            id: e.id.clone(),
+            result: result.map_err(|e| format!("{e:#}")),
+        });
+    });
+}
+
 /// Removes a downloaded font's files and refreshes fontconfig's cache.
 pub fn remove_files(root: &Path, id: &str) -> Result<()> {
     let dir = root.join(id);
@@ -584,7 +697,7 @@ mod tests {
                 match rx.recv_timeout(Duration::from_secs(120)).unwrap() {
                     Msg::Progress { .. } => progress += 1,
                     Msg::Installed { result, .. } => break result,
-                    Msg::Catalogue(_) => {}
+                    Msg::Catalogue(_) | Msg::Preview { .. } => {}
                 }
             };
             let (name, entry) = result.unwrap();

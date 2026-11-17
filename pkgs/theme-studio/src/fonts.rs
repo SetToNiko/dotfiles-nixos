@@ -466,6 +466,10 @@ struct Job {
     bg: Rgb,
     dpi: u32,
     out: PathBuf,
+    /// A fontconfig setup to use (previews of fonts that aren't installed).
+    fontconfig: Option<PathBuf>,
+    /// Wrap lines at this many pixels.
+    width: Option<u32>,
 }
 
 /// Renders samples in the background (newest request wins).
@@ -476,10 +480,18 @@ pub struct SampleRenderer {
     pub last_markup: Option<String>,
     pub shown: u64,
     dir: PathBuf,
+    /// File names: <prefix>-0.png, <prefix>-1.png.
+    prefix: &'static str,
 }
 
 impl SampleRenderer {
     pub fn new(dir: &Path, dirty: Arc<AtomicBool>) -> SampleRenderer {
+        Self::named(dir, dirty, "sample")
+    }
+
+    /// A renderer whose images are named <prefix>-N.png (several can share
+    /// a folder).
+    pub fn named(dir: &Path, dirty: Arc<AtomicBool>, prefix: &'static str) -> SampleRenderer {
         let (tx, rx): (Sender<Job>, Receiver<Job>) = channel();
         let done = Arc::new(Mutex::new(None));
         let d = done.clone();
@@ -501,24 +513,42 @@ impl SampleRenderer {
             last_markup: None,
             shown: 0,
             dir: dir.to_path_buf(),
+            prefix,
         }
     }
 
     /// Asks for a new sample if the markup changed.
     pub fn request(&mut self, markup: String, bg: Rgb, dpi: u32) {
-        if self.last_markup.as_deref() == Some(markup.as_str()) {
+        self.request_with(markup, bg, dpi, None, None)
+    }
+
+    /// The same, with a fontconfig setup and a wrap width.
+    pub fn request_with(
+        &mut self,
+        markup: String,
+        bg: Rgb,
+        dpi: u32,
+        fontconfig: Option<PathBuf>,
+        width: Option<u32>,
+    ) {
+        let key = format!("{markup}{fontconfig:?}{width:?}");
+        if self.last_markup.as_deref() == Some(key.as_str()) {
             return;
         }
         self.next += 1;
-        let out = self.dir.join(format!("sample-{}.png", self.next % 2));
+        let out = self
+            .dir
+            .join(format!("{}-{}.png", self.prefix, self.next % 2));
         let _ = self.tx.send(Job {
             id: self.next,
-            markup: markup.clone(),
+            markup,
             bg,
             dpi,
             out,
+            fontconfig,
+            width,
         });
-        self.last_markup = Some(markup);
+        self.last_markup = Some(key);
     }
 
     /// A finished sample newer than the one shown.
@@ -540,13 +570,20 @@ impl SampleRenderer {
 fn render_sample(job: &Job) -> std::result::Result<PathBuf, String> {
     let markup_file = job.out.with_extension("markup");
     std::fs::write(&markup_file, &job.markup).map_err(|e| e.to_string())?;
-    let out = Command::new("magick")
-        .args([
-            "-density",
-            &job.dpi.to_string(),
-            "-background",
-            &job.bg.hex(),
-        ])
+    let mut cmd = Command::new("magick");
+    if let Some(fc) = &job.fontconfig {
+        cmd.env("FONTCONFIG_FILE", fc);
+    }
+    cmd.args([
+        "-density",
+        &job.dpi.to_string(),
+        "-background",
+        &job.bg.hex(),
+    ]);
+    if let Some(w) = job.width {
+        cmd.args(["-size", &format!("{w}x")]);
+    }
+    let out = cmd
         .arg(format!("pango:@{}", markup_file.display()))
         .args(["-bordercolor", &job.bg.hex(), "-border", "12"])
         .arg(&job.out)
@@ -1099,6 +1136,8 @@ mod tests {
             bg: p.get("bg0"),
             dpi: 96,
             out: dir.join("s.png"),
+            fontconfig: None,
+            width: None,
         };
         let path = render_sample(&job).unwrap();
         let img = image::open(&path).unwrap();

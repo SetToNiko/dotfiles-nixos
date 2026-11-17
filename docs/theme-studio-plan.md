@@ -844,6 +844,9 @@ move to Phase 8.)
   - **README** for any font: a Markdown-style document (headings, lists, a
     code block, a table).
 - **Size:** `+` / `-` change the preview size.
+- **Keys:** `t` the next text, `L` the next language, `<` / `>` pages of
+  prose, `p` fetches a Nerd Font. Code and icons are cut at the pane's
+  edge like a terminal; prose and the README wrap.
 
 ### 5. Font tournament (after codingfont.com)
 
@@ -887,7 +890,7 @@ move to Phase 8.)
 1. ✅ Themes: the data, migration, the studio's titles and Save / Open, the
    scripts and rofi.
 2. ✅ Role picking with filters and applying at once; filling from a family.
-3. Preview fetching and rendering, the texts, the preview pane.
+3. ✅ Preview fetching and rendering, the texts, the preview pane.
 4. The tournament.
 
 ## Phase 8: polish
