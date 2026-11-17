@@ -686,7 +686,8 @@ Asked for after phase 5b; the decisions are settled.
   - They stay pending while you move between pages; a ● on the Settings
     tab shows it.
   - Quitting asks save / discard / cancel, as palettes do.
-- **Discard:** a key and button put the page back as last saved.
+- **Discard:** `D` (the discard-changes action) or the button puts the page
+  back as last saved.
 - **Not affected:** the History tab's restore and naming act at once
   (they ask first), and `<leader>u` stays immediate.
 
@@ -719,9 +720,9 @@ Asked for after phase 5b; the decisions are settled.
 3. ✅ Derived-colour highlights in the Palette.
 3a. ✅ Their own configurable look; Behaviour tab groups; single/double
    underlines only; in-page tabs position and keyboard focus.
-4. Settings pending changes: the Save / Discard buttons, the ● on the tab,
+4. ✅ Settings pending changes: the Save / Discard buttons, the ● on the tab,
    and the quit prompt.
-5. The preset browser with its difference view, delete and new-from.
+5. ✅ The preset browser with its difference view, delete and new-from.
 
 ## Phase 6: downloading fonts
 

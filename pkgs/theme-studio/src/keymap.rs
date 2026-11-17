@@ -164,11 +164,13 @@ impl Key {
     }
 }
 
-/// Display a sequence; the leader is shown as `<leader>`.
+/// Display a sequence; a leading leader key is shown as `<leader>` (later
+/// in a sequence it's just that key: Emacs's C-x C-c, with C-c the leader).
 pub fn display_seq(keys: &[Key], leader: Key) -> String {
     keys.iter()
-        .map(|k| {
-            if *k == leader {
+        .enumerate()
+        .map(|(i, k)| {
+            if i == 0 && *k == leader {
                 "<leader>".to_string()
             } else {
                 k.display()
@@ -1511,5 +1513,19 @@ mod preset_tests {
             vec![ev(KeyCode::Char('A'), KeyModifiers::SHIFT)],
             Key::parse_seq("A", l).unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod leader_display_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_leading_leader_shows_as_leader() {
+        let cc = Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let k = |s| Key::parse_seq(s, cc).unwrap();
+        assert_eq!(display_seq(&k("<C-x><C-c>"), cc), "<C-x><C-c>");
+        assert_eq!(display_seq(&k("<leader><C-c>"), cc), "<leader><C-c>");
+        assert_eq!(display_seq(&k("<leader>sp"), cc), "<leader>sp");
     }
 }

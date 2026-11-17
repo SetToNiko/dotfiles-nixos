@@ -59,6 +59,8 @@ pub enum Capture {
 pub enum Naming {
     /// Save the active keymap as a new preset.
     Preset,
+    /// A new preset, a copy of the named one (the preset list).
+    PresetFrom(String),
     /// Save a file's current state as a named version.
     Version(&'static str),
     /// Keys typed as text (Vim notation).
@@ -105,6 +107,9 @@ pub struct SettingsPage {
     pub reloaded: bool,
     /// Keymaps tab: browsing presets, with this one highlighted.
     pub browse: Option<usize>,
+    pub browse_scroll: usize,
+    /// The preset list's difference shows every action.
+    pub browse_all: bool,
     /// The difference view shows everything, not just what differs.
     pub show_all: bool,
     pub diff_scroll: usize,
@@ -145,6 +150,8 @@ impl Default for SettingsPage {
             draft: None,
             reloaded: false,
             browse: None,
+            browse_scroll: 0,
+            browse_all: false,
             show_all: false,
             diff_scroll: 0,
             versions: None,
@@ -281,7 +288,7 @@ impl App {
     }
 
     /// Copies the active keymap into its preset (in the draft: Save writes).
-    fn save_keymaps(&mut self) {
+    pub(crate) fn sync_preset(&mut self) {
         let active = self.keymap.name.clone();
         if let Some(p) = self.presets.iter_mut().find(|p| p.name == active) {
             *p = self.keymap.clone();
@@ -350,6 +357,9 @@ impl App {
     /// like Enter.
     pub fn settings_click(&mut self, t: crate::hit::Target) {
         use crate::hit::Target as T;
+        if let T::PresetRow(i) = t {
+            return self.with_draft(|app| app.preset_click(i));
+        }
         let p = &mut self.settings_page;
         if !matches!(t, T::SettingsTab(_)) {
             p.tabs_focused = false;
@@ -389,6 +399,15 @@ impl App {
     /// The wheel over a list moves its selection; over the preview, scrolls.
     pub fn settings_scroll(&mut self, t: crate::hit::Target, d: i32) {
         use crate::hit::Target as T;
+        if t == T::SettingsDiff && self.settings_page.browse.is_some() {
+            let p = &mut self.settings_page;
+            p.browse_scroll = (p.browse_scroll as i32 + d * 3).max(0) as usize;
+            return;
+        }
+        if let T::PresetRow(_) = t {
+            return self
+                .with_draft(|app| app.run_browse(if d > 0 { Action::Down } else { Action::Up }));
+        }
         if t == T::SettingsDiff {
             let p = &mut self.settings_page;
             p.diff_scroll = (p.diff_scroll as i32 + d * 3).max(0) as usize;
@@ -432,7 +451,11 @@ impl App {
             // the preset's Save key saves the page; Discard drops the changes
             Action::Save => return self.settings_save(),
             Action::Discard => return self.settings_discard(),
-            // Esc leaves the page
+            // Esc closes the preset list first, then leaves the page
+            Action::Back if self.settings_page.browse.is_some() => {
+                self.settings_page.browse = None;
+                return;
+            }
             Action::Back => {
                 self.page = crate::app::Page::Main;
                 return;
@@ -514,19 +537,10 @@ impl App {
         true
     }
 
-    fn switch_preset(&mut self, d: i32) {
-        let i = self
-            .presets
-            .iter()
-            .position(|p| p.name == self.keymap.name)
-            .unwrap_or(0);
-        let next = self.presets[wrap(i, d, self.presets.len())].clone();
-        self.keymap = next;
-        self.save_keymaps();
-        self.info(format!("Keymap preset: {}", self.keymap.name));
-    }
-
     fn run_keymaps_tab(&mut self, a: Action) {
+        if self.settings_page.browse.is_some() {
+            return self.run_browse(a);
+        }
         let rows = self.keymap_rows();
         if Self::move_sel(&mut self.settings_page.km_sel, rows.len(), a) {
             return;
@@ -534,8 +548,8 @@ impl App {
         let row = rows.get(self.settings_page.km_sel).copied();
         let builtin = Keymap::builtin().iter().any(|b| b.name == self.keymap.name);
         match (row, a) {
-            (Some(KmRow::Preset), Action::Left) => self.switch_preset(-1),
-            (Some(KmRow::Preset), Action::Right | Action::Confirm) => self.switch_preset(1),
+            // the preset button opens the preset list
+            (Some(KmRow::Preset), Action::Right | Action::Confirm) => self.open_browse(),
             (_, Action::SaveNamed) => {
                 self.prompt("Save the keymap as a new preset", Naming::Preset, "")
             }
@@ -545,13 +559,6 @@ impl App {
             ),
             (_, Action::ResetPreset) => {
                 self.info("Only shipped presets can be reset; this one is yours")
-            }
-            (Some(KmRow::Preset), Action::Delete) if !builtin => self.ask(
-                format!("Delete the preset \"{}\"?", self.keymap.name),
-                Deferred::DeletePreset(self.keymap.name.clone()),
-            ),
-            (Some(KmRow::Preset), Action::Delete) => {
-                self.info("Shipped presets can't be deleted (R resets them)")
             }
             (Some(KmRow::Binding(ctx, action)), Action::Confirm | Action::Right) => {
                 self.overlay = Overlay::Capture {
@@ -595,7 +602,7 @@ impl App {
             }
             (Some(KmRow::Binding(ctx, action)), Action::Delete) => {
                 self.keymap.set_keys(ctx, action, Vec::new());
-                self.save_keymaps();
+                self.sync_preset();
                 self.info(format!(
                     "\"{}\" has no keys now ({})",
                     action.describe(),
@@ -619,7 +626,7 @@ impl App {
             .collect();
         all.extend(keys);
         self.keymap.set_keys(ctx, action, all);
-        self.save_keymaps();
+        self.sync_preset();
         if clashes.is_empty() {
             self.info(format!("New keys for \"{}\" (unsaved)", action.describe()));
         } else {
@@ -784,6 +791,7 @@ impl App {
             return;
         }
         match purpose {
+            Naming::PresetFrom(from) => self.new_preset_from(&from, text),
             Naming::Preset => {
                 if self.presets.iter().any(|p| p.name == text) {
                     return self.error(format!("There's already a preset \"{text}\""));
@@ -791,7 +799,7 @@ impl App {
                 let mut km = self.keymap.clone();
                 km.name = text.clone();
                 self.keymap = km;
-                self.save_keymaps();
+                self.sync_preset();
                 self.info(format!("New preset \"{text}\", now active (unsaved)"));
             }
             Naming::Version(file) => {
@@ -845,24 +853,8 @@ impl App {
                     }
                 }
             }
-            Deferred::DeletePreset(name) => {
-                self.presets.retain(|p| p.name != name);
-                self.keymap = self
-                    .presets
-                    .iter()
-                    .find(|p| p.name == "Vim")
-                    .cloned()
-                    .unwrap_or_else(Keymap::vim);
-                self.save_keymaps();
-                self.info(format!("Deleted \"{name}\"; Vim is active"));
-            }
-            Deferred::ResetPreset(name) => {
-                if let Some(b) = Keymap::builtin().into_iter().find(|b| b.name == name) {
-                    self.keymap = b;
-                    self.save_keymaps();
-                    self.info(format!("\"{name}\" is back to the shipped keys"));
-                }
-            }
+            Deferred::DeletePreset(name) => self.delete_preset(&name),
+            Deferred::ResetPreset(name) => self.reset_preset(&name),
         }
     }
 
@@ -895,7 +887,7 @@ impl App {
                 Capture::Leader => {
                     self.overlay = Overlay::None;
                     self.keymap = self.keymap.with_leader(key);
-                    self.save_keymaps();
+                    self.sync_preset();
                     self.info(format!("Leader is now {}", key.display()));
                 }
                 _ => {

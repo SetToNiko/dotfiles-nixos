@@ -3208,4 +3208,102 @@ mod tests {
         assert_eq!(app.palette.get("bg_diff_red"), Rgb(1, 1, 1), "pinned stays");
         std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
     }
+
+    #[test]
+    fn preset_browser_previews_loads_creates_and_deletes() {
+        use crate::hit::Target as T;
+        let store = temp_store("presets");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        app.page = Page::Settings;
+        let screen = render(&mut app, 160, 45);
+        assert!(screen.contains("[ Vim ▾ ]"), "{screen}");
+        // Enter on the preset button opens the list, on the active preset
+        app.settings_page.km_sel = 0;
+        press(&mut app, "\n");
+        assert_eq!(app.settings_page.browse, Some(0));
+        assert!(render(&mut app, 160, 45).contains("Vim (the current keymap)"));
+        // j highlights Helix: the left side shows what would change
+        press(&mut app, "j");
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Vim → Helix:") && screen.contains("differ"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("redo") && !screen.contains("main page"),
+            "only differences:\n{screen}"
+        );
+        press(&mut app, "A");
+        assert!(
+            render(&mut app, 160, 45).contains("main page"),
+            "everything"
+        );
+        // n makes a new preset from the highlighted one
+        press(&mut app, "nMy Helix\n");
+        let names = |app: &mut App| {
+            app.show_draft(|a| a.presets.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
+        };
+        assert!(names(&mut app).contains(&"My Helix".to_string()));
+        let mine = names(&mut app)
+            .iter()
+            .position(|n| n == "My Helix")
+            .unwrap();
+        assert_eq!(app.settings_page.browse, Some(mine));
+        // Enter loads it (unsaved); s saves
+        press(&mut app, "\n");
+        assert_eq!(app.settings_page.browse, None);
+        assert_eq!(app.show_draft(|a| a.keymap.name.clone()), "My Helix");
+        assert_eq!(app.keymap.name, "Vim", "not live yet");
+        press(&mut app, "s");
+        assert_eq!(app.keymap.name, "My Helix");
+        let saved = crate::config::load(&dir.join("studio-config"), false);
+        assert_eq!(saved.keymap.name, "My Helix");
+        // shipped presets can't be deleted; yours can (asks first)
+        app.settings_page.km_sel = 0;
+        press(&mut app, "\n");
+        assert_eq!(
+            app.settings_page.browse,
+            Some(mine),
+            "opens on the active one"
+        );
+        press(&mut app, "ggd"); // Helix keys are live now: gg, ge
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|(m, _)| m.contains("can't be deleted"))
+        );
+        press(&mut app, "ge");
+        assert_eq!(app.settings_page.browse, Some(mine));
+        press(&mut app, "dy");
+        assert!(!names(&mut app).contains(&"My Helix".to_string()));
+        assert_eq!(
+            app.show_draft(|a| a.keymap.name.clone()),
+            "Vim",
+            "the active one went: Vim"
+        );
+        press(&mut app, "s");
+        assert!(
+            !crate::config::load(&dir.join("studio-config"), false)
+                .presets
+                .iter()
+                .any(|p| p.name == "My Helix")
+        );
+        // the mouse: a click highlights, a second loads
+        render(&mut app, 160, 45);
+        click_on(&mut app, T::PresetRow(2));
+        assert_eq!(app.settings_page.browse, Some(2));
+        render(&mut app, 160, 45);
+        click_on(&mut app, T::PresetRow(2));
+        assert_eq!(app.show_draft(|a| a.keymap.name.clone()), "Emacs");
+        press(&mut app, "D");
+        // Esc closes the list first, then leaves the page
+        app.settings_page.km_sel = 0;
+        press(&mut app, "\n\x1b");
+        assert_eq!((app.settings_page.browse, app.page), (None, Page::Settings));
+        press(&mut app, "\x1b");
+        assert_eq!(app.page, Page::Main);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

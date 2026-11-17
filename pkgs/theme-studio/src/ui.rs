@@ -1213,6 +1213,14 @@ fn draw_status(f: &mut Frame, app: &mut App, area: Rect) {
         } else if app.page == Page::Settings {
             use crate::settings::Tab;
             let rows: Vec<(&[Action], &str)> = match app.settings_page.tab {
+                Tab::Keymaps if app.settings_page.browse.is_some() => vec![
+                    (&[A::Down, A::Up], "presets"),
+                    (&[A::Confirm], "load"),
+                    (&[A::SaveNamed], "new from it"),
+                    (&[A::Delete], "delete"),
+                    (&[A::ToggleAll], "everything"),
+                    (&[A::Back], "back"),
+                ],
                 Tab::Keymaps => vec![
                     (&[A::Down, A::Up], "move"),
                     (&[A::Confirm], "rebind"),

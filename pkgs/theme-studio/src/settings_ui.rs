@@ -131,6 +131,24 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         (area, None)
     };
+    // the preset list: the difference on the left, the list on the right
+    // (stacked when narrow)
+    if app.settings_page.browse.is_some() {
+        let (diff, presets) = match info {
+            Some(i) => (list, i),
+            None => {
+                let h = app.presets.len() as u16 + 10;
+                let [p, _, d] = Layout::vertical([
+                    Constraint::Length(h),
+                    Constraint::Length(1),
+                    Constraint::Min(3),
+                ])
+                .areas(area);
+                (d, p)
+            }
+        };
+        return crate::presets::draw_browse(f, app, diff, presets);
+    }
     let rows = app.keymap_rows();
     let n = rows.len();
     app.settings_page.km_sel = app.settings_page.km_sel.min(n.saturating_sub(1));
@@ -161,7 +179,7 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
                 Line::from(vec![
                     Span::styled(" Preset  ", Style::new().bold()),
                     Span::styled(
-                        format!("‹ {} ›", app.keymap.name),
+                        format!("[ {} ▾ ]", app.keymap.name),
                         Style::new().yellow().bold(),
                     ),
                     Span::styled(
@@ -221,10 +239,10 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
     match rows.get(sel) {
         Some(KmRow::Preset) => {
             lines.push(Line::styled("Keymap preset", Style::new().bold()));
-            lines.push(Line::raw("←/→ or Enter switches preset."));
-            lines.push(Line::raw("n  save as a new preset"));
-            lines.push(Line::raw("R  reset a shipped preset"));
-            lines.push(Line::raw("d  delete one of yours"));
+            lines.push(Line::raw("Enter or a click opens the list of"));
+            lines.push(Line::raw("presets: see what each would change,"));
+            lines.push(Line::raw("load one, make a new one from it,"));
+            lines.push(Line::raw("delete or reset one."));
         }
         Some(KmRow::Binding(ctx, action)) => {
             lines.push(Line::styled(action.describe(), Style::new().bold()));
