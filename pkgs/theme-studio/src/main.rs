@@ -6,6 +6,7 @@ mod desktop;
 mod font_tree;
 mod fonts;
 mod fonts_ui;
+mod keymap;
 mod palette;
 mod preview;
 mod store;

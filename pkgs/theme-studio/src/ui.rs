@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::{App, Focus, Overlay, Tab, open_matches};
 use crate::color::{self, Rgb};
+use crate::keymap::{Action, Context};
 use crate::palette::{self, GROUPS, TEXT_KEYS};
 use crate::preview::Mode as PreviewMode;
 
@@ -110,6 +111,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             }
             draw_status(f, app, status);
             draw_overlay(f, app, area);
+            draw_pending(f, app, area);
         }
     }
 }
@@ -763,39 +765,103 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             },
         ));
     } else {
-        let context: &[&str] = if fonts {
-            match app.fonts.focus {
-                crate::fonts::FontFocus::Slots => &["j/k role", "h/l size", "Enter pick font"],
-                crate::fonts::FontFocus::List => &[
-                    "j/k browse",
-                    "l/h open/close",
-                    "Enter use",
-                    "/ search",
-                    "m p n M P x b c filters",
-                    "Esc back",
-                ],
-                crate::fonts::FontFocus::Search => &["type to search", "Enter/Esc done"],
-            }
+        use Action as A;
+        let hint = |actions: &[Action], label: &str| -> Option<String> {
+            let ctx = app.contexts();
+            let keys: Vec<String> = actions
+                .iter()
+                .filter_map(|a| app.keymap.key_for(&ctx, *a))
+                .collect();
+            let keys: Vec<String> = keys.iter().map(|k| friendly(k)).collect();
+            (!keys.is_empty()).then(|| format!("{} {label}", keys.join("/")))
+        };
+        let chips: Vec<Action> = crate::fonts::CHIPS
+            .iter()
+            .map(|(c, _)| A::Filter(*c))
+            .collect();
+        let context: Vec<String> = if fonts && app.fonts.focus == crate::fonts::FontFocus::Search {
+            vec!["type to search".into(), "Enter/Esc done".into()]
         } else if app.preview.focus.is_some() {
-            &[
-                "keys go to the preview window (Ctrl+C too)",
-                "F12 next window / back",
+            let out = app
+                .keymap
+                .key_for(&[Context::Global], A::PreviewCycle)
+                .unwrap_or_default();
+            vec![
+                "keys go to the preview window (Ctrl+C too)".into(),
+                format!("{} next window / back", friendly(&out)),
+            ]
+        } else if !fonts && app.focus == Focus::Hex {
+            vec![
+                "type #rrggbb".into(),
+                "Enter set".into(),
+                "Esc cancel".into(),
             ]
         } else {
-            match app.focus {
-                Focus::List => &["j/k move", "Enter edit", "p pin", "c copy", "# hex"],
-                Focus::Square => &["hjkl saturation/value", "HJKL faster", "Esc list"],
-                Focus::Hue => &["j/k hue", "J/K faster", "Esc list"],
-                Focus::SliderH | Focus::SliderS | Focus::SliderL => {
-                    &["h/l adjust", "H/L faster", "j/k next slider"]
+            let rows: Vec<(&[Action], &str)> = if fonts {
+                match app.fonts.focus {
+                    crate::fonts::FontFocus::Slots => {
+                        vec![
+                            (&[A::Down, A::Up], "role"),
+                            (&[A::Left, A::Right], "size"),
+                            (&[A::PickFont], "pick font"),
+                        ]
+                    }
+                    _ => vec![
+                        (&[A::Down, A::Up], "browse"),
+                        (&[A::Right, A::Left], "open/close"),
+                        (&[A::Confirm], "use"),
+                        (&[A::Search], "search"),
+                        (&chips, "filters"),
+                        (&[A::Back], "back"),
+                    ],
                 }
-                Focus::Hex => &["type #rrggbb", "Enter set", "Esc cancel"],
-            }
+            } else {
+                match app.focus {
+                    Focus::List => vec![
+                        (&[A::Down, A::Up], "move"),
+                        (&[A::Confirm], "edit"),
+                        (&[A::Pin], "pin"),
+                        (&[A::CopyFrom], "copy"),
+                        (&[A::HexEntry], "hex"),
+                    ],
+                    Focus::Square => vec![
+                        (&[A::Left, A::Down, A::Up, A::Right], "saturation/value"),
+                        (&[A::LeftBig, A::DownBig, A::UpBig, A::RightBig], "faster"),
+                        (&[A::Back], "list"),
+                    ],
+                    Focus::Hue => vec![
+                        (&[A::Down, A::Up], "hue"),
+                        (&[A::DownBig, A::UpBig], "faster"),
+                        (&[A::Back], "list"),
+                    ],
+                    _ => vec![
+                        (&[A::Left, A::Right], "adjust"),
+                        (&[A::LeftBig, A::RightBig], "faster"),
+                        (&[A::Down, A::Up], "next slider"),
+                    ],
+                }
+            };
+            rows.into_iter().filter_map(|(a, l)| hint(a, l)).collect()
         };
+        let panels = match (hint(&[A::Panel(1)], ""), hint(&[A::Panel(4)], "")) {
+            (Some(a), Some(b)) => Some(format!("{}-{}panels", a.trim(), b)),
+            _ => None,
+        };
+        let general: Vec<String> = [
+            hint(&[A::FocusNext], "next"),
+            panels,
+            hint(&[A::Save], "save"),
+            hint(&[A::Apply], "apply"),
+            hint(&[A::Open], "open"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let last = hint(&[A::Help], "keys").unwrap_or_default();
         let used: usize = spans.iter().map(|s| s.width()).sum();
         let room = (area.width as usize).saturating_sub(used);
         spans.push(Span::styled(
-            fit_hints(context, room),
+            fit_hints(&context, &general, &last, room),
             Style::new().dark_gray(),
         ));
     }
@@ -803,14 +869,12 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// As many hints as fit in `room` columns: the ones for the current control
-/// first, then the general ones, and "? keys" always last (it lists the rest).
-fn fit_hints(context: &[&str], room: usize) -> String {
-    const GENERAL: [&str; 5] = ["Tab next", "1-4 panels", "s save", "a apply", "o open"];
-    const LAST: &str = "? keys";
+/// first, then the general ones, and `last` (the help key) always at the end.
+fn fit_hints(context: &[String], general: &[String], last: &str, room: usize) -> String {
     let mut out = String::from(" ");
-    let budget = room.saturating_sub(LAST.len() + 3);
+    let budget = room.saturating_sub(last.chars().count() + 3);
     let mut general_started = false;
-    for (i, hint) in context.iter().chain(GENERAL.iter()).enumerate() {
+    for (i, hint) in context.iter().chain(general.iter()).enumerate() {
         let sep = if i == 0 {
             ""
         } else if i == context.len() && !general_started {
@@ -826,10 +890,10 @@ fn fit_hints(context: &[&str], room: usize) -> String {
         out.push_str(hint);
     }
     if out.trim().is_empty() {
-        out = format!(" {LAST} ");
+        out = format!(" {last} ");
     } else {
         out.push_str("  ");
-        out.push_str(LAST);
+        out.push_str(last);
         out.push(' ');
     }
     if out.chars().count() > room {
@@ -837,6 +901,39 @@ fn fit_hints(context: &[&str], room: usize) -> String {
     } else {
         out
     }
+}
+
+/// Key text for hints: `<CR>` → `Enter`, `<leader>sp` → `Space s p`,
+/// `<C-r>` → `C-r`; plain characters stay as they are.
+fn friendly(seq: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut rest = seq;
+    while !rest.is_empty() {
+        if rest.starts_with('<')
+            && let Some(end) = rest.find('>')
+            && end > 1
+        {
+            let name = &rest[1..end];
+            parts.push(
+                match name {
+                    "CR" => "Enter",
+                    "leader" => "Space",
+                    "Up" => "↑",
+                    "Down" => "↓",
+                    "Left" => "←",
+                    "Right" => "→",
+                    other => other,
+                }
+                .to_string(),
+            );
+            rest = &rest[end + 1..];
+        } else {
+            let c = rest.chars().next().unwrap();
+            parts.push(c.to_string());
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    parts.join(if parts.len() > 1 { " " } else { "" })
 }
 
 // ----- pop-ups ------------------------------------------------------------
@@ -860,6 +957,38 @@ fn popup(f: &mut Frame, area: Rect, title: &str, lines: Vec<Line>) {
     f.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+/// While a sequence is half typed (e.g. after the leader): what can follow.
+fn draw_pending(f: &mut Frame, app: &App, area: Rect) {
+    if app.pending_keys.is_empty() {
+        return;
+    }
+    let ctx = app.contexts();
+    let next = app.keymap.continuations(&ctx, &app.pending_keys);
+    let typed = crate::keymap::display_seq(&app.pending_keys, app.keymap.leader);
+    let mut lines: Vec<Line> = next
+        .iter()
+        .map(|(k, what)| {
+            Line::from(vec![
+                Span::styled(format!(" {k:<6}"), Style::new().yellow()),
+                Span::raw(what.clone()),
+            ])
+        })
+        .collect();
+    lines.push(Line::styled(" Esc cancels", Style::new().dark_gray()));
+    let w = lines.iter().map(|l| l.width()).max().unwrap_or(10) as u16 + 4;
+    let h = lines.len() as u16 + 2;
+    let r = Rect {
+        x: area.x + area.width.saturating_sub(w + 1),
+        y: area.y + area.height.saturating_sub(h + 1),
+        width: w.min(area.width),
+        height: h.min(area.height),
+    };
+    f.render_widget(Clear, r);
+    let block = Block::bordered()
+        .title(format!(" {typed} "))
+        .border_style(Style::new().yellow());
+    f.render_widget(Paragraph::new(lines).block(block), r);
+}
 fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
     match &app.overlay {
         Overlay::None | Overlay::CopyFrom { .. } => {
@@ -878,59 +1007,62 @@ fn draw_overlay(f: &mut Frame, app: &App, area: Rect) {
             }
         }
         Overlay::Help => {
-            let rows = [
-                ("Tab / Shift+Tab", "next / previous control"),
-                ("Esc", "back to the key list"),
-                ("j k  ↑ ↓", "move in the list; adjust hue"),
-                ("h j k l  (H J K L)", "move in the colour square (faster)"),
-                ("h l  (H L)", "adjust a slider (faster)"),
-                ("#", "type a hex colour"),
-                ("Ctrl+Shift+V", "paste a hex colour into the key"),
-                ("p", "pin a derived key / let it follow again"),
-                ("c", "copy another key's colour into this one"),
-                ("y", "copy this colour's hex to the clipboard"),
-                ("u  Ctrl+r", "undo  redo"),
-                ("s  S", "save  save as"),
-                ("a", "save and apply as the system theme"),
-                ("o  n", "open a palette  new palette"),
-                (
-                    "F12 or click",
-                    "type into the preview windows; F12 again: next, then back",
+            // Generated from the keymap, so it shows what the keys really are.
+            let mut lines: Vec<Line> = Vec::new();
+            for ctx in Context::ALL {
+                // one row per action, all its keys together
+                let mut rows: Vec<(Action, Vec<String>)> = Vec::new();
+                for b in app.keymap.bindings.iter().filter(|b| b.context == ctx) {
+                    let k = crate::keymap::display_seq(&b.keys, app.keymap.leader);
+                    match rows.iter_mut().find(|(a, _)| *a == b.action) {
+                        Some((_, keys)) => keys.push(k),
+                        None => rows.push((b.action, vec![k])),
+                    }
+                }
+                if rows.is_empty() {
+                    continue;
+                }
+                lines.push(Line::styled(
+                    format!(" {}", ctx.title()),
+                    Style::new().bold(),
+                ));
+                for (a, keys) in rows {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("   {:<20}", keys.join(" ")), Style::new().yellow()),
+                        Span::raw(a.describe()),
+                    ]));
+                }
+            }
+            lines.push(Line::styled(
+                format!(
+                    " Leader: {}   Text fields (hex, search, names) take keys as typing.   Any key closes.",
+                    crate::keymap::display_seq(&[app.keymap.leader], crate::keymap::Key::new(ratatui::crossterm::event::KeyCode::Null, ratatui::crossterm::event::KeyModifiers::NONE))
                 ),
-                ("Y  R  V", "preview: yazi window, rofi menu, swatches view"),
-                (
-                    "1 2 3 4",
-                    "jump to a panel: key list, colour, nvim, shell/yazi (Fonts tab: 1 roles, 2 font list)",
-                ),
-                ("F1  F2", "Colours tab / Fonts tab"),
-                (
-                    "Fonts tab",
-                    "roles: j/k, h/l size (H/L by 4), Enter opens the list",
-                ),
-                (
-                    "Font list",
-                    "l/h open/close a group, Enter use, / search; filters m mono p propo n NF M NF Mono P NF Propo x no NF b bitmap c CJK·emoji·math; mouse works too",
-                ),
-                ("q", "quit"),
-                (
-                    "mouse",
-                    "click or drag in the list, square, hue strip, sliders",
-                ),
-            ];
-            let lines = rows
-                .iter()
-                .map(|(k, d)| {
-                    Line::from(vec![
-                        Span::styled(format!(" {k:<20}"), Style::new().yellow()),
-                        Span::raw(*d),
-                    ])
-                })
-                .chain([
-                    Line::raw(""),
-                    Line::styled(" any key to close", Style::new().dark_gray()),
-                ])
-                .collect();
-            popup(f, centered(area, 64, rows.len() as u16 + 4), "Keys", lines);
+                Style::new().dark_gray(),
+            ));
+            // two columns when it doesn't fit in one
+            let r = centered(
+                area,
+                area.width.saturating_sub(4).min(150),
+                area.height.saturating_sub(2),
+            );
+            f.render_widget(Clear, r);
+            let block = Block::bordered()
+                .title(format!(" Keys: {} preset ", app.keymap.name))
+                .border_style(Style::new().yellow());
+            let inner = block.inner(r);
+            f.render_widget(block, r);
+            let per_col = inner.height as usize;
+            let cols = lines.len().div_ceil(per_col.max(1)).max(1);
+            let w = inner.width / cols as u16;
+            for (i, chunk) in lines.chunks(per_col.max(1)).enumerate() {
+                let col = Rect {
+                    x: inner.x + i as u16 * w,
+                    width: w,
+                    ..inner
+                };
+                f.render_widget(Paragraph::new(chunk.to_vec()), col);
+            }
         }
         Overlay::Confirm(_) => {
             let save = if app.is_new { "" } else { "   s  save first" };
@@ -1043,26 +1175,37 @@ pub fn panel_number(n: u8) -> Span<'static> {
 }
 #[cfg(test)]
 mod tests {
-    use super::fit_hints;
+    use super::{fit_hints, friendly};
 
     #[test]
     fn hints_shorten_to_fit_and_keep_help_last() {
-        let ctx = ["j/k move", "Enter edit", "p pin"];
-        let wide = fit_hints(&ctx, 200);
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let ctx = s(&["j/k move", "Enter edit", "p pin"]);
+        let general = s(&["Tab next", "1-4 panels", "s save", "a apply", "o open"]);
+        let wide = fit_hints(&ctx, &general, "? keys", 200);
         assert_eq!(
             wide,
             " j/k move  Enter edit  p pin │ Tab next  1-4 panels  s save  a apply  o open  ? keys "
         );
-        let narrow = fit_hints(&ctx, 40);
+        let narrow = fit_hints(&ctx, &general, "? keys", 40);
         assert!(narrow.chars().count() <= 40, "{narrow}");
         assert!(
             narrow.starts_with(" j/k move  Enter edit") && narrow.ends_with("? keys "),
             "{narrow}"
         );
-        assert_eq!(fit_hints(&ctx, 10), " ? keys ");
-        assert_eq!(fit_hints(&ctx, 5), "");
+        assert_eq!(fit_hints(&ctx, &general, "? keys", 10), " ? keys ");
+        assert_eq!(fit_hints(&ctx, &general, "? keys", 5), "");
         for room in 0..120 {
-            assert!(fit_hints(&ctx, room).chars().count() <= room);
+            assert!(fit_hints(&ctx, &general, "? keys", room).chars().count() <= room);
         }
+    }
+
+    #[test]
+    fn friendly_key_names() {
+        assert_eq!(friendly("<CR>"), "Enter");
+        assert_eq!(friendly("<leader>sp"), "Space s p");
+        assert_eq!(friendly("<C-r>"), "C-r");
+        assert_eq!(friendly("j"), "j");
+        assert_eq!(friendly("<lt>"), "lt");
     }
 }

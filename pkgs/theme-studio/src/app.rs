@@ -13,6 +13,7 @@ use ratatui::layout::Rect;
 
 use crate::color::{self, Rgb};
 use crate::fonts::FontsTab;
+use crate::keymap::{Action, Context, Key, Keymap, Lookup};
 use crate::palette::{self, GROUPS, Palette};
 use crate::preview::{Mode as PreviewMode, PaneId, Preview};
 use crate::store::{Store, TerminalMap};
@@ -132,6 +133,9 @@ pub struct App {
     pub picker: Option<Picker>,
     pub sample_image: Option<StatefulProtocol>,
     pub sample_error: Option<String>,
+    pub keymap: Keymap,
+    /// Keys of a sequence typed so far (e.g. the leader), waiting for the rest.
+    pub pending_keys: Vec<Key>,
     /// The Open / Save as pop-up is for font presets, not palettes.
     pub overlay_fonts: bool,
     quit: bool,
@@ -168,6 +172,8 @@ impl App {
             sample_image: None,
             sample_error: None,
             overlay_fonts: false,
+            keymap: Keymap::vim(),
+            pending_keys: Vec::new(),
             store,
             name,
             is_new,
@@ -313,61 +319,6 @@ impl App {
                 };
             }
             Err(e) => self.error(format!("{e:#}")),
-        }
-    }
-
-    /// Keys while the Fonts tab is showing (after the tab and quit keys).
-    fn on_fonts_key(&mut self, k: KeyEvent) {
-        use crate::fonts::FontFocus;
-        // In the font list, filter keys (m p n M P x b c) win over the shortcuts below.
-        let chip =
-            matches!(k.code, KeyCode::Char(c) if crate::fonts::CHIPS.iter().any(|(x, _)| *x == c));
-        if self.fonts.focus == FontFocus::List && chip {
-            self.fonts.on_key(k);
-            return;
-        }
-        if self.fonts.focus == FontFocus::Search {
-            self.fonts.on_key(k);
-            return;
-        }
-        match k.code {
-            KeyCode::Char('q') => self.guard(Pending::Quit),
-            KeyCode::Char('s') => self.fonts_save(false),
-            KeyCode::Char('S') => {
-                self.overlay_fonts = true;
-                self.overlay = Overlay::SaveAs {
-                    input: self.fonts.name.clone(),
-                    overwrite: false,
-                    then_apply: false,
-                };
-            }
-            KeyCode::Char('a') => {
-                if self.fonts.dirty() {
-                    self.fonts_save(true);
-                } else {
-                    let name = self.fonts.name.clone();
-                    self.fonts_save_as(&name, true);
-                }
-            }
-            KeyCode::Char('o') => self.fonts_open_overlay(),
-            KeyCode::Char('n') => self.guard(Pending::NewFonts),
-            KeyCode::Char('?') => self.overlay = Overlay::Help,
-            KeyCode::Char('1') => self.fonts.focus = FontFocus::Slots,
-            KeyCode::Char('2') => self.fonts.open_list(),
-            KeyCode::Char(c @ ('3' | '4')) => {
-                self.switch_tab(Tab::Colours);
-                self.goto_panel(c as u8 - b'0');
-            }
-            KeyCode::Tab | KeyCode::BackTab => {
-                if self.fonts.focus == FontFocus::Slots {
-                    self.fonts.open_list();
-                } else {
-                    self.fonts.focus = FontFocus::Slots;
-                }
-            }
-            _ => {
-                self.fonts.on_key(k);
-            }
         }
     }
 
@@ -701,163 +652,253 @@ impl App {
         }
     }
 
+    /// The keymap contexts for the pane with the keyboard, most specific first.
+    pub fn contexts(&self) -> [Context; 3] {
+        use crate::fonts::FontFocus;
+        match self.tab {
+            Tab::Fonts if self.fonts.focus == FontFocus::Slots => {
+                [Context::FontRoles, Context::Fonts, Context::Global]
+            }
+            Tab::Fonts => [Context::FontList, Context::Fonts, Context::Global],
+            Tab::Colours if self.focus == Focus::List => {
+                [Context::ColourList, Context::Colours, Context::Global]
+            }
+            Tab::Colours => [Context::Picker, Context::Colours, Context::Global],
+        }
+    }
+
     fn on_key(&mut self, k: KeyEvent) {
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        // A preview window has the keyboard: everything but F12 goes to it.
+        use crate::fonts::FontFocus;
+        let key = Key::from_event(k);
+        // A preview window has the keyboard: everything but the key bound to
+        // "type into the preview / next window / back" goes to it.
         if let Some(id) = self.preview.focus
             && matches!(self.overlay, Overlay::None)
         {
-            if k.code == KeyCode::F(12) {
+            if self.keymap.lookup(&[Context::Global], &[key]) == Lookup::Run(Action::PreviewCycle) {
                 self.preview.cycle_focus();
             } else {
                 self.preview.send_key(id, k);
             }
             return;
         }
-        if k.code == KeyCode::F(12) && matches!(self.overlay, Overlay::None) {
-            self.switch_tab(Tab::Colours);
-            self.preview.mode = PreviewMode::Desktop;
-            self.preview.cycle_focus();
-            return;
-        }
-        if ctrl && k.code == KeyCode::Char('c') {
+        // Ctrl+C always quits (asking first about unsaved changes)
+        if key == Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL) {
+            self.pending_keys.clear();
             self.guard(Pending::Quit);
             return;
         }
-        if !matches!(self.overlay, Overlay::None) {
+        let copying = matches!(self.overlay, Overlay::CopyFrom { .. });
+        if !matches!(self.overlay, Overlay::None) && !copying {
             self.on_overlay_key(k);
             return;
         }
         self.message = None;
-        match k.code {
-            KeyCode::F(1) => return self.switch_tab(Tab::Colours),
-            KeyCode::F(2) => return self.switch_tab(Tab::Fonts),
-            _ => {}
+        // Text fields: keys are typing, not actions.
+        if self.pending_keys.is_empty() {
+            if self.tab == Tab::Colours && self.focus == Focus::Hex {
+                return self.on_hex_key(k);
+            }
+            if self.tab == Tab::Fonts && self.fonts.focus == FontFocus::Search {
+                return self.fonts.on_search_key(k);
+            }
         }
-        if self.tab == Tab::Fonts {
-            return self.on_fonts_key(k);
+        self.pending_keys.push(key);
+        let contexts = self.contexts();
+        match self.keymap.lookup(&contexts, &self.pending_keys) {
+            Lookup::Pending => {}
+            Lookup::Run(a) => {
+                self.pending_keys.clear();
+                self.run_action(a);
+            }
+            Lookup::None => self.pending_keys.clear(),
         }
-        if self.focus == Focus::Hex {
-            self.on_hex_key(k);
-            return;
-        }
+    }
 
-        // Keys that work everywhere
-        match k.code {
-            KeyCode::Char('q') => return self.guard(Pending::Quit),
-            KeyCode::Char('s') => return self.save(false),
-            KeyCode::Char('S') => {
-                self.overlay_fonts = false;
+    /// Does what an action means in the pane with the keyboard.
+    pub fn run_action(&mut self, a: Action) {
+        use crate::fonts::FontFocus;
+        if let Overlay::CopyFrom { target } = self.overlay {
+            return self.run_copy_from(target, a);
+        }
+        let fonts = self.tab == Tab::Fonts;
+        match a {
+            Action::Quit => self.guard(Pending::Quit),
+            Action::Help => self.overlay = Overlay::Help,
+            Action::TabColours => self.switch_tab(Tab::Colours),
+            Action::TabFonts => self.switch_tab(Tab::Fonts),
+            Action::PreviewCycle => {
+                self.switch_tab(Tab::Colours);
+                self.preview.mode = PreviewMode::Desktop;
+                self.preview.cycle_focus();
+            }
+            Action::SavePalette => self.save(false),
+            Action::SaveFonts => self.fonts_save(false),
+            Action::ApplyPalette => self.apply(),
+            Action::ApplyFonts => self.fonts_apply(),
+            Action::Save if fonts => self.fonts_save(false),
+            Action::Save => self.save(false),
+            Action::SaveAs => {
+                self.overlay_fonts = fonts;
+                let input = if fonts {
+                    self.fonts.name.clone()
+                } else {
+                    self.name.clone()
+                };
                 self.overlay = Overlay::SaveAs {
-                    input: self.name.clone(),
+                    input,
                     overwrite: false,
                     then_apply: false,
                 };
-                return;
             }
-            KeyCode::Char('a') => return self.apply(),
-            KeyCode::Char('o') => return self.open_overlay(),
-            KeyCode::Char('n') => return self.guard(Pending::New),
-            KeyCode::Char('u') => return self.undo(),
-            KeyCode::Char('r') if ctrl => return self.redo(),
-            KeyCode::Char('p') => return self.toggle_pin(),
-            KeyCode::Char('y') => {
+            Action::Apply if fonts => self.fonts_apply(),
+            Action::Apply => self.apply(),
+            Action::Open if fonts => self.fonts_open_overlay(),
+            Action::Open => self.open_overlay(),
+            Action::New if fonts => self.guard(Pending::NewFonts),
+            Action::New => self.guard(Pending::New),
+            Action::Panel(1) if fonts => self.fonts.focus = FontFocus::Slots,
+            Action::Panel(2) if fonts => self.fonts.open_list(),
+            Action::Panel(n) if fonts => {
+                self.switch_tab(Tab::Colours);
+                self.goto_panel(n);
+            }
+            Action::Panel(n) => self.goto_panel(n),
+            Action::FocusNext | Action::FocusPrev if fonts => {
+                if self.fonts.focus == FontFocus::Slots {
+                    self.fonts.open_list();
+                } else {
+                    self.fonts.focus = FontFocus::Slots;
+                }
+            }
+            _ if fonts => {
+                self.fonts.act(a);
+            }
+            _ => self.run_colours(a),
+        }
+    }
+
+    /// Colour-tab actions: the list, the picker and the preview toggles.
+    fn run_colours(&mut self, a: Action) {
+        match a {
+            Action::Undo => self.undo(),
+            Action::Redo => self.redo(),
+            Action::Pin => self.toggle_pin(),
+            Action::CopyHex => {
                 let hex = self.palette.get(self.key()).hex();
-                return self.copy(&hex);
+                self.copy(&hex);
             }
-            KeyCode::Char('c') => {
+            Action::CopyFrom => {
                 self.overlay = Overlay::CopyFrom { target: self.key() };
                 self.focus = Focus::List;
-                return;
             }
-            KeyCode::Char('?') => {
-                self.overlay = Overlay::Help;
-                return;
+            Action::HexEntry => {
+                self.focus = Focus::Hex;
+                self.hex_input = "#".into();
             }
-            KeyCode::Char('Y') => {
+            Action::FocusNext => self.cycle_focus(1),
+            Action::FocusPrev => self.cycle_focus(-1),
+            Action::Back => self.focus = Focus::List,
+            Action::ToggleYazi => {
                 self.preview.mode = PreviewMode::Desktop;
-                return self.preview.toggle_yazi();
+                self.preview.toggle_yazi();
             }
-            KeyCode::Char('R') => {
+            Action::ToggleRofi => {
                 self.preview.mode = PreviewMode::Desktop;
                 self.preview.show_rofi = !self.preview.show_rofi;
-                return;
             }
-            KeyCode::Char('V') => {
+            Action::ToggleView => {
                 self.preview.mode = match self.preview.mode {
                     PreviewMode::Desktop => PreviewMode::Swatches,
                     PreviewMode::Swatches => PreviewMode::Desktop,
                 };
-                return;
             }
-            KeyCode::Char(c @ '1'..='4') => return self.goto_panel(c as u8 - b'0'),
-            KeyCode::Char('#') => {
-                self.focus = Focus::Hex;
-                self.hex_input = "#".into();
-                return;
-            }
-            KeyCode::Tab => return self.cycle_focus(1),
-            KeyCode::BackTab => return self.cycle_focus(-1),
-            KeyCode::Esc => {
-                self.focus = Focus::List;
-                return;
-            }
-            _ => {}
-        }
-
-        let big = k.modifiers.contains(KeyModifiers::SHIFT)
-            || k.code.as_char().is_some_and(|c| c.is_ascii_uppercase());
-        let dir = match k.code {
-            KeyCode::Char('h' | 'H') | KeyCode::Left => Some((-1, 0)),
-            KeyCode::Char('l' | 'L') | KeyCode::Right => Some((1, 0)),
-            KeyCode::Char('k' | 'K') | KeyCode::Up => Some((0, -1)),
-            KeyCode::Char('j' | 'J') | KeyCode::Down => Some((0, 1)),
-            _ => None,
-        };
-        match self.focus {
-            Focus::List => match k.code {
-                KeyCode::Enter => self.focus = Focus::Square,
-                KeyCode::Char('g') | KeyCode::Home => self.select(0),
-                KeyCode::Char('G') | KeyCode::End => self.select(self.keys.len() - 1),
-                KeyCode::PageDown => self.select((self.sel + 10).min(self.keys.len() - 1)),
-                KeyCode::PageUp => self.select(self.sel.saturating_sub(10)),
-                _ => match dir {
-                    Some((0, dy)) => self.move_sel(dy),
-                    Some((1, 0)) => self.focus = Focus::Square,
-                    _ => {}
-                },
-            },
-            Focus::Square => {
-                if let Some((dx, dy)) = dir {
-                    let step = if big { 0.1 } else { 0.02 };
-                    let (h, s, v) = self.hsv;
-                    self.set_hsv(h, s + dx as f64 * step, v - dy as f64 * step);
-                }
-            }
-            Focus::Hue => {
-                if let Some((dx, dy)) = dir {
-                    let step = if big { 15.0 } else { 2.0 };
-                    let (h, s, v) = self.hsv;
-                    self.set_hsv(h + (dy + dx) as f64 * step, s, v);
-                }
-            }
-            Focus::SliderH | Focus::SliderS | Focus::SliderL => match dir {
-                Some((dx, 0)) => {
-                    let n = dx as f64 * if big { 10.0 } else { 1.0 };
-                    let (s, l) = self.hsl();
-                    match self.focus {
-                        Focus::SliderH => {
-                            let (h, s, v) = self.hsv;
-                            self.set_hsv(h + n, s, v);
-                        }
-                        Focus::SliderS => self.set_hsl(s + n / 100.0, l),
-                        _ => self.set_hsl(s, l + n / 100.0),
-                    }
-                }
-                Some((0, dy)) => self.cycle_focus(dy),
+            _ if self.focus == Focus::List => match a {
+                Action::Up => self.move_sel(-1),
+                Action::Down => self.move_sel(1),
+                Action::Right | Action::Confirm => self.focus = Focus::Square,
+                Action::Top => self.select(0),
+                Action::Bottom => self.select(self.keys.len() - 1),
+                Action::PageDown => self.select((self.sel + 10).min(self.keys.len() - 1)),
+                Action::PageUp => self.select(self.sel.saturating_sub(10)),
                 _ => {}
             },
-            Focus::Hex => {}
+            _ => {
+                let (dx, dy, big) = match a {
+                    Action::Left => (-1, 0, false),
+                    Action::Right => (1, 0, false),
+                    Action::Up => (0, -1, false),
+                    Action::Down => (0, 1, false),
+                    Action::LeftBig => (-1, 0, true),
+                    Action::RightBig => (1, 0, true),
+                    Action::UpBig => (0, -1, true),
+                    Action::DownBig => (0, 1, true),
+                    _ => return,
+                };
+                self.nudge(dx, dy, big);
+            }
+        }
+    }
+
+    /// Moves the focused picker control: the square by saturation/value, the
+    /// hue strip by hue, sliders by their value (up/down picks a slider).
+    fn nudge(&mut self, dx: i32, dy: i32, big: bool) {
+        match self.focus {
+            Focus::Square => {
+                let step = if big { 0.1 } else { 0.02 };
+                let (h, s, v) = self.hsv;
+                self.set_hsv(h, s + dx as f64 * step, v - dy as f64 * step);
+            }
+            Focus::Hue => {
+                let step = if big { 15.0 } else { 2.0 };
+                let (h, s, v) = self.hsv;
+                self.set_hsv(h + (dy + dx) as f64 * step, s, v);
+            }
+            Focus::SliderH | Focus::SliderS | Focus::SliderL if dx != 0 => {
+                let n = dx as f64 * if big { 10.0 } else { 1.0 };
+                let (s, l) = self.hsl();
+                match self.focus {
+                    Focus::SliderH => {
+                        let (h, s, v) = self.hsv;
+                        self.set_hsv(h + n, s, v);
+                    }
+                    Focus::SliderS => self.set_hsl(s + n / 100.0, l),
+                    _ => self.set_hsl(s, l + n / 100.0),
+                }
+            }
+            Focus::SliderH | Focus::SliderS | Focus::SliderL => self.cycle_focus(dy),
+            _ => {}
+        }
+    }
+
+    /// While picking the key to copy a colour from: move, Enter copies, Esc cancels.
+    fn run_copy_from(&mut self, target: &'static str, a: Action) {
+        match a {
+            Action::Up => self.move_sel(-1),
+            Action::Down => self.move_sel(1),
+            Action::Top => self.select(0),
+            Action::Bottom => self.select(self.keys.len() - 1),
+            Action::PageDown => self.select((self.sel + 10).min(self.keys.len() - 1)),
+            Action::PageUp => self.select(self.sel.saturating_sub(10)),
+            Action::Confirm | Action::Right => {
+                let from = self.key();
+                let c = self.palette.get(from);
+                self.sel = self.keys.iter().position(|k| *k == target).unwrap_or(0);
+                self.overlay = Overlay::None;
+                self.set_key(target, c);
+                self.info(format!("{target} = {from} ({})", c.hex()));
+            }
+            Action::Back => self.overlay = Overlay::None,
+            _ => {}
+        }
+    }
+
+    fn fonts_apply(&mut self) {
+        if self.fonts.dirty() {
+            self.fonts_save(true);
+        } else {
+            let name = self.fonts.name.clone();
+            self.fonts_save_as(&name, true);
         }
     }
 
@@ -913,27 +954,8 @@ impl App {
                 KeyCode::Esc | KeyCode::Char('n') => Overlay::None,
                 _ => Overlay::Confirm(p),
             },
-            Overlay::CopyFrom { target } => match k.code {
-                KeyCode::Enter => {
-                    let from = self.key();
-                    let c = self.palette.get(from);
-                    let to = self.keys.iter().position(|k| *k == target).unwrap_or(0);
-                    self.sel = to;
-                    self.set_key(target, c);
-                    self.info(format!("{target} = {from} ({})", c.hex()));
-                    Overlay::None
-                }
-                KeyCode::Esc => Overlay::None,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.move_sel(1);
-                    Overlay::CopyFrom { target }
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.move_sel(-1);
-                    Overlay::CopyFrom { target }
-                }
-                _ => Overlay::CopyFrom { target },
-            },
+            // keys while copying go through the keymap (run_copy_from)
+            Overlay::CopyFrom { target } => Overlay::CopyFrom { target },
             Overlay::SaveAs {
                 mut input,
                 overwrite,
@@ -1535,6 +1557,53 @@ mod tests {
                 render(&mut app, w, h);
             }
         }
+    }
+
+    #[test]
+    fn leader_sequences_popup_help_and_hints() {
+        let store = temp_store("leader");
+        let dir = store.dir.clone();
+        let mut app = test_app(store, Start::Named("One".into()));
+        // the hints come from the keymap
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("j/k move")
+                && screen.contains("Enter edit")
+                && screen.contains("? keys"),
+            "{screen}"
+        );
+        // Space waits and shows what can follow
+        press(&mut app, " ");
+        assert_eq!(app.pending_keys.len(), 1);
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("<leader>") && screen.contains("Esc cancels"),
+            "{screen}"
+        );
+        // Esc cancels without doing anything
+        press(&mut app, "\x1b");
+        assert!(app.pending_keys.is_empty());
+        // <leader>sp saves the palette from anywhere
+        press(&mut app, "#abcdef\n");
+        assert!(app.dirty());
+        app.on_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        press(&mut app, " sp");
+        assert!(!app.dirty(), "saved from the Fonts tab");
+        assert_eq!(
+            Store { dir }.load("One").unwrap().get("bg0"),
+            Rgb(0xab, 0xcd, 0xef)
+        );
+        // an unbound sequence does nothing and clears
+        press(&mut app, " zz");
+        assert!(app.pending_keys.is_empty());
+        // the help screen lists the real bindings
+        press(&mut app, "?");
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("<leader>sp") && screen.contains("save palette"),
+            "{screen}"
+        );
+        assert!(screen.contains("Vim preset"));
     }
 
     #[test]

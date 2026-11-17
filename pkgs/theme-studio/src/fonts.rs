@@ -15,6 +15,7 @@ use serde_json::{Map, Value, json};
 
 use crate::color::Rgb;
 use crate::font_tree::Node;
+use crate::keymap::Action;
 use crate::palette::Palette;
 use crate::store::to_jq_string;
 use ratatui::layout::Rect;
@@ -932,63 +933,64 @@ impl FontsTab {
         Ok(())
     }
 
-    /// Keys for the tab's own panels; returns false for keys it doesn't use.
-    pub fn on_key(&mut self, k: KeyEvent) -> bool {
+    /// Typing into the search box (the keymap doesn't apply while typing).
+    pub fn on_search_key(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Down => self.focus = FontFocus::List,
+            KeyCode::Backspace => {
+                self.search.pop();
+                self.list_sel = 0;
+            }
+            KeyCode::Char(c) => {
+                self.search.push(c);
+                self.list_sel = 0;
+            }
+            _ => {}
+        }
+    }
+
+    /// Runs an action in the roles or the font list; returns false if it
+    /// means nothing there.
+    pub fn act(&mut self, a: Action) -> bool {
         let n = self.rows().len();
+        let last = n.saturating_sub(1);
         match self.focus {
-            FontFocus::Search => match k.code {
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Down => self.focus = FontFocus::List,
-                KeyCode::Backspace => {
-                    self.search.pop();
-                    self.list_sel = 0;
-                }
-                KeyCode::Char(c) => {
-                    self.search.push(c);
-                    self.list_sel = 0;
-                }
-                _ => {}
-            },
-            FontFocus::List => match k.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.list_sel = (self.list_sel + 1).min(n.saturating_sub(1))
-                }
-                KeyCode::Char('k') | KeyCode::Up => self.list_sel = self.list_sel.saturating_sub(1),
-                KeyCode::Char('g') | KeyCode::Home => self.list_sel = 0,
-                KeyCode::Char('G') | KeyCode::End => self.list_sel = n.saturating_sub(1),
-                KeyCode::PageDown => self.list_sel = (self.list_sel + 10).min(n.saturating_sub(1)),
-                KeyCode::PageUp => self.list_sel = self.list_sel.saturating_sub(10),
-                KeyCode::Char('/') => self.focus = FontFocus::Search,
-                KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
-                    match self.rows().get(self.list_sel) {
-                        Some(Row::Group {
-                            expanded: false, ..
-                        }) => self.set_expanded(true),
-                        // already open: step into it
-                        Some(Row::Group { expanded: true, .. }) => {
-                            self.list_sel = (self.list_sel + 1).min(n.saturating_sub(1))
-                        }
-                        _ => {}
+            FontFocus::Search => return false,
+            FontFocus::List => match a {
+                Action::Down => self.list_sel = (self.list_sel + 1).min(last),
+                Action::Up => self.list_sel = self.list_sel.saturating_sub(1),
+                Action::Top => self.list_sel = 0,
+                Action::Bottom => self.list_sel = last,
+                Action::PageDown => self.list_sel = (self.list_sel + 10).min(last),
+                Action::PageUp => self.list_sel = self.list_sel.saturating_sub(10),
+                Action::Search => self.focus = FontFocus::Search,
+                Action::Right => match self.rows().get(self.list_sel) {
+                    Some(Row::Group {
+                        expanded: false, ..
+                    }) => self.set_expanded(true),
+                    // already open: step into it
+                    Some(Row::Group { expanded: true, .. }) => {
+                        self.list_sel = (self.list_sel + 1).min(last)
                     }
-                }
-                KeyCode::Char('h') | KeyCode::Left => self.go_up(),
-                KeyCode::Enter => self.activate(),
-                KeyCode::Esc => self.focus = FontFocus::Slots,
-                KeyCode::Char(c) if CHIPS.iter().any(|(k, _)| *k == c) => {
+                    _ => {}
+                },
+                Action::Left => self.go_up(),
+                Action::Confirm => self.activate(),
+                Action::Back => self.focus = FontFocus::Slots,
+                Action::Filter(c) => {
                     self.filters.toggle(c);
                     self.clamp_sel();
                 }
                 _ => return false,
             },
-            FontFocus::Slots => match k.code {
-                KeyCode::Char('j') | KeyCode::Down => self.slot = (self.slot + 1).min(2),
-                KeyCode::Char('k') | KeyCode::Up => self.slot = self.slot.saturating_sub(1),
-                KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
-                    self.resize(1)
-                }
-                KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') => self.resize(-1),
-                KeyCode::Char('L') => self.resize(4),
-                KeyCode::Char('H') => self.resize(-4),
-                KeyCode::Enter | KeyCode::Char('f') => self.open_list(),
+            FontFocus::Slots => match a {
+                Action::Down => self.slot = (self.slot + 1).min(2),
+                Action::Up => self.slot = self.slot.saturating_sub(1),
+                Action::Right | Action::SizeUp => self.resize(1),
+                Action::Left | Action::SizeDown => self.resize(-1),
+                Action::RightBig => self.resize(4),
+                Action::LeftBig => self.resize(-4),
+                Action::Confirm | Action::PickFont => self.open_list(),
                 _ => return false,
             },
         }
@@ -1115,6 +1117,26 @@ mod tests {
         KeyEvent::new(code, ratatui::crossterm::event::KeyModifiers::NONE)
     }
 
+    /// A key as the app routes it: typing while searching, otherwise the
+    /// Vim keymap's action for the font list or roles.
+    fn press(t: &mut FontsTab, k: KeyEvent) {
+        use crate::keymap::{Context, Key, Keymap, Lookup};
+        if t.focus == FontFocus::Search {
+            return t.on_search_key(k);
+        }
+        let pane = if t.focus == FontFocus::Slots {
+            Context::FontRoles
+        } else {
+            Context::FontList
+        };
+        if let Lookup::Run(a) = Keymap::vim().lookup(
+            &[pane, Context::Fonts, Context::Global],
+            &[Key::from_event(k)],
+        ) {
+            t.act(a);
+        }
+    }
+
     fn labels(t: &FontsTab) -> Vec<String> {
         t.rows()
             .iter()
@@ -1167,44 +1189,44 @@ mod tests {
         );
         assert_eq!(t.list_sel, 2);
         // browsing previews the highlighted font without setting it
-        t.on_key(key('j'));
+        press(&mut t, key('j'));
         assert_eq!(t.shown_fonts()[0].family, "JetBrainsMono Nerd Font Mono");
         assert_eq!(t.preset.fonts[0].family, "JetBrainsMono Nerd Font");
         // h goes up to the group, again closes it
-        t.on_key(key('h'));
+        press(&mut t, key('h'));
         assert_eq!(t.list_sel, 1);
-        t.on_key(key('h'));
+        press(&mut t, key('h'));
         assert_eq!(labels(&t), ["▸DejaVu 2", "▸JetBrains Mono 3"]);
         // filters: NF Mono only, then show the hidden kinds
-        t.on_key(key('M'));
+        press(&mut t, key('M'));
         assert_eq!(labels(&t), ["▸JetBrains Mono 1"]);
-        t.on_key(key('M'));
-        t.on_key(key('b'));
-        t.on_key(key('c'));
-        t.on_key(key('p'));
+        press(&mut t, key('M'));
+        press(&mut t, key('b'));
+        press(&mut t, key('c'));
+        press(&mut t, key('p'));
         // (only Noto Sans CJK fonts here, so that is the shared name)
         assert_eq!(
             labels(&t),
             ["▸DejaVu 1", "▸JetBrains Mono 1", "▸Noto Sans CJK 2"]
         );
-        t.on_key(key('p'));
+        press(&mut t, key('p'));
         assert!(labels(&t).contains(&"Fixed".to_string()));
         // l opens a group, l again steps in, Enter uses the font
         t.list_sel = 0;
-        t.on_key(key('l'));
-        t.on_key(key('l'));
-        t.on_key(special(KeyCode::Enter));
+        press(&mut t, key('l'));
+        press(&mut t, key('l'));
+        press(&mut t, special(KeyCode::Enter));
         assert_eq!(t.preset.fonts[t.slot].family, "DejaVu Sans");
         assert_eq!(t.focus, FontFocus::Slots);
         // searching shows a flat list of matches
         t.open_list();
-        t.on_key(key('/'));
+        press(&mut t, key('/'));
         for c in "font mono".chars() {
-            t.on_key(key(c));
+            press(&mut t, key(c));
         }
         assert_eq!(labels(&t), ["JetBrainsMono Nerd Font Mono"]);
-        t.on_key(special(KeyCode::Enter));
-        t.on_key(special(KeyCode::Enter));
+        press(&mut t, special(KeyCode::Enter));
+        press(&mut t, special(KeyCode::Enter));
         assert_eq!(
             t.preset.fonts[t.slot].family,
             "JetBrainsMono Nerd Font Mono"
