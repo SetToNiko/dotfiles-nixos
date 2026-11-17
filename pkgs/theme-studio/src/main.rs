@@ -22,6 +22,7 @@ mod hit;
 mod keymap;
 mod out;
 mod palette;
+mod paths;
 mod prefetch;
 mod presets;
 mod preview;
@@ -64,7 +65,13 @@ Settings: $XDG_CONFIG_HOME/theme-studio (default ~/.config/theme-studio):
   settings.json  startup defaults
 
 Environment:
-  THEME_STUDIO_CONFIGS  dotfiles configs folder (default ~/dotfiles-nixos/configs)
+  THEME_STUDIO_DATA     your palettes.json, fonts.json and themes.json
+                        (default $XDG_CONFIG_HOME/theme-studio once it has a
+                        palettes.json)
+  THEME_STUDIO_SHARE    the files the studio and scripts need (set by the
+                        package)
+  THEME_STUDIO_CONFIGS  the old place for all of it, still used when the
+                        others don't apply (default ~/dotfiles-nixos/configs)
   THEME_STUDIO_TIMING   set: log font preview render times to
                         ~/.local/state/theme-studio/timing.log
 
@@ -89,6 +96,7 @@ fn main() -> Result<()> {
             let store = Store::locate();
             let fonts = fonts::FontStore {
                 dir: store.dir.clone(),
+                share: store.share.clone(),
             };
             // themes.json: the first theme, from the active palette and fonts
             let themes = theme::ThemeStore {

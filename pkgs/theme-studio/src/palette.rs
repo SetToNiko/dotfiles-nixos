@@ -378,9 +378,14 @@ mod tests {
         let input =
             std::env::temp_dir().join(format!("theme-studio-derive-{}.json", std::process::id()));
         std::fs::write(&input, serde_json::to_string(&bases).unwrap()).unwrap();
+        let share = crate::store::Store::locate().share;
         let out = Command::new("jq")
             .args(["-r", "-f"])
-            .arg(dir.join("palette-derive.jq"))
+            .arg(crate::paths::share_file(
+                &share,
+                "palette-derive.jq",
+                "palette-derive.jq",
+            ))
             .arg(&input)
             .output();
         let Ok(out) = out else {

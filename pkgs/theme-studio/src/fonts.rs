@@ -121,9 +121,12 @@ impl Preset {
     }
 }
 
-/// configs/fonts.json and the files around it.
+/// fonts.json (in the data folder) and the files around it.
 pub struct FontStore {
+    /// The data folder.
     pub dir: PathBuf,
+    /// The share folder (passed on to font-switch).
+    pub share: PathBuf,
 }
 
 fn home() -> PathBuf {
@@ -164,7 +167,15 @@ impl FontStore {
     /// The host offset files with the old role keys get the new ones (not
     /// kept in the history: it's by file name, and fonts.json is taken).
     fn migrate_offsets(&self) -> Result<()> {
-        let Ok(hosts) = std::fs::read_dir(self.dir.join("hosts")) else {
+        // the hosts folder: beside fonts.json in the old layout, else in the
+        // old configs folder (the data folder doesn't have one)
+        let dir = [
+            self.dir.join("hosts"),
+            crate::paths::legacy_configs().join("hosts"),
+        ]
+        .into_iter()
+        .find(|d| d.is_dir());
+        let Some(Ok(hosts)) = dir.map(std::fs::read_dir) else {
             return Ok(());
         };
         for host in hosts.flatten() {
@@ -212,12 +223,11 @@ impl FontStore {
     }
 
     fn run_switch(&self, name: &str, quiet: bool) -> Result<()> {
-        let mut cmd = Command::new("bash");
+        let mut cmd = crate::paths::switch_command("font-switch", &self.dir, &self.share);
         if quiet {
             cmd.env("NO_RESTART", "1");
         }
         let out = cmd
-            .arg(self.dir.join("font-switch.sh"))
             .arg(name)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -805,9 +815,10 @@ pub struct FontsTab {
 }
 
 impl FontsTab {
-    pub fn new(configs: &Path, draft_dir: &Path, dirty: Arc<AtomicBool>) -> FontsTab {
+    pub fn new(data: &Path, share: &Path, draft_dir: &Path, dirty: Arc<AtomicBool>) -> FontsTab {
         let store = FontStore {
-            dir: configs.to_path_buf(),
+            dir: data.to_path_buf(),
+            share: share.to_path_buf(),
         };
         let active = store.active_name();
         let (name, preset, is_new, load_error) = match active.as_deref().map(|n| (n, store.load(n)))
@@ -1296,7 +1307,10 @@ mod tests {
             r#"{"mono": 0, "ui": 3, "bar": 3}"#,
         )
         .unwrap();
-        let store = FontStore { dir: dir.clone() };
+        let store = FontStore {
+            dir: dir.clone(),
+            share: dir.clone(),
+        };
         let before = store.load("A").unwrap();
         assert_eq!(store.migrate().unwrap(), Some(3));
         assert_eq!(store.migrate().unwrap(), None, "only once");
@@ -1380,6 +1394,7 @@ mod tests {
     fn tab_with(fonts: Vec<Installed>) -> FontsTab {
         let dir = std::env::temp_dir();
         let mut t = FontsTab::new(
+            &dir.join("nonexistent"),
             &dir.join("nonexistent"),
             &dir,
             Arc::new(AtomicBool::new(false)),

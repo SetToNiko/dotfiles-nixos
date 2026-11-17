@@ -313,8 +313,13 @@ impl App {
             Start::New => ("untitled".to_string(), Palette::blank(), true),
         };
         let terminal = store.terminal_map().ok();
-        let preview = Preview::new(&store.dir);
-        let fonts = FontsTab::new(&store.dir, preview.draft_dir(), preview.dirty_flag());
+        let preview = Preview::new(&store.desktop);
+        let fonts = FontsTab::new(
+            &store.dir,
+            &store.share,
+            preview.draft_dir(),
+            preview.dirty_flag(),
+        );
         let mut app = App {
             preview,
             side: Side::Colours,
@@ -2460,7 +2465,7 @@ mod tests {
             to_jq_string(&crate::store::data_file("palettes", m)),
         )
         .unwrap();
-        Store { dir }
+        Store::at(dir)
     }
 
     /// An app whose preview never starts nvim, the shell or yazi.
@@ -2585,10 +2590,7 @@ mod tests {
         assert!(!app.theme_dirty() && !app.dirty());
         assert!(themes().contains(&"Work".to_string()));
         assert_eq!(
-            Store { dir: dir.clone() }
-                .load(&app.name)
-                .unwrap()
-                .get("bg0"),
+            Store::at(dir.clone()).load(&app.name).unwrap().get("bg0"),
             Rgb(0xab, 0xcd, 0xef)
         );
         // <leader>op swaps another palette into the theme: unsaved
@@ -2610,7 +2612,7 @@ mod tests {
         }
         press(&mut app, "Play\n");
         assert_eq!((app.theme.as_str(), app.name.as_str()), ("Play", "Play"));
-        let names: Vec<String> = Store { dir: dir.clone() }
+        let names: Vec<String> = Store::at(dir.clone())
             .load_all()
             .unwrap()
             .keys()
@@ -2621,7 +2623,7 @@ mod tests {
             "{names:?}"
         );
         assert_eq!(
-            Store { dir: dir.clone() }.load("Two").unwrap().get("bg0"),
+            Store::at(dir.clone()).load("Two").unwrap().get("bg0"),
             Palette::blank().get("bg0"),
             "Two kept"
         );
@@ -2893,7 +2895,7 @@ mod tests {
         press(&mut app, " sp");
         assert!(!app.dirty(), "saved from the Fonts tab");
         assert_eq!(
-            Store { dir }.load("One").unwrap().get("bg0"),
+            Store::at(dir).load("One").unwrap().get("bg0"),
             Rgb(0xab, 0xcd, 0xef)
         );
         // an unbound sequence does nothing and clears
@@ -3508,7 +3510,7 @@ mod tests {
         assert_eq!(app.palette.get("red"), before);
         assert!(!app.dirty());
         assert_eq!(
-            Store { dir: dir.clone() }.load("One").unwrap().get("red"),
+            Store::at(dir.clone()).load("One").unwrap().get("red"),
             before
         );
         assert_eq!(app.versions().len(), 2);
@@ -4552,12 +4554,8 @@ mod tests {
             warnings: Vec::new(),
             dir: dir.join("studio-config"),
         };
-        let mut app2 = App::with_config(
-            Store { dir: dir.clone() },
-            Start::Named("One".into()),
-            loaded,
-        )
-        .unwrap();
+        let mut app2 =
+            App::with_config(Store::at(dir.clone()), Start::Named("One".into()), loaded).unwrap();
         app2.preview.set_headless();
         assert!(!app2.hints_visible && !app2.main_preview_visible && app2.fonts_preview_visible);
         std::fs::remove_dir_all(dir).unwrap();

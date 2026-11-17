@@ -1,10 +1,8 @@
-//! The Settings page's README tab: docs/theme-studio.md (next to the
-//! configs folder, read when the tab opens), rendered from Markdown into
+//! The Settings page's README tab: docs/theme-studio.md (found by
+//! paths::guide, read when the tab opens), rendered from Markdown into
 //! styled lines wrapped to the pane: headings, paragraphs, lists, block
 //! quotes, code, tables and rules. Headings are remembered so `}` / `{` can
 //! jump between them.
-
-use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Alignment, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
@@ -17,14 +15,6 @@ pub struct Doc {
     pub lines: Vec<Line<'static>>,
     /// The line each heading starts on, in order.
     pub headings: Vec<usize>,
-}
-
-/// Where the guide is: `docs/theme-studio.md` beside the configs folder.
-pub fn path(configs: &Path) -> PathBuf {
-    configs
-        .parent()
-        .unwrap_or(configs)
-        .join("docs/theme-studio.md")
 }
 
 /// A piece of text in one style.
@@ -513,7 +503,7 @@ mod tests {
 
     #[test]
     fn the_real_guide_renders_at_any_width() {
-        let p = path(&crate::store::Store::locate().dir);
+        let p = crate::paths::guide(&crate::store::Store::locate().share);
         let Ok(md) = std::fs::read_to_string(&p) else {
             eprintln!("skipped: no {}", p.display());
             return;
@@ -540,7 +530,7 @@ mod tests {
 #[test]
 #[ignore]
 fn show_the_guide() {
-    let p = path(&crate::store::Store::locate().dir);
+    let p = crate::paths::guide(&crate::store::Store::locate().share);
     let md = std::fs::read_to_string(&p).unwrap();
     for l in render(&md, 90).lines {
         println!("{l}");

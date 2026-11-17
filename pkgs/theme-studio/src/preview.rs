@@ -356,10 +356,8 @@ impl Preview {
         }
         Preview {
             configs: configs.to_path_buf(),
-            workdir: configs
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| configs.to_path_buf()),
+            // the demo shell's `git log`: the dotfiles repo, else home
+            workdir: crate::paths::demo_dir(),
             draft: draft_dir.join("colors.sh"),
             draft_dir,
             written: None,

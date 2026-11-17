@@ -1,5 +1,6 @@
-//! Files the studio reads and writes: configs/palettes.json,
-//! configs/terminal-colors.json, ~/.config/colors/current, theme-switch.sh.
+//! Files the studio reads and writes: palettes.json (the data folder),
+//! terminal-colors.json (the share folder), ~/.config/colors/current, and
+//! theme-switch (paths.rs says where each is).
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -10,8 +11,13 @@ use serde_json::{Map, Value};
 use crate::palette::Palette;
 
 pub struct Store {
-    /// The dotfiles configs/ folder ($THEME_STUDIO_CONFIGS, or ~/dotfiles-nixos/configs).
+    /// The data folder: palettes.json, fonts.json, themes.json.
     pub dir: PathBuf,
+    /// The share folder: terminal-colors.json and the other files the
+    /// studio and the scripts need.
+    pub share: PathBuf,
+    /// Where the preview reads the desktop's configs (i3, rofi, nvim).
+    pub desktop: PathBuf,
 }
 
 /// Which palette key becomes each terminal colour (configs/terminal-colors.json).
@@ -81,6 +87,8 @@ pub fn write_json_file(path: &std::path::Path, value: &Value) -> Result<()> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     crate::history::record(&label, path, value);
+    // through a link: write the file it points at, so the link stays
+    let path = &crate::paths::write_target(path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
@@ -115,10 +123,27 @@ pub fn migrate_data_file(
 
 impl Store {
     pub fn locate() -> Store {
-        let dir = std::env::var_os("THEME_STUDIO_CONFIGS")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home().join("dotfiles-nixos/configs"));
-        Store { dir }
+        Store {
+            dir: crate::paths::data_dir(),
+            share: crate::paths::share_dir(),
+            desktop: crate::paths::desktop_dir(),
+        }
+    }
+
+    /// Everything in one folder (the tests' temporary stores).
+    #[cfg(test)]
+    pub fn at(dir: PathBuf) -> Store {
+        Store {
+            share: dir.clone(),
+            desktop: dir.clone(),
+            dir,
+        }
+    }
+
+    /// A switch script (`theme-switch`, `font-switch`), told where this
+    /// store's data and share folders are.
+    pub fn switch_command(&self, name: &str) -> Command {
+        crate::paths::switch_command(name, &self.dir, &self.share)
     }
 
     fn palettes_path(&self) -> PathBuf {
@@ -165,10 +190,10 @@ impl Store {
         write_json_file(&self.palettes_path(), &data_file("palettes", all))
     }
 
-    /// Runs theme-switch.sh to make a saved palette the system theme.
+    /// Runs theme-switch to make a saved palette the system theme.
     pub fn apply(&self, name: &str) -> Result<()> {
-        let out = Command::new("bash")
-            .arg(self.dir.join("theme-switch.sh"))
+        let out = self
+            .switch_command("theme-switch")
             .arg(name)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -185,7 +210,8 @@ impl Store {
     }
 
     pub fn terminal_map(&self) -> Result<TerminalMap> {
-        let path = self.dir.join("terminal-colors.json");
+        let path =
+            crate::paths::share_file(&self.share, "terminal-colors.json", "terminal-colors.json");
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         let v: Value = serde_json::from_str(&text)?;
@@ -243,7 +269,7 @@ mod tests {
             to_jq_string(&Value::Object(m.clone())),
         )
         .unwrap();
-        let store = Store { dir: dir.clone() };
+        let store = Store::at(dir.clone());
         assert_eq!(store.load_all().unwrap(), m, "version 1 reads");
         assert_eq!(store.migrate().unwrap(), Some(2));
         assert_eq!(store.migrate().unwrap(), None, "only once");
@@ -272,7 +298,7 @@ mod tests {
         m.insert("A".into(), blank.clone());
         m.insert("B".into(), blank);
         std::fs::write(dir.join("palettes.json"), to_jq_string(&Value::Object(m))).unwrap();
-        let store = Store { dir: dir.clone() };
+        let store = Store::at(dir.clone());
 
         let mut p = Palette::blank();
         p.set("red", crate::color::Rgb(1, 2, 3));
