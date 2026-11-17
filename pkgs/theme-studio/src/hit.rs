@@ -112,9 +112,103 @@ impl Border {
     }
 }
 
-/// The hover look for rows and labels: a dim background and an underline.
+/// Underline styles (Ghostty and other modern terminals draw them all).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Underline {
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
+}
+
+impl Underline {
+    pub fn parse(s: &str) -> Option<Underline> {
+        Some(match s {
+            "single" => Underline::Single,
+            "double" => Underline::Double,
+            "curly" => Underline::Curly,
+            "dotted" => Underline::Dotted,
+            "dashed" => Underline::Dashed,
+            _ => return None,
+        })
+    }
+
+    /// The SGR code that turns it on.
+    pub fn sgr(self) -> &'static str {
+        match self {
+            Underline::Single => "4",
+            Underline::Double => "4:2",
+            Underline::Curly => "4:3",
+            Underline::Dotted => "4:4",
+            Underline::Dashed => "4:5",
+        }
+    }
+}
+
+/// The hover look as colours (settings.json's `hover`, with the theme's
+/// keys looked up).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoverLook {
+    pub bg: Option<Color>,
+    pub underline: Option<(Underline, Color)>,
+    pub fg: Option<Color>,
+    /// BOLD, DIM or nothing (with `fg`).
+    pub weight: Modifier,
+    /// Pane borders under the mouse.
+    pub pane: Color,
+    /// Preview window frames under the mouse.
+    pub preview: Color,
+}
+
+impl Default for HoverLook {
+    fn default() -> Self {
+        HoverLook {
+            bg: None,
+            underline: Some((Underline::Single, Color::Yellow)),
+            fg: Some(Color::Yellow),
+            weight: Modifier::empty(),
+            pane: Color::Cyan,
+            preview: Color::Magenta,
+        }
+    }
+}
+
+impl HoverLook {
+    pub fn apply(&self, style: Style) -> Style {
+        let mut s = style;
+        if let Some(bg) = self.bg {
+            s = s.bg(bg);
+        }
+        if let Some(fg) = self.fg {
+            s = s.fg(fg).add_modifier(self.weight);
+        }
+        match self.underline {
+            Some((Underline::Single, c)) => s.add_modifier(Modifier::UNDERLINED).underline_color(c),
+            // ratatui only knows plain underlines: rapid blink (never used
+            // otherwise) marks the cell, and out::Out swaps it for the style
+            Some((_, c)) => s.add_modifier(Modifier::RAPID_BLINK).underline_color(c),
+            None => s,
+        }
+    }
+}
+
+thread_local! {
+    static LOOK: std::cell::RefCell<HoverLook> = std::cell::RefCell::new(HoverLook::default());
+}
+
+/// Sets the hover look (each draw, from the settings).
+pub fn set_look(l: HoverLook) {
+    LOOK.with(|x| *x.borrow_mut() = l);
+}
+
+pub fn look() -> HoverLook {
+    LOOK.with(|x| x.borrow().clone())
+}
+
+/// The hover look for rows and labels (configurable on the Settings page).
 pub fn hover(style: Style) -> Style {
-    style.bg(Color::DarkGray).add_modifier(Modifier::UNDERLINED)
+    LOOK.with(|x| x.borrow().apply(style))
 }
 
 #[derive(Default, Debug)]

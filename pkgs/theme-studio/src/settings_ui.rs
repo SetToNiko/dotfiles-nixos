@@ -274,14 +274,23 @@ fn draw_keymaps(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = behaviour_rows();
     let sel = app.settings_page.bh_sel.min(rows.len() - 1);
+    // the list scrolls; the sample and notes stay below it
     let [list, _, note] = Layout::vertical([
-        Constraint::Length(rows.len() as u16),
+        Constraint::Min(3),
         Constraint::Length(1),
-        Constraint::Min(0),
+        Constraint::Length(4),
     ])
     .areas(area);
-    for (i, row) in rows.iter().enumerate().take(list.height as usize) {
-        let r = row_rect(list, i);
+    let mut scroll = app.settings_page.bh_scroll;
+    follow(&mut scroll, sel, list.height as usize);
+    app.settings_page.bh_scroll = scroll;
+    for (i, row) in rows
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list.height as usize)
+    {
+        let r = row_rect(list, i - scroll);
         let value = app.behaviour_value(*row);
         let label = App::behaviour_label(*row);
         let button = matches!(row, BhRow::SaveSizes | BhRow::ResetSizes);
@@ -289,6 +298,13 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
             Line::from(vec![
                 Span::raw(format!(" {label:<52} ")),
                 Span::styled("[ Enter ]", Style::new().cyan()),
+            ])
+        } else if row.is_colour() {
+            Line::from(vec![
+                Span::raw(format!(" {label:<52} ")),
+                Span::styled("██ ", Style::new().fg(app.theme_colour(&value))),
+                Span::styled(format!("‹ {value} ›"), Style::new().yellow()),
+                Span::styled("  Enter: list", Style::new().dark_gray()),
             ])
         } else {
             Line::from(vec![
@@ -303,7 +319,18 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
         }
         f.render_widget(Paragraph::new(line).style(style), r);
     }
+    // the hover look as set, on a sample
+    let look = crate::hit::look();
     let text = vec![
+        Line::from(vec![
+            Span::raw(" Hover sample: "),
+            Span::styled(" a clickable row ", hover(Style::new())),
+            Span::raw("   pane "),
+            Span::styled("──────", Style::new().fg(look.pane)),
+            Span::raw("   preview window "),
+            Span::styled("──────", Style::new().fg(look.preview)),
+        ]),
+        Line::raw(""),
         Line::styled(
             " ←/→ or Enter changes a value; click a selected row to change it.",
             Style::new().dark_gray(),

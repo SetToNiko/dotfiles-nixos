@@ -239,6 +239,7 @@ pub fn arrange(area: Rect, page: Page, picker: bool, sample: bool, sizes: &Sizes
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits.clear();
+    crate::hit::set_look(app.hover_look(&app.settings.hover));
     let full = f.area();
     // tabs on top: their own row; at the bottom they share the status line
     let top = app.settings.layout.tabs_on_top();
@@ -395,12 +396,21 @@ fn draw_too_small(f: &mut Frame, area: Rect, need_w: u16, need_h: u16) {
     f.render_widget(Paragraph::new(lines).centered(), r);
 }
 
-fn focused_block(title: Line<'static>, focused: bool) -> Block<'static> {
-    let b = Block::bordered().title(title);
+fn focused_block(app: &App, area: Rect, title: Line<'static>, focused: bool) -> Block<'static> {
+    Block::bordered()
+        .title(title)
+        .border_style(pane_border(app, area, focused))
+}
+
+/// A pane's border: yellow when it has the keyboard, the hover colour when
+/// the mouse is over it, else grey.
+pub fn pane_border(app: &App, area: Rect, focused: bool) -> Style {
     if focused {
-        b.border_style(Style::new().yellow())
+        Style::new().yellow()
+    } else if app.pane_hovered(area) {
+        Style::new().fg(crate::hit::look().pane)
     } else {
-        b.border_style(Style::new().dark_gray())
+        Style::new().dark_gray()
     }
 }
 
@@ -446,7 +456,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let focused =
         app.side == Side::Colours && app.focus == Focus::List && app.preview.focus.is_none();
     let title = pane_title(app, area, title, 4);
-    let block = focused_block(title, focused);
+    let block = focused_block(app, area, title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -588,7 +598,7 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: Rect) {
         && !matches!(app.focus, Focus::List)
         && app.preview.focus.is_none();
     let title = pane_title(app, area, title, 5);
-    let block = focused_block(title, focused);
+    let block = focused_block(app, area, title, focused);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -834,7 +844,7 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
     };
     let block = match app.preview.focus {
         Some(_) => Block::bordered().title(title).border_style(capture.bold()),
-        None => focused_block(title, false),
+        None => focused_block(app, area, title, false),
     };
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -854,18 +864,19 @@ fn draw_preview(f: &mut Frame, app: &mut App, area: Rect, stack: bool) {
     let rects = app.preview.rects.clone();
     for (id, r) in rects {
         if app.hits.add(r, Target::Preview(id)) && app.preview.focus != Some(id) {
+            let frame = crate::hit::look().preview;
             let buf = f.buffer_mut();
             for x in r.x..r.x + r.width {
                 for y in [r.y, r.y + r.height.saturating_sub(1)] {
                     if let Some(c) = buf.cell_mut((x, y)) {
-                        c.set_fg(Color::Magenta);
+                        c.set_fg(frame);
                     }
                 }
             }
             for y in r.y..r.y + r.height {
                 for x in [r.x, r.x + r.width.saturating_sub(1)] {
                     if let Some(c) = buf.cell_mut((x, y)) {
-                        c.set_fg(Color::Magenta);
+                        c.set_fg(frame);
                     }
                 }
             }
@@ -1571,6 +1582,49 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 "Record keys",
                 lines,
             );
+        }
+        Overlay::ChooseKey { row, sel } => {
+            let keys = crate::settings::theme_keys();
+            let r = centered(
+                area,
+                40,
+                area.height.saturating_sub(4).min(keys.len() as u16 + 3),
+            );
+            let list_h = r.height.saturating_sub(3) as usize;
+            let start = sel.saturating_sub(list_h.saturating_sub(1));
+            let current = app.behaviour_value(*row);
+            let mut lines = vec![Line::styled(
+                " j/k move, Enter choose, Esc cancel",
+                Style::new().dark_gray(),
+            )];
+            for (i, key) in keys.iter().enumerate().skip(start).take(list_h) {
+                let rr = Rect {
+                    x: r.x + 1,
+                    y: r.y + 1 + lines.len() as u16,
+                    width: r.width.saturating_sub(2),
+                    height: 1,
+                };
+                let mut line = Line::from(vec![
+                    Span::styled(" ██ ", Style::new().fg(app.theme_colour(key))),
+                    Span::styled(
+                        format!("{key:<20}"),
+                        if i == *sel {
+                            Style::new().reversed()
+                        } else {
+                            Style::new()
+                        },
+                    ),
+                    Span::styled(
+                        if *key == current { " current" } else { "" },
+                        Style::new().dark_gray(),
+                    ),
+                ]);
+                if app.hits.add(rr, Target::OverlayRow(i)) && i != *sel {
+                    line = line.patch_style(hover(Style::new()));
+                }
+                lines.push(line);
+            }
+            popup(f, r, "Colour from the active theme", lines);
         }
         Overlay::Prompt { title, input, .. } => {
             let lines = vec![

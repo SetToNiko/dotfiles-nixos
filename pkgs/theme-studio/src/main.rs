@@ -10,6 +10,7 @@ mod fonts_ui;
 mod history;
 mod hit;
 mod keymap;
+mod out;
 mod palette;
 mod preview;
 mod settings;
@@ -90,7 +91,11 @@ fn main() -> Result<()> {
         app.open_fonts_tab();
     }
 
-    let mut terminal = ratatui::init();
+    // raw mode, the alternate screen and the panic hook; drawing goes
+    // through out::Out (for the hover underline styles)
+    drop(ratatui::init());
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(out::Out::default()))?;
     execute!(stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     // The kitty keyboard protocol (Ghostty, kitty, foot, WezTerm…), so keys
     // like Ctrl+Shift+Z, Ctrl+1 or Ctrl+I (not Tab) arrive as themselves.

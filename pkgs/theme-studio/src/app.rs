@@ -4,7 +4,8 @@ use std::io::Write;
 use std::time::Duration;
 
 use anyhow::Result;
-use ratatui::DefaultTerminal;
+/// The terminal the studio draws on.
+pub type Term = ratatui::Terminal<ratatui::backend::CrosstermBackend<crate::out::Out>>;
 use ratatui::crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
     MouseEventKind,
@@ -109,6 +110,11 @@ pub enum Overlay {
         input: String,
         purpose: crate::settings::Naming,
     },
+    /// Settings page: choosing a palette key for a hover colour.
+    ChooseKey {
+        row: crate::settings::BhRow,
+        sel: usize,
+    },
     /// Settings page: a yes / no question.
     Ask {
         question: String,
@@ -138,6 +144,8 @@ pub struct App {
     pub hsv: (f64, f64, f64),
     pub hex_input: String,
     pub active: Option<String>,
+    /// The active system palette (hover colours are its keys).
+    pub system_palette: Option<Palette>,
     pub terminal: Option<TerminalMap>,
     /// Status-line message and whether it's an error.
     pub message: Option<(String, bool)>,
@@ -209,6 +217,7 @@ impl App {
 
     pub fn with_config(store: Store, start: Start, config: crate::config::Loaded) -> Result<App> {
         let active = store.active_name();
+        let system_palette = active.as_ref().and_then(|n| store.load(n).ok());
         let (name, palette, is_new) = match start {
             Start::Named(n) => {
                 let p = store.load(&n)?;
@@ -274,6 +283,7 @@ impl App {
             hsv: (0.0, 0.0, 0.0),
             hex_input: String::new(),
             active,
+            system_palette,
             terminal,
             message: None,
             overlay: Overlay::None,
@@ -310,7 +320,7 @@ impl App {
         Ok(app)
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    pub fn run(&mut self, terminal: &mut Term) -> Result<()> {
         let mut redraw = true;
         while !self.quit {
             // nvim in the preview re-reads this whenever it changes
@@ -623,6 +633,7 @@ impl App {
         match self.store.apply(&name) {
             Ok(()) => {
                 self.active = Some(name.clone());
+                self.system_palette = Some(self.palette.clone());
                 self.info(format!("Saved and applied \"{name}\""));
             }
             Err(e) => self.error(format!("Apply failed: {e:#}")),
@@ -877,6 +888,13 @@ impl App {
         if self.settings.colours.picker_hides_on_esc() {
             self.picker_visible = false;
         }
+    }
+
+    /// The mouse is over this pane (and no pop-up or drag is in the way).
+    pub fn pane_hovered(&self, area: Rect) -> bool {
+        self.hits.over(area)
+            && self.dragging.is_none()
+            && matches!(self.overlay, Overlay::None | Overlay::CopyFrom { .. })
     }
 
     /// The keymap contexts for the pane with the keyboard, most specific first.
@@ -1432,6 +1450,10 @@ impl App {
         let overlay = std::mem::replace(&mut self.overlay, Overlay::None);
         self.overlay = match overlay {
             Overlay::Help => Overlay::None,
+            Overlay::ChooseKey { row, sel } => {
+                self.choose_key_key(row, sel, k);
+                return;
+            }
             Overlay::Capture { what, keys } => {
                 // capture_key sets the overlay itself
                 self.capture_key(what, keys, k);
@@ -1804,7 +1826,14 @@ impl App {
                 self.fonts.click_chip(c);
             }
             T::OverlayRow(i) => {
-                if let Overlay::Open { sel, .. } = &mut self.overlay {
+                if let Overlay::ChooseKey { row, sel } = self.overlay {
+                    if sel == i {
+                        self.overlay = Overlay::None;
+                        self.set_colour_setting(row, crate::settings::theme_keys()[i]);
+                    } else {
+                        self.overlay = Overlay::ChooseKey { row, sel: i };
+                    }
+                } else if let Overlay::Open { sel, .. } = &mut self.overlay {
                     if *sel == i {
                         // a second click opens it, like Enter
                         self.on_overlay_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -2422,11 +2451,13 @@ mod tests {
         let tab = app.hits.rect_of(T::PageTab(Page::Settings)).unwrap();
         mouse(&mut app, MouseEventKind::Moved, tab.x + 1, tab.y);
         let buf = draw(&mut app);
-        assert_eq!(
-            buf[(tab.x + 1, tab.y)].bg,
-            ratatui::style::Color::DarkGray,
+        // the default look: underlined, in the theme's yellow
+        let cell = &buf[(tab.x + 1, tab.y)];
+        assert!(
+            cell.modifier.contains(ratatui::style::Modifier::UNDERLINED),
             "hover"
         );
+        assert_eq!(cell.fg, app.theme_colour("yellow"), "hover");
         assert_eq!(app.hits.hovered(), Some(T::PageTab(Page::Settings)));
         click_on(&mut app, T::PageTab(Page::Settings));
         assert_eq!(app.page, Page::Settings);
@@ -2920,5 +2951,81 @@ mod tests {
         app.on_key(ctrl_c);
         assert!(matches!(app.overlay, Overlay::None), "copied, not quit");
         std::fs::remove_dir_all(app.store.dir.clone()).unwrap();
+    }
+
+    #[test]
+    fn hover_look_is_configurable_and_pane_borders_light_up() {
+        use crate::hit::{Target as T, Underline};
+        use crate::settings::{BhRow, behaviour_rows};
+        use ratatui::style::{Color, Modifier};
+        let store = temp_store("hover-look");
+        let dir = store.dir.clone();
+        crate::history::init_for_test(dir.join("history"));
+        let mut app = test_app(store, Start::Named("One".into()));
+        // a system palette whose keys we know
+        let mut sys = Palette::blank();
+        sys.set("aqua", Rgb(1, 2, 3));
+        sys.set("bg3", Rgb(4, 5, 6));
+        sys.set("purple", Rgb(7, 8, 9));
+        app.system_palette = Some(sys);
+        assert_eq!(app.theme_colour("aqua"), Color::Rgb(1, 2, 3));
+        // the mouse over the colour list (without the keyboard: focus is
+        // yellow) lights its border in the pane colour
+        app.side = Side::Fonts;
+        let mut t = Terminal::new(TestBackend::new(200, 50)).unwrap();
+        t.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let row = app.hits.rect_of(T::ColourRow(1)).unwrap();
+        mouse(&mut app, MouseEventKind::Moved, row.x + 2, row.y);
+        t.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = t.backend().buffer().clone();
+        assert_eq!(
+            buf[(row.x - 1, row.y)].fg,
+            Color::Rgb(1, 2, 3),
+            "pane border in aqua"
+        );
+        // Behaviour tab: highlight on, in bg3; curly underline; bold text
+        app.page = Page::Settings;
+        app.settings_page.tab = crate::settings::Tab::Behaviour;
+        let rows = behaviour_rows();
+        let at = |r: BhRow| rows.iter().position(|x| *x == r).unwrap();
+        app.settings_page.bh_sel = at(BhRow::HoverHighlight);
+        press(&mut app, "l");
+        app.settings_page.bh_sel = at(BhRow::HoverHighlightColour);
+        press(&mut app, "\n");
+        assert!(matches!(app.overlay, Overlay::ChooseKey { .. }));
+        let screen = render(&mut app, 160, 45);
+        assert!(screen.contains("Colour from the active theme"), "{screen}");
+        // the list: move to bg3 and choose it
+        let target = crate::settings::theme_keys()
+            .iter()
+            .position(|k| *k == "bg3")
+            .unwrap();
+        if let Overlay::ChooseKey { row, .. } = app.overlay {
+            app.overlay = Overlay::ChooseKey { row, sel: target };
+        }
+        press(&mut app, "\n");
+        assert_eq!(app.settings.hover.highlight_colour, "bg3");
+        app.settings_page.bh_sel = at(BhRow::HoverUnderline);
+        press(&mut app, "ll"); // single → double → curly
+        app.settings_page.bh_sel = at(BhRow::HoverTextWeight);
+        press(&mut app, "l");
+        let look = app.hover_look(&app.settings.hover);
+        assert_eq!(look.bg, Some(Color::Rgb(4, 5, 6)));
+        assert_eq!(look.underline.map(|u| u.0), Some(Underline::Curly));
+        assert_eq!(look.weight, Modifier::BOLD);
+        assert_eq!(look.preview, Color::Rgb(7, 8, 9));
+        // drawn: the marker that out::Out turns into a curly underline
+        crate::hit::set_look(look);
+        let s = crate::hit::hover(ratatui::style::Style::new());
+        assert!(
+            s.add_modifier
+                .contains(Modifier::RAPID_BLINK | Modifier::BOLD)
+        );
+        assert!(render(&mut app, 160, 45).contains("Hover sample"));
+        // saved
+        let saved = crate::config::load(&dir.join("studio-config"), false);
+        assert_eq!(saved.settings.hover.underline, "curly");
+        crate::hit::set_look(Default::default());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

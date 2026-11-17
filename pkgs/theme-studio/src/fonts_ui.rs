@@ -13,13 +13,10 @@ use crate::fonts::{CHIPS, FontFocus, ROLE_USE, ROLES, Row};
 use crate::hit::{Target, hover};
 use crate::ui::{pane_title, panel_number};
 
-fn block(title: Line<'static>, focused: bool) -> Block<'static> {
-    let b = Block::bordered().title(title);
-    if focused {
-        b.border_style(Style::new().yellow())
-    } else {
-        b.border_style(Style::new().dark_gray())
-    }
+fn block(app: &App, area: Rect, title: Line<'static>, focused: bool) -> Block<'static> {
+    Block::bordered()
+        .title(title)
+        .border_style(crate::ui::pane_border(app, area, focused))
 }
 
 /// ¹ the font roles and ² the installed fonts (the fonts column; the sample
@@ -54,7 +51,12 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
     let t = &app.fonts;
 
     // ¹ roles: three lines each
-    let b = block(title1, active && t.focus == FontFocus::Slots);
+    let b = block(
+        app,
+        slots_area,
+        title1,
+        active && app.fonts.focus == FontFocus::Slots,
+    );
     let inner = b.inner(slots_area);
     f.render_widget(b, slots_area);
     let mut lines = Vec::new();
@@ -132,7 +134,7 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
 
     // ² installed fonts: search, filter chips, then the grouped list
     let browsing = active && matches!(t.focus, FontFocus::List | FontFocus::Search);
-    let b = block(title2, browsing);
+    let b = block(app, list_area, title2, browsing);
     let inner = b.inner(list_area);
     f.render_widget(b, list_area);
     if inner.height < 4 {
@@ -299,16 +301,12 @@ pub fn draw_fonts(f: &mut Frame, app: &mut App, slots_area: Rect, list_area: Rec
 pub fn draw_sample(f: &mut Frame, app: &mut App, area: Rect) {
     let title = Line::from(vec![panel_number(3), "Sample ".into()]);
     let title = pane_title(app, area, title, 3);
-    let b = Block::bordered().title(title).border_style(
-        if app.side == Side::Fonts
-            && app.preview.focus.is_none()
-            && app.fonts.focus == FontFocus::Sample
-        {
-            Style::new().yellow()
-        } else {
-            Style::new().dark_gray()
-        },
-    );
+    let focused = app.side == Side::Fonts
+        && app.preview.focus.is_none()
+        && app.fonts.focus == FontFocus::Sample;
+    let b = Block::bordered()
+        .title(title)
+        .border_style(crate::ui::pane_border(app, area, focused));
     let inner = b.inner(area);
     app.hits.add(inner, Target::PaneBody(3));
     f.render_widget(b, area);

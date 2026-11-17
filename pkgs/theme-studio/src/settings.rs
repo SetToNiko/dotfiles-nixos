@@ -9,8 +9,10 @@ use serde_json::Value;
 use crate::app::{App, Overlay};
 use crate::color::Rgb;
 use crate::history::{History, SnapshotInfo};
+use crate::hit::{HoverLook, Underline};
 use crate::keymap::{Action, Context, Key, Keymap, all_actions, display_seq};
 use crate::palette::GROUPS;
+use ratatui::style::{Color, Modifier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -50,10 +52,54 @@ pub enum BhRow {
     NerdFont,
     SaveSizes,
     ResetSizes,
+    HoverHighlight,
+    HoverHighlightColour,
+    HoverUnderline,
+    HoverUnderlineColour,
+    HoverText,
+    HoverTextColour,
+    HoverTextWeight,
+    PaneBorder,
+    PreviewBorder,
+}
+
+impl BhRow {
+    /// Rows whose value is a key of the system palette.
+    pub fn is_colour(self) -> bool {
+        matches!(
+            self,
+            BhRow::HoverHighlightColour
+                | BhRow::HoverUnderlineColour
+                | BhRow::HoverTextColour
+                | BhRow::PaneBorder
+                | BhRow::PreviewBorder
+        )
+    }
+}
+
+/// Every palette key, in the colour list's order (the choices for hover
+/// colours).
+pub fn theme_keys() -> Vec<&'static str> {
+    GROUPS
+        .iter()
+        .flat_map(|(_, keys)| keys.iter().copied())
+        .collect()
 }
 
 pub fn behaviour_rows() -> Vec<BhRow> {
-    let mut v = vec![BhRow::Leader, BhRow::Tabs];
+    let mut v = vec![
+        BhRow::Leader,
+        BhRow::Tabs,
+        BhRow::HoverHighlight,
+        BhRow::HoverHighlightColour,
+        BhRow::HoverUnderline,
+        BhRow::HoverUnderlineColour,
+        BhRow::HoverText,
+        BhRow::HoverTextColour,
+        BhRow::HoverTextWeight,
+        BhRow::PaneBorder,
+        BhRow::PreviewBorder,
+    ];
     v.extend((0..GROUPS.len()).map(BhRow::GroupOpen));
     v.extend([
         BhRow::PickerAtStart,
@@ -129,6 +175,7 @@ pub struct SettingsPage {
     pub km_sel: usize,
     pub km_scroll: usize,
     pub bh_sel: usize,
+    pub bh_scroll: usize,
     pub hist_file: usize,
     pub hist_focus: HistFocus,
     pub hist_sel: usize,
@@ -164,6 +211,7 @@ impl Default for SettingsPage {
             km_sel: 0,
             km_scroll: 0,
             bh_sel: 0,
+            bh_scroll: 0,
             hist_file: 0,
             hist_focus: HistFocus::Versions,
             hist_sel: 0,
@@ -289,6 +337,96 @@ fn wrap(i: usize, d: i32, n: usize) -> usize {
 }
 
 impl App {
+    // ----- hover look --------------------------------------------------------
+
+    /// A key of the active system palette as a colour (the terminal's own
+    /// colours when the palette can't be read).
+    pub fn theme_colour(&self, key: &str) -> Color {
+        if let Some(p) = &self.system_palette
+            && theme_keys().contains(&key)
+        {
+            let c = p.get(key);
+            return Color::Rgb(c.0, c.1, c.2);
+        }
+        match key {
+            "red" | "bg_red" => Color::Red,
+            "green" | "bg_green" => Color::Green,
+            "yellow" | "bg_yellow" | "orange" => Color::Yellow,
+            "blue" => Color::Blue,
+            "purple" => Color::Magenta,
+            "aqua" => Color::Cyan,
+            "fg0" | "fg1" => Color::White,
+            k if k.starts_with("grey") => Color::Gray,
+            _ => Color::DarkGray,
+        }
+    }
+
+    /// The hover settings as colours.
+    pub fn hover_look(&self, h: &crate::config::HoverSettings) -> HoverLook {
+        HoverLook {
+            bg: h.highlight.then(|| self.theme_colour(&h.highlight_colour)),
+            underline: Underline::parse(&h.underline)
+                .map(|u| (u, self.theme_colour(&h.underline_colour))),
+            fg: h.text.then(|| self.theme_colour(&h.text_colour)),
+            weight: match h.text_weight.as_str() {
+                "bold" => Modifier::BOLD,
+                "dim" => Modifier::DIM,
+                _ => Modifier::empty(),
+            },
+            pane: self.theme_colour(&h.pane_border),
+            preview: self.theme_colour(&h.preview_border),
+        }
+    }
+
+    /// The key a colour row holds.
+    fn colour_setting(&mut self, row: BhRow) -> Option<&mut String> {
+        let h = &mut self.settings.hover;
+        Some(match row {
+            BhRow::HoverHighlightColour => &mut h.highlight_colour,
+            BhRow::HoverUnderlineColour => &mut h.underline_colour,
+            BhRow::HoverTextColour => &mut h.text_colour,
+            BhRow::PaneBorder => &mut h.pane_border,
+            BhRow::PreviewBorder => &mut h.preview_border,
+            _ => return None,
+        })
+    }
+
+    /// Sets a colour row to a palette key (from the key list).
+    pub fn set_colour_setting(&mut self, row: BhRow, key: &str) {
+        if let Some(v) = self.colour_setting(row) {
+            *v = key.to_string();
+            self.save_settings();
+        }
+    }
+
+    /// Keys while the list of palette keys is open.
+    pub fn choose_key_key(
+        &mut self,
+        row: BhRow,
+        mut sel: usize,
+        k: ratatui::crossterm::event::KeyEvent,
+    ) {
+        use ratatui::crossterm::event::KeyCode;
+        let keys = theme_keys();
+        match k.code {
+            KeyCode::Esc => self.overlay = Overlay::None,
+            KeyCode::Enter => {
+                self.overlay = Overlay::None;
+                self.set_colour_setting(row, keys[sel]);
+            }
+            KeyCode::Up | KeyCode::Char('k') => sel = sel.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => sel = (sel + 1).min(keys.len() - 1),
+            KeyCode::PageUp => sel = sel.saturating_sub(10),
+            KeyCode::PageDown => sel = (sel + 10).min(keys.len() - 1),
+            KeyCode::Home | KeyCode::Char('g') => sel = 0,
+            KeyCode::End | KeyCode::Char('G') => sel = keys.len() - 1,
+            _ => {}
+        }
+        if matches!(self.overlay, Overlay::ChooseKey { .. }) {
+            self.overlay = Overlay::ChooseKey { row, sel };
+        }
+    }
+
     // ----- shared ----------------------------------------------------------
 
     pub fn history(&self) -> Option<History> {
@@ -641,6 +779,15 @@ impl App {
             BhRow::NerdFont => s.font_list.nerd_font.clone(),
             BhRow::SaveSizes => "Enter".into(),
             BhRow::ResetSizes => "Enter".into(),
+            BhRow::HoverHighlight => yes(s.hover.highlight),
+            BhRow::HoverUnderline => s.hover.underline.clone(),
+            BhRow::HoverText => yes(s.hover.text),
+            BhRow::HoverTextWeight => s.hover.text_weight.clone(),
+            BhRow::HoverHighlightColour => s.hover.highlight_colour.clone(),
+            BhRow::HoverUnderlineColour => s.hover.underline_colour.clone(),
+            BhRow::HoverTextColour => s.hover.text_colour.clone(),
+            BhRow::PaneBorder => s.hover.pane_border.clone(),
+            BhRow::PreviewBorder => s.hover.preview_border.clone(),
         }
     }
 
@@ -659,6 +806,15 @@ impl App {
             BhRow::NerdFont => "Font list Nerd Font filter at start".into(),
             BhRow::SaveSizes => "Save the current pane sizes as the default".into(),
             BhRow::ResetSizes => "Pane sizes back to the shipped defaults".into(),
+            BhRow::HoverHighlight => "Hover: highlight the background".into(),
+            BhRow::HoverHighlightColour => "Hover: highlight colour".into(),
+            BhRow::HoverUnderline => "Hover: underline".into(),
+            BhRow::HoverUnderlineColour => "Hover: underline colour".into(),
+            BhRow::HoverText => "Hover: change the text".into(),
+            BhRow::HoverTextColour => "Hover: text colour".into(),
+            BhRow::HoverTextWeight => "Hover: text weight".into(),
+            BhRow::PaneBorder => "Hover: pane border colour".into(),
+            BhRow::PreviewBorder => "Hover: preview window frame colour".into(),
         }
     }
 
@@ -676,8 +832,21 @@ impl App {
             let i = opts.iter().position(|o| *o == cur).unwrap_or(0);
             opts[wrap(i, d, opts.len())].to_string()
         };
+        let row = rows[self.settings_page.bh_sel];
+        // colours: Enter opens the list of keys; left/right steps through it
+        if row.is_colour() {
+            let keys = theme_keys();
+            let cur = self.colour_setting(row).cloned().unwrap_or_default();
+            let i = keys.iter().position(|k| *k == cur).unwrap_or(0);
+            if a == Action::Confirm {
+                self.overlay = Overlay::ChooseKey { row, sel: i };
+            } else {
+                self.set_colour_setting(row, keys[wrap(i, d, keys.len())]);
+            }
+            return;
+        }
         let s = &mut self.settings;
-        match rows[self.settings_page.bh_sel] {
+        match row {
             BhRow::Leader => {
                 self.overlay = Overlay::Capture {
                     what: Capture::Leader,
@@ -744,6 +913,23 @@ impl App {
                 self.sizes = s.layout.sizes.clone();
                 self.info("Pane sizes back to the shipped defaults");
             }
+            BhRow::HoverHighlight => s.hover.highlight = !s.hover.highlight,
+            BhRow::HoverUnderline => {
+                s.hover.underline = cycle(
+                    &s.hover.underline,
+                    &["off", "single", "double", "curly", "dotted", "dashed"],
+                )
+            }
+            BhRow::HoverText => s.hover.text = !s.hover.text,
+            BhRow::HoverTextWeight => {
+                s.hover.text_weight = cycle(&s.hover.text_weight, &["normal", "bold", "dim"])
+            }
+            // handled above
+            BhRow::HoverHighlightColour
+            | BhRow::HoverUnderlineColour
+            | BhRow::HoverTextColour
+            | BhRow::PaneBorder
+            | BhRow::PreviewBorder => {}
         }
         self.save_settings();
     }

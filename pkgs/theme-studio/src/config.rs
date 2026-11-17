@@ -192,6 +192,45 @@ pub struct Settings {
     pub colours: ColourSettings,
     pub fonts: FontSettings,
     pub font_list: FontListSettings,
+    pub hover: HoverSettings,
+}
+
+/// How clickable things look under the mouse. Colours are keys of the
+/// active system palette ("yellow", "bg3", …).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct HoverSettings {
+    /// A background colour.
+    pub highlight: bool,
+    pub highlight_colour: String,
+    /// "off", "single", "double", "curly", "dotted" or "dashed"
+    pub underline: String,
+    pub underline_colour: String,
+    /// A text colour and weight.
+    pub text: bool,
+    pub text_colour: String,
+    /// "normal", "bold" or "dim"
+    pub text_weight: String,
+    /// The border of a pane under the mouse.
+    pub pane_border: String,
+    /// The frame of a preview window (nvim, the shell) under the mouse.
+    pub preview_border: String,
+}
+
+impl Default for HoverSettings {
+    fn default() -> Self {
+        HoverSettings {
+            highlight: false,
+            highlight_colour: "bg3".into(),
+            underline: "single".into(),
+            underline_colour: "yellow".into(),
+            text: true,
+            text_colour: "yellow".into(),
+            text_weight: "normal".into(),
+            pane_border: "aqua".into(),
+            preview_border: "purple".into(),
+        }
+    }
 }
 
 /// settings.json's format version.
@@ -205,6 +244,7 @@ impl Default for Settings {
             colours: ColourSettings::default(),
             fonts: FontSettings::default(),
             font_list: FontListSettings::default(),
+            hover: HoverSettings::default(),
         }
     }
 }
