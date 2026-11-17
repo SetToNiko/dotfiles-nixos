@@ -40,7 +40,28 @@
     "root": {
       "inputs": {
         "home-manager": "home-manager",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "theme-studio": "theme-studio"
+      }
+    },
+    "theme-studio": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794958429,
+        "narHash": "sha256-cuxAsZ4h4W5uYywcuEuq91SYx+2dFYvuzppez2DwPIA=",
+        "owner": "SetToNiko",
+        "repo": "theme-studio",
+        "rev": "bd4df8f07ca5a866c41bc9912b75419e20a4b08e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "SetToNiko",
+        "repo": "theme-studio",
+        "type": "github"
       }
     }
   },

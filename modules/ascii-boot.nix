@@ -7,8 +7,9 @@
 # kept in /var/lib/ascii-boot. A plain `reboot` reuses the last set.
 # Neither host has an encrypted disk; this theme draws no passphrase prompt.
 # The greeter's font is the font preset's Monospace font, set by Theme
-# Studio's NixOS module (theme-studio/packaging/nix/nixos-module.nix) from
-# the greeter config below. (Plymouth plays images and draws no text.)
+# Studio's NixOS module (services.theme-studio.loginFont, from the
+# theme-studio flake input) from the greeter config below. (Plymouth plays
+# images and draws no text.)
 
 { pkgs, ... }:
 
@@ -37,8 +38,6 @@ let
   } ''python3 -c "from PIL import Image; Image.new('RGB', (1, 1)).save('$out', 'PNG')"'';
 in
 {
-  imports = [ ../theme-studio/packaging/nix/nixos-module.nix ];
-
   boot.plymouth = {
     enable = true;
     theme = "ascii";

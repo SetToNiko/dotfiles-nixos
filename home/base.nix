@@ -134,14 +134,13 @@ in
     org.gradle.daemon.idletimeout=15000
   '';
 
-  # Theme Studio (theme-studio/, home-module.nix there): the studio and the
-  # theme-switch / themes-switch / font-switch commands, run live from the
-  # checkout; the data in configs/theme-studio, linked to
+  # Theme Studio (the theme-studio flake input, its home-manager module): the
+  # studio and the theme-switch / themes-switch / font-switch commands, as
+  # pinned in flake.lock; the data in configs/theme-studio, linked to
   # ~/.config/theme-studio; ~/.config/colors and ~/.config/fonts regenerated
   # on every switch (keeping the current ones); downloaded fonts installed.
   programs.theme-studio = {
     enable = true;
-    live = "${config.home.homeDirectory}/dotfiles-nixos/theme-studio";
     dataDir = "${dotfiles}/theme-studio";
     fontsList = ./fonts-installed.json;
     fallbackPalette = "Gruvbox Dark";

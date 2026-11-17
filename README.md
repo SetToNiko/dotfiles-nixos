@@ -28,16 +28,23 @@ A theme is a colour palette plus a font preset, applied across the desktop
 
 - `$mod+t` picks a theme, `$mod+p` only a palette, `$mod+Shift+t` only a
   font preset (rofi menus; Alt+BackSpace deletes).
-- `$mod+Ctrl+t` opens Theme Studio (`theme-studio/`, a project of its own), which edits
-  them with a live preview and downloads fonts.
-- The data is in `configs/`: `themes.json`, `palettes.json` and
-  `fonts.json`, applied by `themes-switch.sh`, `theme-switch.sh` and
-  `font-switch.sh`. Font sizes get a per-host offset from
-  `configs/hosts/<host>/fonts.json`.
+- `$mod+Ctrl+t` opens Theme Studio, which edits them with a live preview
+  and downloads fonts. It's a project of its own,
+  [SetToNiko/theme-studio](https://github.com/SetToNiko/theme-studio): the
+  flake takes it as the `theme-studio` input (pinned in `flake.lock`;
+  `nix flake update theme-studio` brings in new versions) and sets it up in
+  `home/base.nix` (`programs.theme-studio`) and `modules/ascii-boot.nix`
+  (the login screen's font).
+- The data is in `configs/theme-studio/` (`themes.json`, `palettes.json`,
+  `fonts.json`, the studio's keymaps and settings), linked to
+  `~/.config/theme-studio`, and applied by the `themes-switch`,
+  `theme-switch` and `font-switch` commands. Font sizes get a per-host
+  offset from `configs/hosts/<host>/fonts.json`.
 - Fonts downloaded in the studio are listed in `home/fonts-installed.json`
   and installed by Nix on the next rebuild.
 
-More in [theme-studio/docs/theme-studio.md](theme-studio/docs/theme-studio.md).
+More in the project's guide,
+[docs/theme-studio.md](https://github.com/SetToNiko/theme-studio/blob/main/docs/theme-studio.md).
 
 ## Building
 

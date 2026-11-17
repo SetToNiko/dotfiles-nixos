@@ -6,6 +6,11 @@
       url = "github:nix-community/home-manager/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Theme Studio, a project of its own (github.com/SetToNiko/theme-studio)
+    theme-studio = {
+      url = "github:SetToNiko/theme-studio";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -13,6 +18,7 @@
       self,
       nixpkgs,
       home-manager,
+      theme-studio,
       ...
     }:
     let
@@ -29,6 +35,7 @@
             ./modules/base.nix
             ./hosts/${host}
             home-manager.nixosModules.home-manager
+            theme-studio.nixosModules.default
             {
               home-manager = {
                 useGlobalPkgs = true;
@@ -36,7 +43,7 @@
                 extraSpecialArgs = { inherit host; };
                 users.niko.imports = [
                   ./home/base.nix
-                  ./theme-studio/packaging/nix/home-module.nix
+                  theme-studio.homeManagerModules.default
                   ./hosts/${host}/home.nix
                 ];
                 backupFileExtension = "backup";
@@ -51,9 +58,9 @@
         desktop = mkHost "desktop";
       };
 
-      # Theme Studio (theme-studio/, a project of its own), e.g.
+      # Theme Studio (the theme-studio input), e.g.
       # `nix run ~/dotfiles-nixos#theme-studio`.
-      packages.${system}.theme-studio = pkgs.callPackage ./theme-studio/packaging/nix/package.nix { };
+      packages.${system}.theme-studio = theme-studio.packages.${system}.default;
 
       # One dev shell per file in devshells/: devshells/<name>.nix becomes
       # devShells.<name>, used from a project with `use flake ~/dotfiles-nixos#<name>`.
