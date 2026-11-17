@@ -676,7 +676,9 @@ impl App {
     /// Runs `p` now, or asks first when there are unsaved changes.
     fn guard(&mut self, p: Pending) {
         let dirty = match p {
-            Pending::Quit => self.dirty() || self.fonts.dirty(),
+            Pending::Quit => {
+                self.dirty() || self.fonts.dirty() || self.settings_page.draft.is_some()
+            }
             _ if p.is_fonts() => self.fonts.dirty(),
             _ => self.dirty(),
         };
@@ -716,6 +718,9 @@ impl App {
         if fonts && self.fonts.dirty() && !self.fonts.is_new {
             let name = self.fonts.name.clone();
             self.fonts_save_as(&name, false);
+        }
+        if matches!(p, Pending::Quit) && self.settings_page.draft.is_some() {
+            self.settings_save();
         }
     }
 
@@ -1450,13 +1455,14 @@ impl App {
         let overlay = std::mem::replace(&mut self.overlay, Overlay::None);
         self.overlay = match overlay {
             Overlay::Help => Overlay::None,
+            // Settings page pop-ups edit the draft (see draft.rs)
             Overlay::ChooseKey { row, sel } => {
-                self.choose_key_key(row, sel, k);
+                self.with_draft(|app| app.choose_key_key(row, sel, k));
                 return;
             }
             Overlay::Capture { what, keys } => {
                 // capture_key sets the overlay itself
-                self.capture_key(what, keys, k);
+                self.with_draft(|app| app.capture_key(what, keys, k));
                 return;
             }
             Overlay::Prompt {
@@ -1467,7 +1473,7 @@ impl App {
                 KeyCode::Esc => Overlay::None,
                 KeyCode::Enter => {
                     // finish_prompt may open something else
-                    self.finish_prompt(purpose, input);
+                    self.with_draft(|app| app.finish_prompt(purpose, input));
                     return;
                 }
                 KeyCode::Backspace => {
@@ -1494,7 +1500,7 @@ impl App {
             },
             Overlay::Ask { question, then } => match k.code {
                 KeyCode::Char('y') | KeyCode::Enter => {
-                    self.run_deferred(then);
+                    self.with_draft(|app| app.run_deferred(then));
                     return;
                 }
                 KeyCode::Esc | KeyCode::Char('n') => Overlay::None,
@@ -1829,7 +1835,9 @@ impl App {
                 if let Overlay::ChooseKey { row, sel } = self.overlay {
                     if sel == i {
                         self.overlay = Overlay::None;
-                        self.set_colour_setting(row, crate::behaviour::theme_keys()[i]);
+                        self.with_draft(|app| {
+                            app.set_colour_setting(row, crate::behaviour::theme_keys()[i])
+                        });
                     } else {
                         self.overlay = Overlay::ChooseKey { row, sel: i };
                     }
@@ -1842,9 +1850,13 @@ impl App {
                     }
                 }
             }
-            T::SettingsTab(_) | T::SettingsRow(_) | T::HistFile(_) | T::SettingsDiff => {
-                self.settings_click(t)
-            }
+            T::SettingsTab(_)
+            | T::SettingsRow(_)
+            | T::HistFile(_)
+            | T::SettingsDiff
+            | T::PresetRow(_) => self.settings_click(t),
+            T::SettingsButton('s') => self.settings_save(),
+            T::SettingsButton(_) => self.settings_discard(),
             T::ConfirmChoice(c) => {
                 let code = if c == 'n' {
                     KeyCode::Esc
@@ -2732,7 +2744,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_keymaps_tab_rebinds_and_changes_the_leader() {
+    fn settings_changes_wait_for_save() {
         use crate::settings::KmRow;
         let store = temp_store("settings-keys");
         let dir = store.dir.clone();
@@ -2741,37 +2753,54 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
         assert_eq!(app.page, Page::Settings);
         assert_eq!(app.contexts()[0], Context::Settings);
-        let screen = render(&mut app, 160, 45);
-        assert!(
-            screen.contains("‹ Vim ›") && screen.contains("Keymaps"),
-            "{screen}"
-        );
-        // Enter on "quit" records new keys: Q, then Enter keeps them
-        let row = app
-            .keymap_rows()
-            .iter()
-            .position(|r| *r == KmRow::Binding(Context::Global, Action::Quit))
-            .unwrap();
-        app.settings_page.km_sel = row;
+        let row_of = |app: &mut App, r: KmRow| {
+            app.show_draft(|a| a.keymap_rows().iter().position(|x| *x == r).unwrap())
+        };
+        let draft_keys =
+            |app: &mut App, c: Context, a: Action| app.show_draft(|x| x.keymap.keys_of(c, a));
+        let on_disk =
+            |dir: &std::path::Path| crate::config::load(&dir.join("studio-config"), false);
+        let q = Key::parse_seq("Q", app.keymap.leader).unwrap();
+        // Enter on "quit" records new keys: Q, then Enter keeps them, unsaved
+        app.settings_page.km_sel = row_of(&mut app, KmRow::Binding(Context::Global, Action::Quit));
         press(&mut app, "\n");
         assert!(matches!(app.overlay, Overlay::Capture { .. }));
         press(&mut app, "Q");
         assert!(render(&mut app, 160, 45).contains("Q▏"));
         press(&mut app, "\n");
-        let q = Key::parse_seq("Q", app.keymap.leader).unwrap();
+        assert_eq!(
+            draft_keys(&mut app, Context::Global, Action::Quit),
+            vec![q.clone()]
+        );
+        assert_ne!(
+            app.keymap.keys_of(Context::Global, Action::Quit),
+            vec![q.clone()],
+            "not live yet"
+        );
+        assert_ne!(
+            on_disk(&dir).keymap.keys_of(Context::Global, Action::Quit),
+            vec![q.clone()]
+        );
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("● 1 unsaved")
+                && screen.contains("s Save")
+                && screen.contains("Settings ●"),
+            "{screen}"
+        );
+        // s saves: live and on disk
+        press(&mut app, "s");
+        assert!(app.settings_page.draft.is_none());
         assert_eq!(
             app.keymap.keys_of(Context::Global, Action::Quit),
             vec![q.clone()]
         );
-        let saved = crate::config::load(&dir.join("studio-config"), false);
-        assert_eq!(saved.keymap.keys_of(Context::Global, Action::Quit), vec![q]);
-        // binding pin to y (copy-hex in Colours) saves with a warning
-        let row = app
-            .keymap_rows()
-            .iter()
-            .position(|r| *r == KmRow::Binding(Context::Colours, Action::Pin))
-            .unwrap();
-        app.settings_page.km_sel = row;
+        assert_eq!(
+            on_disk(&dir).keymap.keys_of(Context::Global, Action::Quit),
+            vec![q]
+        );
+        // binding pin to y (copy-hex in Colours) warns; D discards
+        app.settings_page.km_sel = row_of(&mut app, KmRow::Binding(Context::Colours, Action::Pin));
         press(&mut app, "ay\n");
         assert!(
             app.message
@@ -2780,38 +2809,45 @@ mod tests {
             "{:?}",
             app.message
         );
-        // d unbinds
-        press(&mut app, "d");
+        assert_eq!(draft_keys(&mut app, Context::Colours, Action::Pin).len(), 2);
+        press(&mut app, "D");
+        assert!(app.settings_page.draft.is_none());
+        assert_eq!(app.keymap.keys_of(Context::Colours, Action::Pin).len(), 1);
+        // d unbinds, s saves; <leader>u undoes that save, again redoes
+        press(&mut app, "ds");
         assert!(app.keymap.keys_of(Context::Colours, Action::Pin).is_empty());
-        // <leader>u undoes the last change (pin's keys come back), again redoes
         press(&mut app, " u");
-        assert_eq!(app.keymap.keys_of(Context::Colours, Action::Pin).len(), 2);
+        assert_eq!(app.keymap.keys_of(Context::Colours, Action::Pin).len(), 1);
         press(&mut app, " u");
         assert!(app.keymap.keys_of(Context::Colours, Action::Pin).is_empty());
-        // n saves the keymap as a new preset, which becomes active
-        press(&mut app, "nMine\n");
-        assert_eq!(app.keymap.name, "Mine");
-        assert!(app.presets.iter().any(|p| p.name == "Mine"));
         // Behaviour tab: the leader, by pressing it
         press(&mut app, "]");
-        app.settings_page.bh_sel = 0;
+        app.settings_page.bh_sel = 1;
         press(&mut app, "\n,");
-        assert_eq!(
-            app.keymap.leader,
-            Key::new(KeyCode::Char(','), KeyModifiers::NONE)
+        let comma = Key::new(KeyCode::Char(','), KeyModifiers::NONE);
+        assert_eq!(app.show_draft(|a| a.keymap.leader), comma);
+        assert_ne!(app.keymap.leader, comma, "not live yet");
+        // quitting asks, and "save first" saves the settings
+        press(&mut app, "Q"); // quit is Q now
+        assert!(matches!(app.overlay, Overlay::Confirm(Pending::Quit)));
+        let screen = render(&mut app, 160, 45);
+        assert!(
+            screen.contains("Unsaved: ") && screen.contains("settings."),
+            "{screen}"
         );
+        press(&mut app, "s");
+        assert!(app.quit);
+        assert_eq!(app.keymap.leader, comma);
+        assert_eq!(on_disk(&dir).keymap.leader, comma);
         assert_eq!(
             app.keymap.keys_of(Context::Global, Action::SavePalette),
-            vec![Key::parse_seq(",sp", app.keymap.leader).unwrap()]
+            vec![Key::parse_seq(",sp", comma).unwrap()]
         );
-        // Esc goes back to the main page
-        press(&mut app, "\x1b");
-        assert_eq!(app.page, Page::Main);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn settings_behaviour_tab_saves_settings() {
+    fn settings_behaviour_tab_edits_then_saves() {
         use crate::behaviour::{BhRow, behaviour_rows};
         let store = temp_store("settings-behaviour");
         let dir = store.dir.clone();
@@ -2826,22 +2862,35 @@ mod tests {
             "{screen}"
         );
         let rows = behaviour_rows();
+        let on_disk =
+            |dir: &std::path::Path| crate::config::load(&dir.join("studio-config"), false);
         app.settings_page.bh_sel = rows.iter().position(|r| *r == BhRow::Tabs).unwrap();
         press(&mut app, "l");
-        assert_eq!(app.settings.layout.tabs, "top");
-        let saved = crate::config::load(&dir.join("studio-config"), false);
-        assert_eq!(saved.settings.layout.tabs, "top");
-        // a click on the selected row changes it too
+        assert_eq!(app.show_draft(|a| a.settings.layout.tabs.clone()), "top");
+        assert_eq!(app.settings.layout.tabs, "bottom", "not live yet");
+        // changing it back leaves nothing unsaved
         render(&mut app, 160, 45);
         let i = app.settings_page.bh_sel;
         click_on(&mut app, crate::hit::Target::SettingsRow(i));
-        assert_eq!(app.settings.layout.tabs, "bottom");
-        // the current pane sizes become the default
+        assert!(app.settings_page.draft.is_none());
+        // again, then the Save button
+        press(&mut app, "l");
+        render(&mut app, 160, 45);
+        click_on(&mut app, crate::hit::Target::SettingsButton('s'));
+        assert_eq!(app.settings.layout.tabs, "top");
+        assert_eq!(on_disk(&dir).settings.layout.tabs, "top");
+        // the current pane sizes become the default when saved
         app.sizes.fonts_width = 0.4;
         app.settings_page.bh_sel = rows.iter().position(|r| *r == BhRow::SaveSizes).unwrap();
-        press(&mut app, "\n");
-        let saved = crate::config::load(&dir.join("studio-config"), false);
-        assert_eq!(saved.settings.layout.sizes.fonts_width, 0.4);
+        press(&mut app, "\ns");
+        assert_eq!(on_disk(&dir).settings.layout.sizes.fonts_width, 0.4);
+        // the Discard button drops changes
+        app.settings_page.bh_sel = rows.iter().position(|r| *r == BhRow::Tabs).unwrap();
+        press(&mut app, "l");
+        render(&mut app, 160, 45);
+        click_on(&mut app, crate::hit::Target::SettingsButton('d'));
+        assert!(app.settings_page.draft.is_none());
+        assert_eq!(app.settings.layout.tabs, "top");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -3004,7 +3053,10 @@ mod tests {
             app.overlay = Overlay::ChooseKey { row, sel: target };
         }
         press(&mut app, "\n");
-        assert_eq!(app.settings.hover.look.highlight_colour, "bg3");
+        assert_eq!(
+            app.show_draft(|a| a.settings.hover.look.highlight_colour.clone()),
+            "bg3"
+        );
         app.settings_page.bh_sel = at(BhRow::Underline(LookId::Hover));
         press(&mut app, "l"); // single → double
         app.settings_page.bh_sel = at(BhRow::TextWeight(LookId::Hover));
@@ -3012,6 +3064,7 @@ mod tests {
         // the derived-colour highlight is its own look
         app.settings_page.bh_sel = at(BhRow::Underline(LookId::Derived));
         press(&mut app, "l"); // off → single
+        press(&mut app, "s"); // save
         let looks = app.looks(&app.settings);
         assert_eq!(looks.hover.bg, Some(Color::Rgb(4, 5, 6)));
         assert_eq!(looks.hover.underline.map(|u| u.0), Some(Underline::Double));

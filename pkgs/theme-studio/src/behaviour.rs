@@ -206,7 +206,6 @@ impl App {
     pub fn set_colour_setting(&mut self, row: BhRow, key: &str) {
         if let Some(v) = self.colour_setting(row) {
             *v = key.to_string();
-            self.save_settings();
         }
     }
 
@@ -392,7 +391,6 @@ impl App {
                     what: Capture::Leader,
                     keys: Vec::new(),
                 };
-                return;
             }
             BhRow::Highlight(id) => {
                 let l = self.look_settings(id);
@@ -412,12 +410,11 @@ impl App {
             }
             BhRow::SaveSizes => {
                 self.settings.layout.sizes = self.sizes.clone();
-                self.info("Saved the current pane sizes as the default");
+                self.info("The current pane sizes become the default (when saved)");
             }
             BhRow::ResetSizes => {
                 self.settings.layout.sizes = crate::config::Sizes::default();
-                self.sizes = self.settings.layout.sizes.clone();
-                self.info("Pane sizes back to the shipped defaults");
+                self.info("Default pane sizes back to the shipped ones (applied when saved)");
             }
             _ => {
                 let s = &mut self.settings;
@@ -476,10 +473,9 @@ impl App {
                             ],
                         )
                     }
-                    _ => return,
+                    _ => {}
                 }
             }
         }
-        self.save_settings();
     }
 }

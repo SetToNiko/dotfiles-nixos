@@ -46,6 +46,10 @@ pub enum Target {
     HistFile(usize),
     /// History tab: the preview (scrolls; no hover).
     SettingsDiff,
+    /// Settings page: Save ('s') or Discard ('d').
+    SettingsButton(char),
+    /// Keymaps tab: a preset in the preset list.
+    PresetRow(usize),
 }
 
 impl Target {

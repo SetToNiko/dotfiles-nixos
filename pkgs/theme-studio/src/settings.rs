@@ -1,6 +1,6 @@
-//! The Settings page (F3): Keymaps, Behaviour and History tabs. Every change
-//! is saved straight away (keymaps.json / settings.json), and every save goes
-//! through the history, so it can be undone.
+//! The Settings page (F3): Keymaps, Behaviour and History tabs. Keymaps and
+//! Behaviour changes wait in a draft until Save (see draft.rs); History acts
+//! at once. Every write goes through the history, so it can be undone.
 
 use std::path::PathBuf;
 
@@ -99,6 +99,12 @@ pub struct SettingsPage {
     pub hist_scroll: usize,
     /// The keyboard is on the tab strip (left/right change tabs).
     pub tabs_focused: bool,
+    /// Unsaved Keymaps / Behaviour changes.
+    pub draft: Option<crate::draft::Draft>,
+    /// A config file was reloaded during a draft edit (see with_draft).
+    pub reloaded: bool,
+    /// Keymaps tab: browsing presets, with this one highlighted.
+    pub browse: Option<usize>,
     /// The difference view shows everything, not just what differs.
     pub show_all: bool,
     pub diff_scroll: usize,
@@ -136,6 +142,9 @@ impl Default for SettingsPage {
             hist_sel: 0,
             hist_scroll: 0,
             tabs_focused: false,
+            draft: None,
+            reloaded: false,
+            browse: None,
             show_all: false,
             diff_scroll: 0,
             versions: None,
@@ -271,21 +280,13 @@ impl App {
         }
     }
 
+    /// Copies the active keymap into its preset (in the draft: Save writes).
     fn save_keymaps(&mut self) {
         let active = self.keymap.name.clone();
         if let Some(p) = self.presets.iter_mut().find(|p| p.name == active) {
             *p = self.keymap.clone();
         } else {
             self.presets.push(self.keymap.clone());
-        }
-        if let Err(e) = crate::config::save_keymaps(&self.config_dir, &self.presets, &active) {
-            self.error(format!("Saving keymaps.json: {e:#}"));
-        }
-    }
-
-    pub(crate) fn save_settings(&mut self) {
-        if let Err(e) = crate::config::save_settings(&self.config_dir, &self.settings) {
-            self.error(format!("Saving settings.json: {e:#}"));
         }
     }
 
@@ -307,6 +308,11 @@ impl App {
                 self.keymap = l.keymap;
                 self.presets = l.presets;
                 self.settings = l.settings;
+                // unsaved Settings page changes were made against the old file
+                if self.settings_page.draft.take().is_some() && !self.settings_page.reloaded {
+                    self.info("The unsaved settings were dropped");
+                }
+                self.settings_page.reloaded = true;
             }
             _ => {}
         }
@@ -423,6 +429,9 @@ impl App {
                 );
                 return;
             }
+            // the preset's Save key saves the page; Discard drops the changes
+            Action::Save => return self.settings_save(),
+            Action::Discard => return self.settings_discard(),
             // Esc leaves the page
             Action::Back => {
                 self.page = crate::app::Page::Main;
@@ -439,9 +448,10 @@ impl App {
             }
             _ => {}
         }
+        // Keymaps and Behaviour edit the draft; History acts at once
         match self.settings_page.tab {
-            Tab::Keymaps => self.run_keymaps_tab(a),
-            Tab::Behaviour => self.run_behaviour_tab(a),
+            Tab::Keymaps => self.with_draft(|app| app.run_keymaps_tab(a)),
+            Tab::Behaviour => self.with_draft(|app| app.run_behaviour_tab(a)),
             Tab::History => self.run_history_tab(a),
         }
     }
@@ -450,7 +460,11 @@ impl App {
     fn settings_at_edge(&mut self, up: bool) -> bool {
         let at = |sel: usize, n: usize| if up { sel == 0 } else { sel + 1 >= n };
         match self.settings_page.tab {
-            Tab::Keymaps => at(self.settings_page.km_sel, self.keymap_rows().len()),
+            Tab::Keymaps if self.settings_page.browse.is_some() => false,
+            Tab::Keymaps => {
+                let n = self.show_draft(|app| app.keymap_rows().len());
+                at(self.settings_page.km_sel, n)
+            }
             Tab::Behaviour => self.behaviour_at_edge(up),
             Tab::History => match self.settings_page.hist_focus {
                 HistFocus::Files => at(self.settings_page.hist_file, FILES.len()),
@@ -607,9 +621,9 @@ impl App {
         self.keymap.set_keys(ctx, action, all);
         self.save_keymaps();
         if clashes.is_empty() {
-            self.info(format!("Saved the keys for \"{}\"", action.describe()));
+            self.info(format!("New keys for \"{}\" (unsaved)", action.describe()));
         } else {
-            self.error(format!("Saved, but: {}", clashes.join("; ")));
+            self.error(format!("New keys (unsaved), but: {}", clashes.join("; ")));
         }
     }
 
@@ -778,7 +792,7 @@ impl App {
                 km.name = text.clone();
                 self.keymap = km;
                 self.save_keymaps();
-                self.info(format!("Saved the keymap as \"{text}\" (now active)"));
+                self.info(format!("New preset \"{text}\", now active (unsaved)"));
             }
             Naming::Version(file) => {
                 let now = std::fs::read_to_string(self.file_path(file))

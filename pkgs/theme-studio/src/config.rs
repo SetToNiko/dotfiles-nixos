@@ -344,7 +344,7 @@ fn default_keymaps() -> Value {
 }
 
 /// keymaps.json's format version. 2: panes are `<leader>1`…`<leader>7`.
-const KEYMAPS_VERSION: u64 = 2;
+pub const KEYMAPS_VERSION: u64 = 2;
 
 /// Updates an older keymaps.json. Version 1 (no "version") had panes on the
 /// plain digits; bindings still exactly like that move to the leader, so
@@ -420,19 +420,6 @@ fn load_keymaps(v: &Value, warnings: &mut Vec<String>) -> (Keymap, Vec<Keymap>, 
     }
     out.insert("presets".into(), Value::Object(obj));
     (active, presets, Value::Object(out))
-}
-
-/// Writes keymaps.json: every preset and which one is active.
-pub fn save_keymaps(dir: &Path, presets: &[Keymap], active: &str) -> Result<()> {
-    let mut obj = Map::new();
-    for p in presets {
-        obj.insert(p.name.clone(), p.to_json());
-    }
-    let mut m = Map::new();
-    m.insert("version".into(), Value::from(KEYMAPS_VERSION));
-    m.insert("active".into(), Value::String(active.to_string()));
-    m.insert("presets".into(), Value::Object(obj));
-    write_json(&dir.join("keymaps.json"), &Value::Object(m))
 }
 
 /// Writes settings.json.

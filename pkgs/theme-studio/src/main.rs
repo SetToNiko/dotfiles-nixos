@@ -5,6 +5,7 @@ mod behaviour;
 mod color;
 mod config;
 mod desktop;
+mod draft;
 mod font_tree;
 mod fonts;
 mod fonts_ui;

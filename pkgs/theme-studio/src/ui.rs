@@ -266,7 +266,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Arrangement::TooSmall { .. } => {}
         Arrangement::Page { body, status } => {
             if app.page == Page::Settings {
-                crate::settings_ui::draw_settings(f, app, body);
+                // as edited; Save / Discard drawn with what's live
+                let changes = app.draft_changes();
+                app.show_draft(|app| crate::settings_ui::draw_settings(f, app, body));
+                crate::settings_ui::draw_save_buttons(f, app, body, changes);
             } else {
                 draw_page(f, app, body);
             }
@@ -323,7 +326,13 @@ fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect) -> u16 {
             .key_for(&[Context::Global], action)
             .map(|k| friendly(&k))
             .unwrap_or_default();
-        let text = format!(" {key} {label} ");
+        // a dot on Settings while it has unsaved changes
+        let dot = if page == Page::Settings && app.settings_page.draft.is_some() {
+            " ●"
+        } else {
+            ""
+        };
+        let text = format!(" {key} {label}{dot} ");
         let w = (text.chars().count() as u16).min((area.x + area.width).saturating_sub(x));
         let r = Rect {
             x,
@@ -1527,8 +1536,25 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
                 f.render_widget(Paragraph::new(chunk.to_vec()), col);
             }
         }
-        Overlay::Confirm(_) => {
-            let r = centered(area, 56, 5);
+        Overlay::Confirm(p) => {
+            // what's unsaved: the palette, the font preset, the settings
+            let quit = matches!(p, crate::app::Pending::Quit);
+            let fonts = matches!(
+                p,
+                crate::app::Pending::NewFonts | crate::app::Pending::OpenFonts(_)
+            );
+            let mut what = Vec::new();
+            if (quit || !fonts) && app.dirty() {
+                what.push(format!("palette \"{}\"", app.name));
+            }
+            if (quit || fonts) && app.fonts.dirty() {
+                what.push(format!("font preset \"{}\"", app.fonts.name));
+            }
+            if quit && app.settings_page.draft.is_some() {
+                what.push("settings".to_string());
+            }
+            let what = format!(" Unsaved: {}.", what.join(", "));
+            let r = centered(area, (what.chars().count() as u16 + 4).max(56), 5);
             let y = r.y + 3;
             // the choices are clickable, like their keys
             let mut button = |text: &'static str, x: u16, choice: char, base: Style| {
@@ -1558,11 +1584,7 @@ fn draw_overlay(f: &mut Frame, app: &mut App, area: Rect) {
             }
             spans.push("  ".into());
             spans.push(button(" Esc  cancel ", x + 2, 'n', Style::new()).0);
-            let lines = vec![
-                Line::raw(format!(" \"{}\" has unsaved changes.", app.name)),
-                Line::raw(""),
-                Line::from(spans),
-            ];
+            let lines = vec![Line::raw(what), Line::raw(""), Line::from(spans)];
             popup(f, r, "Unsaved changes", lines);
         }
         Overlay::SaveAs {

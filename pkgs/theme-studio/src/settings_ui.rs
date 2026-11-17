@@ -310,7 +310,8 @@ fn draw_behaviour(f: &mut Frame, app: &mut App, area: Rect) {
         scroll -= 1;
     }
     app.settings_page.bh_scroll = scroll;
-    let looks = crate::hit::looks();
+    // the looks as edited (this is drawn with the draft in place)
+    let looks = app.looks(&app.settings);
     let focused = !app.settings_page.tabs_focused;
     for (i, row) in rows
         .iter()
@@ -601,5 +602,55 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(n.saturating_sub(1)).collect::<String>() + "…"
+    }
+}
+
+/// The Save and Discard buttons on the frame's bottom edge, while there are
+/// unsaved changes; drawn with the live keymap (keys change only on Save).
+pub fn draw_save_buttons(f: &mut Frame, app: &mut App, area: Rect, changes: usize) {
+    if changes == 0 || area.height < 2 {
+        return;
+    }
+    use crate::keymap::{Action, Context};
+    let key = |a: Action| {
+        app.keymap
+            .key_for(&[Context::Settings, Context::Global], a)
+            .map(|k| crate::ui::friendly(&k))
+            .unwrap_or_default()
+    };
+    let note = format!(" ● {changes} unsaved ");
+    let save = format!(" {} Save ", key(Action::Save));
+    let discard = format!(" {} Discard ", key(Action::Discard));
+    let w = |s: &str| s.chars().count() as u16;
+    let total = w(&note) + w(&save) + w(&discard) + 2;
+    let y = area.bottom() - 1;
+    let mut x = area.right().saturating_sub(total + 2);
+    f.render_widget(
+        Paragraph::new(Span::styled(note.clone(), Style::new().yellow())),
+        Rect {
+            x,
+            y,
+            width: w(&note),
+            height: 1,
+        },
+    );
+    x += w(&note) + 1;
+    for (text, id, base) in [
+        (save, 's', Style::new().black().on_yellow().bold()),
+        (discard, 'd', Style::new().reversed()),
+    ] {
+        let r = Rect {
+            x,
+            y,
+            width: w(&text),
+            height: 1,
+        };
+        let style = if app.hits.add(r, Target::SettingsButton(id)) {
+            hover(base)
+        } else {
+            base
+        };
+        f.render_widget(Paragraph::new(Span::styled(text.clone(), style)), r);
+        x += w(&text) + 1;
     }
 }
