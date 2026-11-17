@@ -268,6 +268,20 @@ impl App {
         app.fonts.filters = app.settings.font_list.filters();
         app.fonts.unfold_current = app.settings.fonts.list_opens_to_current_font;
         app.fonts.refresh_installed();
+        // palettes.json / fonts.json: version 1 files become version 2 (once;
+        // the old file goes to the history)
+        for (what, result) in [
+            ("palettes.json", app.store.migrate()),
+            ("fonts.json", app.fonts.store.migrate()),
+        ] {
+            match result {
+                Ok(true) => app.info(format!(
+                    "{what} updated to file format version 2 (the old file is in the history)"
+                )),
+                Ok(false) => {}
+                Err(e) => app.error(format!("{what}: {e:#}")),
+            }
+        }
         app.sync_row();
         if !config.warnings.is_empty() {
             app.error(format!("Settings: {}", config.warnings.join("; ")));
@@ -1836,7 +1850,11 @@ mod tests {
         let mut m = Map::new();
         m.insert("One".into(), Value::Object(Palette::blank().to_json()));
         m.insert("Two".into(), Value::Object(two.to_json()));
-        std::fs::write(dir.join("palettes.json"), to_jq_string(&Value::Object(m))).unwrap();
+        std::fs::write(
+            dir.join("palettes.json"),
+            to_jq_string(&crate::store::data_file("palettes", m)),
+        )
+        .unwrap();
         Store { dir }
     }
 
@@ -2135,7 +2153,8 @@ mod tests {
         assert!(!app.fonts.dirty());
         let text = std::fs::read_to_string(dir.join("fonts.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(v["Wide bar"]["bar"]["family"], "C Mono");
+        assert_eq!(v["version"], 2, "saved as version 2");
+        assert_eq!(v["presets"]["Wide bar"]["bar"]["family"], "C Mono");
         assert_eq!(text, to_jq_string(&v));
         // the palette tab didn't change, and its keys still work after F1
         assert!(!app.dirty());

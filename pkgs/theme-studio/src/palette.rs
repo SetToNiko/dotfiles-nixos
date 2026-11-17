@@ -326,11 +326,7 @@ mod tests {
 
     fn all_palettes(dir: &std::path::Path) -> Map<String, Value> {
         let text = std::fs::read_to_string(dir.join("palettes.json")).unwrap();
-        serde_json::from_str::<Value>(&text)
-            .unwrap()
-            .as_object()
-            .unwrap()
-            .clone()
+        crate::store::data_map(serde_json::from_str(&text).unwrap(), "palettes").unwrap()
     }
 
     #[test]
@@ -382,7 +378,10 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let expected: Map<String, Value> = serde_json::from_slice(&out.stdout).unwrap();
+        // palette-derive.jq writes the version-2 layout
+        let expected =
+            crate::store::data_map(serde_json::from_slice(&out.stdout).unwrap(), "palettes")
+                .unwrap();
         assert_eq!(expected.len(), all.len());
         for (name, want) in &expected {
             let want = want.as_object().unwrap();

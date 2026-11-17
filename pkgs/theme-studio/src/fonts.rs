@@ -17,7 +17,6 @@ use crate::color::Rgb;
 use crate::font_tree::Node;
 use crate::keymap::Action;
 use crate::palette::Palette;
-use crate::store::to_jq_string;
 
 /// The three font roles, in fonts.json and on screen.
 pub const ROLES: [&str; 3] = ["mono", "ui", "bar"];
@@ -113,13 +112,17 @@ impl FontStore {
         self.dir.join("fonts.json")
     }
 
+    /// All presets, in file order (either layout of fonts.json).
     pub fn load_all(&self) -> Result<Map<String, Value>> {
         let text = std::fs::read_to_string(self.path())
             .with_context(|| format!("reading {}", self.path().display()))?;
-        match serde_json::from_str(&text)? {
-            Value::Object(m) => Ok(m),
-            _ => bail!("fonts.json is not a JSON object"),
-        }
+        let v: Value = serde_json::from_str(&text)?;
+        crate::store::data_map(v, "presets").ok_or_else(|| anyhow!("fonts.json has no presets"))
+    }
+
+    /// Rewrites fonts.json as version 2 if it's still version 1.
+    pub fn migrate(&self) -> Result<bool> {
+        crate::store::migrate_data_file(&self.path(), "presets")
     }
 
     pub fn load(&self, name: &str) -> Result<Preset> {
@@ -135,10 +138,7 @@ impl FontStore {
     pub fn save(&self, name: &str, preset: &Preset) -> Result<()> {
         let mut all = self.load_all().unwrap_or_default();
         all.insert(name.to_string(), Value::Object(preset.to_json()));
-        let tmp = self.path().with_extension("json.tmp");
-        std::fs::write(&tmp, to_jq_string(&Value::Object(all)))?;
-        std::fs::rename(&tmp, self.path())?;
-        Ok(())
+        crate::store::write_json_file(&self.path(), &crate::store::data_file("presets", all))
     }
 
     /// Runs font-switch.sh to make a saved preset the system fonts.
@@ -1001,6 +1001,7 @@ impl FontsTab {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::to_jq_string;
 
     #[test]
     fn presets_round_trip_and_bar_falls_back_to_ui() {
@@ -1031,13 +1032,21 @@ mod tests {
             eprintln!("skipped: no fonts.json");
             return;
         };
-        let all: Map<String, Value> = serde_json::from_str(&text).unwrap();
+        // either layout: rebuilding every preset gives back the same file
+        let v: Value = serde_json::from_str(&text).unwrap();
+        let versioned = v.get("version").is_some();
+        let all = crate::store::data_map(v, "presets").unwrap();
         let mut rebuilt = Map::new();
         for (name, v) in &all {
             let p = Preset::from_json(v.as_object().unwrap()).unwrap();
             rebuilt.insert(name.clone(), Value::Object(p.to_json()));
         }
-        assert_eq!(to_jq_string(&Value::Object(rebuilt)), text);
+        let file = if versioned {
+            crate::store::data_file("presets", rebuilt)
+        } else {
+            Value::Object(rebuilt)
+        };
+        assert_eq!(to_jq_string(&file), text);
     }
 
     #[test]

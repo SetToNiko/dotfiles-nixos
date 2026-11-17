@@ -11,7 +11,6 @@ use serde_json::{Map, Value};
 
 use crate::fonts::{Filters, NerdKind, Spacing};
 use crate::keymap::Keymap;
-use crate::store::to_jq_string;
 
 /// `$XDG_CONFIG_HOME/theme-studio`, or `~/.config/theme-studio`.
 pub fn dir() -> PathBuf {
@@ -184,13 +183,30 @@ impl LayoutSettings {
 }
 
 /// settings.json: how things look when the studio starts.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// (`version` is the file format, for migrating later versions.)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Settings {
+    pub version: u32,
     pub layout: LayoutSettings,
     pub colours: ColourSettings,
     pub fonts: FontSettings,
     pub font_list: FontListSettings,
+}
+
+/// settings.json's format version.
+pub const SETTINGS_VERSION: u32 = 1;
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            version: SETTINGS_VERSION,
+            layout: LayoutSettings::default(),
+            colours: ColourSettings::default(),
+            fonts: FontSettings::default(),
+            font_list: FontListSettings::default(),
+        }
+    }
 }
 
 /// What loading the config produced, and anything worth telling the user.
@@ -202,13 +218,7 @@ pub struct Loaded {
 }
 
 fn write_json(path: &Path, v: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, to_jq_string(v)).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+    crate::store::write_json_file(path, v)
 }
 
 fn read_json(path: &Path) -> Result<Option<Value>> {
@@ -380,6 +390,7 @@ pub fn load(dir: &Path, write: bool) -> Loaded {
 mod tests {
     use super::*;
     use crate::keymap::{Action, Context, Key, Lookup};
+    use crate::store::to_jq_string;
 
     fn temp(tag: &str) -> PathBuf {
         let d =

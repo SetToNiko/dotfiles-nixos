@@ -35,6 +35,66 @@ pub fn to_jq_string(v: &Value) -> String {
     s
 }
 
+/// palettes.json and fonts.json: version 1 was the plain map of palettes /
+/// presets; version 2 wraps it as `{"version": 2, "palettes": { … }}` (fonts:
+/// `"presets"`), so the files can be migrated later. Both are read.
+pub const DATA_VERSION: u64 = 2;
+
+/// The map inside a data file, whichever layout it has.
+pub fn data_map(v: Value, field: &str) -> Option<Map<String, Value>> {
+    let Value::Object(mut m) = v else { return None };
+    if m.contains_key("version") {
+        match m.remove(field) {
+            Some(Value::Object(inner)) => Some(inner),
+            _ => None,
+        }
+    } else {
+        Some(m)
+    }
+}
+
+/// The version-2 file for a map of palettes / presets.
+pub fn data_file(field: &str, map: Map<String, Value>) -> Value {
+    let mut m = Map::new();
+    m.insert("version".into(), Value::from(DATA_VERSION));
+    m.insert(field.into(), Value::Object(map));
+    Value::Object(m)
+}
+
+/// Writes a JSON file in jq's format, first keeping what it held in the
+/// history (labelled with the file's name).
+pub fn write_json_file(path: &std::path::Path, value: &Value) -> Result<()> {
+    let label = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    crate::history::record(&label, path, value);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, to_jq_string(value))
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+}
+
+/// Rewrites a version-1 data file as version 2 (once). True if it did.
+pub fn migrate_data_file(path: &std::path::Path, field: &str) -> Result<bool> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    let v: Value =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    if v.get("version").is_some() {
+        return Ok(false);
+    }
+    let map =
+        data_map(v, field).ok_or_else(|| anyhow!("{} is not a JSON object", path.display()))?;
+    write_json_file(path, &data_file(field, map))?;
+    Ok(true)
+}
+
 impl Store {
     pub fn locate() -> Store {
         let dir = std::env::var_os("THEME_STUDIO_CONFIGS")
@@ -48,14 +108,19 @@ impl Store {
     }
 
     /// All palettes, in file order.
+    /// All palettes, in file order (either layout).
     pub fn load_all(&self) -> Result<Map<String, Value>> {
         let path = self.palettes_path();
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
-        match serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))? {
-            Value::Object(m) => Ok(m),
-            _ => bail!("{} is not a JSON object", path.display()),
-        }
+        let v: Value =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        data_map(v, "palettes").ok_or_else(|| anyhow!("{} has no palettes", path.display()))
+    }
+
+    /// Rewrites palettes.json as version 2 if it's still version 1.
+    pub fn migrate(&self) -> Result<bool> {
+        migrate_data_file(&self.palettes_path(), "palettes")
     }
 
     pub fn load(&self, name: &str) -> Result<Palette> {
@@ -79,11 +144,7 @@ impl Store {
     pub fn save(&self, name: &str, palette: &Palette) -> Result<()> {
         let mut all = self.load_all()?;
         all.insert(name.to_string(), Value::Object(palette.to_json()));
-        let path = self.palettes_path();
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, to_jq_string(&Value::Object(all)))
-            .with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))
+        write_json_file(&self.palettes_path(), &data_file("palettes", all))
     }
 
     /// Runs theme-switch.sh to make a saved palette the system theme.
@@ -146,8 +207,42 @@ mod tests {
             eprintln!("skipped: no palettes.json");
             return;
         };
-        let all = store.load_all().unwrap();
-        assert_eq!(to_jq_string(&Value::Object(all)), text);
+        // whichever layout: the palettes come out of it, and writing the file
+        // back gives the same bytes
+        assert!(!store.load_all().unwrap().is_empty());
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(to_jq_string(&v), text);
+    }
+
+    #[test]
+    fn version_1_files_migrate_once_and_stay_version_2() {
+        let dir = std::env::temp_dir().join(format!("theme-studio-migrate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut m = Map::new();
+        m.insert("A".into(), Value::Object(Palette::blank().to_json()));
+        std::fs::write(
+            dir.join("palettes.json"),
+            to_jq_string(&Value::Object(m.clone())),
+        )
+        .unwrap();
+        let store = Store { dir: dir.clone() };
+        assert_eq!(store.load_all().unwrap(), m, "version 1 reads");
+        assert!(store.migrate().unwrap());
+        assert!(!store.migrate().unwrap(), "only once");
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("palettes.json")).unwrap())
+                .unwrap();
+        assert_eq!(v, data_file("palettes", m.clone()));
+        store.save("B", &Palette::blank()).unwrap();
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("palettes.json")).unwrap())
+                .unwrap();
+        assert_eq!(v["version"], 2);
+        assert_eq!(
+            store.load_all().unwrap().keys().collect::<Vec<_>>(),
+            ["A", "B"]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
