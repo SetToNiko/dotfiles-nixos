@@ -149,6 +149,7 @@
     git
     lazygit
     bat
+    xmousepasteblock # stops middle-click from pasting (started by i3)
     doxx # terminal .docx viewer
     ghostty
     unzip
