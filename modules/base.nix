@@ -82,6 +82,13 @@
       autoRepeatDelay = 200; # delay before autorepeat starts ms.
       autoRepeatInterval = 35; # autorepeat keypress/s.
       windowManager.i3.enable = true; # set window manager to i3.
+      xkb = {
+        # English (US) + French (Canada); Super+Space cycles between them,
+        # and the i3blocks keyboard block shows/picks the active one
+        layout = "us,ca";
+        variant = ","; # default variant of each layout
+        options = "grp:win_space_toggle,terminate:ctrl_alt_bksp";
+      };
       # dpi is set per host (hosts/<host>/default.nix)
     };
     pipewire = {
@@ -150,6 +157,7 @@
     lazygit
     bat
     xmousepasteblock # stops middle-click from pasting (started by i3)
+    xbanish # hides the mouse pointer while typing (started by i3)
     doxx # terminal .docx viewer
     ghostty
     unzip
@@ -157,7 +165,17 @@
     autorandr
     glib
     vial # Vial keymap editor
+
+    # Rust toolchain, pinned by flake.lock (rust-analyzer is started by rustaceanvim)
+    rustc
+    cargo
+    clippy
+    rustfmt
+    rust-analyzer
   ];
+
+  # Standard library sources, so rust-analyzer can resolve std/core/alloc
+  environment.variables.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
 
   services.udev.packages = [ pkgs.vial ]; # udev rule granting hidraw access to Vial keyboards
 

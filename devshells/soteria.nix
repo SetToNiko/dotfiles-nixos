@@ -1,5 +1,6 @@
 # Dev environment for ~/bajoding/Soteria (Tauri app): the system libraries
-# and build tools Tauri needs. The Rust toolchain comes from the global rustup.
+# and build tools Tauri needs. The Rust toolchain comes from the system
+# packages (modules/base.nix).
 #
 # Loaded automatically by direnv through the project's .envrc:
 #   use flake ~/dotfiles-nixos#soteria

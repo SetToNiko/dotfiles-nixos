@@ -220,6 +220,7 @@ in
 
     # Core
     neovim
+    xclip # clipboard provider for neovim's clipboard = "unnamedplus"
     android-studio
     android-tools
     ripgrep # telescope find_files / grep_string
@@ -229,6 +230,7 @@ in
     nil
     nixpkgs-fmt
     i3blocks
+    xkb-switch # keyboard layout block (configs/i3blocks/keyboard.sh)
     autotiling
     dex # runs XDG autostart entries from the i3 config (blueman-applet)
     discord
@@ -236,6 +238,8 @@ in
     starship
     pywalfox-native
     yazi # Yazi file explorer and dependencies
+    dragon-drop # drag files out of yazi (middle-click, configs/yazi/init.lua)
+    ouch # archive extraction for yazi's `u` (configs/yazi/plugins/unzip.yazi)
     ffmpeg
     jq
     fd
@@ -250,6 +254,7 @@ in
     asciiPower
     asciiBoot
     xss-lock
+    maim # drag-select screenshots, $mod+s / $mod+Shift+s (configs/i3/screenshot.sh)
 
     # Fonts
     nerd-fonts.jetbrains-mono # mini.icons / neo-tree icons (can be replaced with any nerd-font)
@@ -275,9 +280,6 @@ in
     deno
     moon
     browser-sync
-
-    # Rust (rustaceanvim)
-    rustup
 
     # Go toolchain + formatters/linters
     go
